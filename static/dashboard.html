@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <title>ccmeter — Claude Code yakıt metresi</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/static/dashboard.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
+  <script src="/static/dashboard.js" defer></script>
+</head>
+<body>
+
+<header>
+  <div class="header-title">ccmeter <span id="version" class="dim">…</span></div>
+  <div class="header-meta">
+    <span id="data-source" class="dim">…</span>
+    <span id="last-updated" class="dim">…</span>
+    <span id="live-pulse" class="pulse" title="auto-refresh 10s"></span>
+    <button id="refresh" title="şimdi yenile">↻</button>
+  </div>
+</header>
+
+<main>
+
+  <!-- 1. THE ANSWER -->
+  <section class="hero neutral" id="hero">
+    <div class="hero-label" id="hero-label">…</div>
+    <div class="hero-detail" id="hero-detail">…</div>
+  </section>
+
+  <!-- 2. RIGHT NOW: speedometer + trip + live + models (4 columns) -->
+  <section class="status-row status-row-4">
+    <div class="status-card status-speedo" data-card-id="speedo">
+      <div class="status-cap">
+        Burn rate · saatte $
+        <span class="window-picker" id="burn-window-picker">
+          <button data-h="1">1h</button>
+          <button data-h="2" class="active">2h</button>
+          <button data-h="4">4h</button>
+          <button data-h="6">6h</button>
+        </span>
+      </div>
+      <svg id="speedo-svg" viewBox="0 0 400 270" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="status-bottom" id="speedo-zone">…</div>
+    </div>
+    <div class="status-card status-trip" data-card-id="trip">
+      <div class="status-cap">Bugün</div>
+      <div class="trip-big" id="trip-amount">$—</div>
+      <div class="trip-line" id="trip-line">…</div>
+      <div class="trip-line" id="trip-top-project">…</div>
+      <div class="trip-line" id="trip-top-session">…</div>
+      <div class="trip-line dim" id="trip-window">…</div>
+      <div class="trip-divider"></div>
+      <div class="trip-line trip-block" id="trip-block">…</div>
+      <div class="trip-line trip-week" id="trip-week">…</div>
+    </div>
+    <div class="status-card status-live" data-card-id="live">
+      <div class="status-cap">
+        Aktif modeller
+        <span class="window-picker" id="live-window-picker">
+          <button data-w="15">15dk</button>
+          <button data-w="60">1sa</button>
+          <button data-w="300">5sa</button>
+          <button data-w="1440" class="active">24sa</button>
+        </span>
+        <span class="pulse" style="width:6px;height:6px;vertical-align:middle;margin-left:6px"></span>
+      </div>
+      <div id="live-models-list"></div>
+      <div class="live-window-summary dim" id="live-window-summary">—</div>
+    </div>
+    <div class="status-card status-models" data-card-id="models">
+      <div class="status-cap">Model dağılımı · lifetime</div>
+      <table id="models-table">
+        <thead><tr>
+          <th>model</th><th class="num">turn</th><th class="num">$</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 2.5 BEHAVIOR ROW: errors + tool mix -->
+  <section class="status-row" id="row-insight">
+    <div class="status-card" data-card-id="behavior">
+      <div class="status-cap">Davranış · son 24h hata pattern'leri</div>
+      <div class="bhv-headline" id="bhv-headline">…</div>
+      <div class="bhv-bars" id="bhv-bars"></div>
+      <div class="bhv-recent dim" id="bhv-recent"></div>
+    </div>
+    <div class="status-card" data-card-id="toolmix">
+      <div class="status-cap">Tool kullanımı · lifetime</div>
+      <div class="toolmix-headline" id="toolmix-headline">…</div>
+      <div class="toolmix-bars" id="toolmix-bars"></div>
+    </div>
+  </section>
+
+  <!-- 3. WHERE THE MONEY WENT -->
+  <section class="status-row">
+    <div class="status-card" id="card-recent" data-card-id="recent">
+      <div class="status-cap">Son aktivite · son 2 saatteki oturumlar</div>
+      <div class="scroll-recent">
+        <table id="recent-table">
+          <thead><tr>
+            <th>ne zaman</th><th>proje</th><th>model</th>
+            <th class="num">token</th><th class="num">$</th><th class="num">cache</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="status-card" id="card-projects" data-card-id="projects">
+      <div class="status-cap">En pahalı projeler · lifetime</div>
+      <div class="scroll-recent">
+        <table id="projects-table">
+          <thead><tr>
+            <th>proje</th><th class="num">$</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. DAILY chart (narrow) + long-term burn rate trend (wide) -->
+  <section class="status-row" id="row-charts">
+    <div class="status-card card-daily" data-card-id="daily">
+      <div class="status-cap">Son 30 gün · günlük $ harcama</div>
+      <div class="chart-wrap"><canvas id="chart-daily"></canvas></div>
+    </div>
+    <div class="status-card card-trend" data-card-id="trend">
+      <div class="status-cap">
+        Burn rate trendi · $/saat
+        <span class="window-picker" id="trend-tf-picker">
+          <button data-tf="1">1h</button>
+          <button data-tf="4">4h</button>
+          <button data-tf="6">6h</button>
+          <button data-tf="12">12h</button>
+          <button data-tf="24" class="active">1d</button>
+        </span>
+      </div>
+      <div class="indicator-bar">
+        <span class="dim" style="font-size:10px">MA:</span>
+        <button class="indicator-btn ma-7"   data-ma="7">MA 7</button>
+        <button class="indicator-btn ma-25"  data-ma="25">MA 25</button>
+        <button class="indicator-btn ma-50"  data-ma="50">MA 50</button>
+        <button class="indicator-btn ma-100" data-ma="100">MA 100</button>
+        <span class="dim" style="font-size:10px;margin-left:auto">son N bar ort.</span>
+      </div>
+      <div class="trend-body">
+        <div class="chart-wrap"><canvas id="chart-trend"></canvas></div>
+        <div class="lit-compare" id="lit-compare"></div>
+      </div>
+      <div class="lit-note">
+        Endüstri değerleri <strong>türetilmiş</strong> ($13/aktif gün, $30/P90 — Anthropic). Saatlik için 2-3h AI-coding varsayımı. Chat-only (claude.ai) 5-10× daha düşük; ccmeter chat'i okumuyor, sadece Claude Code JSONL'lerini.
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer-bar">
+  <span id="footer-text" class="dim">…</span>
+  <span class="dim">— okur: <code>~/.claude/projects/</code> · $ tahmindir, fatura için Anthropic Console'a bak. Plan limiti için Claude Code'un <strong>Plan usage</strong> popup'ı.</span>
+</footer>
+
+</body>
+</html>
