@@ -4,9 +4,9 @@
   <meta charset="utf-8" />
   <title>ccmeter — AI coding yakıt metresi</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260530d" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260530f" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
-  <script src="/static/dashboard.js?v=20260530d" defer></script>
+  <script src="/static/dashboard.js?v=20260530f" defer></script>
 </head>
 <body>
 
@@ -30,19 +30,21 @@
 
 <main>
 
-  <!-- ROW 1 — HERO: binding constraint + aside -->
+  <!-- ROW 1 — HERO: burn-rate SPEEDOMETER (araba göstergesi) + binding-constraint aside -->
   <section class="card card-hero col-8" data-card="hero">
-    <div class="hero-grid">
-      <div class="ring" id="hero-ring" style="--p:0">
-        <div class="ring-inner">
-          <div class="ring-value" id="hero-ring-value">—</div>
-          <div class="ring-label" id="hero-ring-label">…</div>
-        </div>
-      </div>
-      <div>
-        <div class="hero-headline" id="hero-headline">…</div>
-        <div class="hero-detail" id="hero-detail">…</div>
-        <div class="hero-stats" id="hero-stats"></div>
+    <div class="card-title">
+      Burn rate · çok mu yakıyorsun?
+      <span class="picker" id="burn-window-picker">
+        <button data-h="0.25">15dk</button><button data-h="1">1h</button>
+        <button data-h="2" class="active">2h</button><button data-h="4">4h</button><button data-h="6">6h</button>
+      </span>
+    </div>
+    <div class="speedo-wrap">
+      <svg id="speedo-svg" viewBox="0 0 400 250" preserveAspectRatio="xMidYMid meet"></svg>
+      <div style="flex:1;min-width:0">
+        <div class="speedo-zone-txt" id="speedo-zone">…</div>
+        <div class="hero-detail" id="hero-detail" style="font-size:12.5px">…</div>
+        <div class="speedo-breakdown" id="speedo-breakdown"></div>
       </div>
     </div>
   </section>
@@ -57,10 +59,10 @@
   <section class="card col-3" data-card="kpi"><div class="kpi-label" id="kpi3-l">…</div><div class="kpi-value" id="kpi3-v">—</div><div class="kpi-sub" id="kpi3-s"></div><div class="kpi-spark"><canvas id="kpi3-spark"></canvas></div></section>
   <section class="card col-3" data-card="kpi"><div class="kpi-label" id="kpi4-l">…</div><div class="kpi-value" id="kpi4-v">—</div><div class="kpi-sub" id="kpi4-s"></div><div class="kpi-spark"><canvas id="kpi4-spark"></canvas></div></section>
 
-  <!-- ROW 3 — plan limit (per-device meters) + cache efficiency -->
-  <section class="card col-8" data-card="limits">
-    <div class="card-title" id="limits-title">Plan limiti <span class="sub" id="limits-sub"></span></div>
-    <div id="limits-body"></div>
+  <!-- ROW 3 — verimlilik (sen vs tipik) + cache efficiency -->
+  <section class="card col-8" data-card="eff">
+    <div class="card-title">Verimlilik · birim ekonomisi <span class="sub">sen vs tipik — token harcaman verimli mi?</span></div>
+    <div id="eff-body"></div>
   </section>
   <section class="card col-4" data-card="cache">
     <div class="card-title">Cache verimliliği <span class="sub">lifetime</span></div>
@@ -76,6 +78,14 @@
         <button data-tf="6">6h</button><button data-tf="12">12h</button>
         <button data-tf="24" class="active">1d</button>
       </span>
+    </div>
+    <div class="indicator-bar">
+      <span class="dim" style="font-size:10px">MA:</span>
+      <button class="indicator-btn ma-7"   data-ma="7">7</button>
+      <button class="indicator-btn ma-25"  data-ma="25">25</button>
+      <button class="indicator-btn ma-50"  data-ma="50">50</button>
+      <button class="indicator-btn ma-100" data-ma="100">100</button>
+      <span class="dim" style="font-size:10px;margin-left:auto">son N bar hareketli ort.</span>
     </div>
     <div class="chart-wrap tall"><canvas id="chart-trend"></canvas></div>
   </section>

@@ -192,11 +192,36 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
 .meter-pct.good{color:var(--good)} .meter-pct.warn{color:var(--warn)} .meter-pct.bad{color:var(--bad)}
 .meter-reset { font:500 10px/1 var(--font-mono); color: var(--text-4); width:84px; flex-shrink:0; }
 
-/* Burn-rate efficiency gauge — zone bar + marker ("çok mu yakıyor") */
-.burn-track { position:relative; height:10px; border-radius:var(--radius-full); margin:14px 0 6px; overflow:visible; }
-.burn-marker { position:absolute; top:-4px; width:3px; height:18px; border-radius:2px;
-  background:var(--text-1); box-shadow:0 0 0 2px var(--bg-surface); transition:left .5s cubic-bezier(.22,1,.36,1); }
-.burn-ticks { display:flex; justify-content:space-between; font:500 10px/1 var(--font-mono); color:var(--text-4); }
+/* ── SPEEDOMETER (araba göstergesi) — burn rate car gauge ──────────── */
+.speedo-wrap { display:flex; align-items:center; gap:var(--s6); }
+@media (max-width:640px){ .speedo-wrap{ flex-direction:column; } }
+#speedo-svg { width:330px; max-width:100%; height:auto; flex-shrink:0; }
+.speedo-zone-green  { stroke:var(--good); opacity:.9; }
+.speedo-zone-yellow { stroke:var(--warn); opacity:.9; }
+.speedo-zone-orange { stroke:#f0883e; opacity:.9; }
+.speedo-zone-red    { stroke:var(--bad); opacity:.9; }
+.speedo-hub { fill:var(--text-1); }
+.speedo-value { fill:var(--text-1); font:600 38px var(--font-mono); text-anchor:middle; }
+.speedo-unit  { fill:var(--text-3); font:500 12px var(--font-sans); text-anchor:middle; }
+.speedo-tick-label { fill:var(--text-4); font:500 10px var(--font-mono); }
+.speedo-zone-txt { font:600 14px/1.4 var(--font-sans); margin-bottom:4px; }
+.speedo-zone-txt.good{color:var(--good)} .speedo-zone-txt.warn{color:var(--warn)} .speedo-zone-txt.bad{color:var(--bad)}
+.speedo-breakdown { display:flex; flex-direction:column; gap:5px; margin-top:12px; }
+.sb-row { display:flex; align-items:center; gap:8px; font:500 12px/1 var(--font-mono); }
+.sb-name { color:var(--text-2); min-width:88px; } .sb-val { color:var(--text-1); } .sb-share { color:var(--text-4); }
+.sb-row.opus .sb-name{color:#c4a8f5} .sb-row.sonnet .sb-name{color:#7cc0ff} .sb-row.haiku .sb-name{color:#6fdc8c}
+.sb-row.gpt-55 .sb-name,.sb-row.gpt-54 .sb-name,.sb-row.gpt-codex .sb-name,.sb-row.gpt-mini .sb-name{color:#1fd6a6}
+
+/* trend MA indicator buttons */
+.indicator-bar { display:flex; align-items:center; gap:6px; margin:4px 0 10px; }
+.indicator-btn { background:var(--bg-raised); color:var(--text-3); border:1px solid var(--border-subtle);
+  border-radius:5px; padding:2px 8px; font:500 10px/1 var(--font-mono); cursor:pointer; transition:.12s; }
+.indicator-btn:hover{ color:var(--text-1); }
+.indicator-btn.active{ color:var(--text-1); border-color:var(--border-strong); }
+.indicator-btn.ma-7.active{ background:rgba(94,106,210,.2); color:#8b97ff; border-color:#5E6AD2; }
+.indicator-btn.ma-25.active{ background:rgba(2,184,204,.2); color:#3fd9e8; border-color:#02B8CC; }
+.indicator-btn.ma-50.active{ background:rgba(245,166,35,.2); color:#ffc05a; border-color:#F5A623; }
+.indicator-btn.ma-100.active{ background:rgba(242,85,90,.2); color:#ff8a8e; border-color:#F2555A; }
 
 /* ---------- Table ---------- */
 .tbl { width:100%; border-collapse:collapse; font-size:13px; }

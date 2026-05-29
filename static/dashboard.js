@@ -114,119 +114,122 @@ function render(rep) {
   renderTools(rep);
 }
 
-// ---------- hero (binding constraint) ----------
+// ---------- hero SPEEDOMETER (araba göstergesi) ----------
+function polarToCartesian(cx, cy, r, deg) { const a = deg * Math.PI / 180; return { x: cx + r * Math.cos(a), y: cy - r * Math.sin(a) }; }
+function arcPath(cx, cy, r, sv, ev, mv) {
+  const a1 = 180 - (Math.min(sv, mv) / mv) * 180, a2 = 180 - (Math.min(ev, mv) / mv) * 180;
+  const p1 = polarToCartesian(cx, cy, r, a1), p2 = polarToCartesian(cx, cy, r, a2);
+  return `M ${p1.x.toFixed(1)} ${p1.y.toFixed(1)} A ${r} ${r} 0 0 1 ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+}
+// "Bu araba çok mu yakıyor?" — burn rate $/sa, referans zone'lara (tipik/yoğun/
+// ağır) göre iğne + verdict. Window picker (15dk/1h/2h/4h/6h) ortalama penceresi.
 function renderHero(rep, isCodex) {
-  let pct, label, headline, detail, stats = [];
-  if (isCodex) {
-    // Binding constraint = weekly rate-limit % (max across devices)
-    const rl = rep.codex_rate_limits || {};
-    let maxWk = 0, resets = 0, plan = "";
-    for (const d of Object.values(rl)) {
-      const w = (d.secondary || {}).used_percent || 0;
-      if (w >= maxWk) { maxWk = w; resets = (d.secondary || {}).resets_at; }
-      plan = d.plan_type || plan;
-    }
-    pct = maxWk;
-    label = "haftalık limit";
-    headline = pct >= 90 ? "⚠️ Haftalık Codex limitine çok yakınsın"
-      : pct >= 70 ? "Haftalık limit yükseliyor" : "Haftalık limitte bol alan var";
-    detail = `Codex ${plan ? plan.toUpperCase() + " plan" : "aboneliği"} · flat-fee, yani asıl kısıt $ değil plan limiti. `
-      + (resets ? `Haftalık pencere ${resetIn(resets)} sonra resetlenir.` : "");
-  } else {
-    // Claude: 5h block fill vs personal P90 (proxy for the wall)
-    const cw = rep.current_window || {};
-    const used = cw.cost_usd || 0, p90 = cw.baseline_cost_p90 || 0;
-    pct = p90 > 0 ? Math.min(100, used / p90 * 100) : 0;
-    label = "5 saat bloğu";
-    const fe = rep.fuel_efficiency?.headline || {};
-    headline = fe.label || "Kullanım profili";
-    detail = fe.detail || "";
-  }
-  const c = sevClass(pct);
-  const ring = $("hero-ring");
-  ring.style.setProperty("--p", pct.toFixed(0));
-  ring.style.setProperty("--c", `var(--${c})`);
-  $("hero-ring-value").textContent = "%" + Math.round(pct);
-  $("hero-ring-label").textContent = label;
-  $("hero-headline").textContent = headline;
-  $("hero-detail").textContent = detail;
-
-  // hero stats: today $, burn rate, tokens today
   const fc = rep.forecast || {};
-  const t = rep.totals || {};
-  const today = fc.today?.so_far ?? 0;
-  const burn = fc.burn_rate_per_hour_recent ?? (rep.current_window || {}).cost_per_hour ?? 0;
-  stats = [
-    { v: fmtMoney0(today), l: "bugün" },
-    { v: fmtMoney(burn) + "<small>/sa</small>", l: "burn rate" },
-    { v: fmtPct(t.cache_hit_rate), l: "cache hit" },
-  ];
-  $("hero-stats").innerHTML = stats.map(s => `<div class="hero-stat"><div class="v">${s.v}</div><div class="l">${s.l}</div></div>`).join("");
+  const z = rep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25, max: 50 };
+  const hoursStr = localStorage.getItem("ccmeter_burn_hours") || "2";
+  const burnByHours = fc.burn_rates_by_hours || {};
+  const rate = burnByHours[hoursStr] ?? fc.burn_rate_per_hour_recent ?? 0;
+  const cx = 200, cy = 200, r = 150, max = z.max || 50;
+
+  const arcs =
+    `<path class="speedo-zone-green"  d="${arcPath(cx,cy,r,0,z.typical,max)}" stroke-width="26" fill="none"/>` +
+    `<path class="speedo-zone-yellow" d="${arcPath(cx,cy,r,z.typical,z.busy,max)}" stroke-width="26" fill="none"/>` +
+    `<path class="speedo-zone-orange" d="${arcPath(cx,cy,r,z.busy,z.heavy,max)}" stroke-width="26" fill="none"/>` +
+    `<path class="speedo-zone-red"    d="${arcPath(cx,cy,r,z.heavy,max,max)}" stroke-width="26" fill="none"/>`;
+  const ticks = [{ v: 0, l: "$0" }, { v: z.typical, l: "tipik" }, { v: z.busy, l: "yoğun" }, { v: z.heavy, l: "ağır" }];
+  const ticksSvg = ticks.map(t => {
+    const a = 180 - (Math.min(t.v, max) / max) * 180, p = polarToCartesian(cx, cy, r + 20, a);
+    const anc = a < 90 ? "start" : a > 90 ? "end" : "middle";
+    return `<text class="speedo-tick-label" x="${p.x.toFixed(1)}" y="${p.y.toFixed(1)}" text-anchor="${anc}" dominant-baseline="middle">${t.l}</text>`;
+  }).join("");
+  const clamped = Math.max(0, Math.min(rate, max));
+  const na = 180 - (clamped / max) * 180;
+  const tip = polarToCartesian(cx, cy, r - 6, na), tail = polarToCartesian(cx, cy, -24, na);
+
+  let zc, zw;
+  if (rate >= z.heavy)        { zc = "bad";  zw = "🔴 ağır bölge · çok yoğun yakıyorsun"; }
+  else if (rate >= z.busy)    { zc = "warn"; zw = "🟠 yoğun bölge"; }
+  else if (rate >= z.typical) { zc = "warn"; zw = "🟡 normal üstü"; }
+  else                         { zc = "good"; zw = "🟢 sakin · verimli"; }
+  const needleCol = zc === "bad" ? "#F2555A" : zc === "warn" ? "#F5A623" : "#2BD96B";
+
+  const svg = $("speedo-svg");
+  if (svg) svg.innerHTML = `${arcs}${ticksSvg}
+    <line x1="${tail.x.toFixed(1)}" y1="${tail.y.toFixed(1)}" x2="${tip.x.toFixed(1)}" y2="${tip.y.toFixed(1)}" stroke="${needleCol}" stroke-width="4" stroke-linecap="round"/>
+    <circle class="speedo-hub" cx="${cx}" cy="${cy}" r="8"/>
+    <text class="speedo-value" x="${cx}" y="${cy + 36}">${fmtMoney(rate)}</text>
+    <text class="speedo-unit" x="${cx}" y="${cy + 52}">/saat · son ${hoursStr === "0.25" ? "15dk" : hoursStr + "h"} ort.${isCodex ? " (notional)" : ""}</text>`;
+
+  const cw = rep.current_window || {};
+  const ratio = cw.vs_baseline_ratio;
+  const ratioTxt = (ratio != null && ratio > 0) ? ` · normalinin <strong>${ratio.toFixed(1)}x</strong> hızı`
+    : (rate < z.typical ? " · normalin altında" : "");
+  $("speedo-zone").className = "speedo-zone-txt " + zc;
+  $("speedo-zone").innerHTML = zw + ratioTxt;
+
+  // efficiency headline (fuel_efficiency) — unit economics narrative
+  const fe = rep.fuel_efficiency?.headline || {};
+  $("hero-detail").innerHTML = `<strong>${esc(fe.label || "")}</strong>${fe.detail ? " — " + esc(fe.detail) : ""}`;
+
+  // per-model breakdown of this burn (which model is eating the $/hr)
+  const bd = (fc.burn_rates_by_hours_by_model || {})[hoursStr] || [];
+  const vis = bd.filter(m => !String(m.model_id).startsWith("<")).slice(0, 4);
+  $("speedo-breakdown").innerHTML = vis.length
+    ? `<div class="dim" style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">bu hızı kim yakıyor</div>` +
+      vis.map(m => `<span class="sb-row ${modelToFamily(m.model_id)}"><span class="sb-name">${esc(modelDisplay(m.model_id))}</span>
+        <span class="sb-val">${fmtMoney(m.cost_per_hour)}/sa</span><span class="sb-share">%${(m.share * 100).toFixed(0)}</span></span>`).join("")
+    : "";
 }
 
-// ---------- burn-rate efficiency gauge ("çok mu yakıyorum? normalin neresinde?") ----------
-// Cihan paradigm: araba metaforu — bu araba çok mu yakıyor az mı? Referans
-// zone'larına (tipik/yoğun/ağır) göre konum + "normalinin Nx hızı" verdict.
+// ---------- binding-constraint aside ("duvara ne kadar var") — NET etiketli ----------
 function renderHeroAside(rep, isCodex) {
   const fc = rep.forecast || {};
   const cw = rep.current_window || {};
-  const z = rep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25, max: 50 };
-  $("aside-title").firstChild.textContent = "Burn rate · şu an ";
-  $("aside-sub").textContent = "çok mu yakıyorsun?";
+  $("aside-title").firstChild.textContent = isCodex ? "Plan limiti · duvar " : "5 saat bloğu · duvar ";
+  $("aside-sub").textContent = isCodex ? "Codex Pro" : "Claude";
 
-  const rate = fc.burn_rate_per_hour_recent ?? cw.cost_per_hour ?? 0;
-  const max = z.max || (z.heavy * 1.5) || 50;
-  const pos = Math.max(2, Math.min(100, rate / max * 100));
-  // zone of current rate
-  let zoneCls, zoneWord;
-  if (rate >= z.heavy)        { zoneCls = "bad";  zoneWord = "ağır bölge"; }
-  else if (rate >= z.busy)    { zoneCls = "warn"; zoneWord = "yoğun bölge"; }
-  else if (rate >= z.typical) { zoneCls = "warn"; zoneWord = "normal üstü"; }
-  else                         { zoneCls = "good"; zoneWord = "sakin · verimli"; }
-  // segment stops as % of max
-  const tp = z.typical / max * 100, bp = z.busy / max * 100, hp = z.heavy / max * 100;
-  const ratio = cw.vs_baseline_ratio;
-  const verdict = cw.verdict_label || "";
-  const unit = isCodex ? "/sa<span class='dim' style='font-size:11px'> (notional)</span>" : "/sa";
+  const bigPct = (pct, label, sub, resetSec) => {
+    const c = sevClass(pct);
+    return `<div style="margin-bottom:14px">
+      <div style="display:flex;align-items:baseline;gap:8px">
+        <span class="num ${c}" style="font-size:34px;font-weight:600">%${Math.round(pct)}</span>
+        <span style="color:var(--text-3);font-size:12px;font-weight:600">${label}</span></div>
+      <div class="meter-track" style="margin:8px 0 5px"><div class="meter-fill ${c}" style="width:${Math.min(100, pct)}%"></div></div>
+      <div class="dim" style="font-size:11px">${sub}${resetSec ? ` · ↻ ${resetIn(resetSec)}` : ""}</div></div>`;
+  };
 
-  const ratioTxt = (ratio != null && ratio > 0)
-    ? `normalinin <strong>${ratio.toFixed(1)}x</strong> hızında`
-    : (rate < z.typical ? "normalinin altında" : "");
+  let body = "";
+  if (isCodex) {
+    // Real Codex rate limit — the actual wall. NET: "% of weekly Codex limit".
+    const rl = rep.codex_rate_limits || {};
+    const dev = rl.mac || Object.values(rl)[0] || {};
+    const wk = dev.secondary || {}, h5 = dev.primary || {};
+    body += bigPct(wk.used_percent || 0, "haftalık Codex limiti", "bu hafta kullandığın oran", wk.resets_at);
+    body += bigPct(h5.used_percent || 0, "5 saat limiti", "son 5 saatte kullandığın oran", h5.resets_at);
+  } else {
+    // Claude: no exposed rate-limit % → personal P90/P95 baselines. NET labels.
+    const used = cw.cost_usd || 0, p90 = cw.baseline_cost_p90 || 0, p50 = cw.baseline_cost_p50 || 0;
+    const blockPct = p90 > 0 ? Math.min(100, used / p90 * 100) : 0;
+    const wc = rep.weekly_cap || {};
+    const wkPct = Math.min(100, wc.pct_of_personal_p95 || 0);
+    body += bigPct(blockPct, "5h blok dolu",
+      `bu blokta ${fmtMoney0(used)} · senin <strong>yoğun bloğun</strong> (P90) ${fmtMoney0(p90)}`,
+      cw.active ? (cw.remaining_seconds || 0) : 0);
+    body += bigPct(wkPct, "haftalık dolu",
+      `bu hafta ${fmtMoney0(wc.rolling_7d_cost || 0)} · senin <strong>yoğun haftan</strong> (P95) ${fmtMoney0(wc.historical_7d_p95 || 0)}`, 0);
+  }
 
-  $("hero-aside-body").innerHTML = `
-    <div style="display:flex;align-items:baseline;gap:8px">
-      <span class="num" style="font-size:30px;font-weight:600;color:var(--text-1)">${fmtMoney(rate)}</span>
-      <span class="dim" style="font-size:13px">${unit}</span>
-    </div>
-    <div class="meter-pct ${zoneCls}" style="font-size:12px;width:auto;text-align:left;margin-top:4px;font-family:var(--font-sans);font-weight:600">
-      ${zoneWord}${ratioTxt ? ` · <span style="font-weight:500">${ratioTxt}</span>` : ""}
-    </div>
-    <div class="burn-track" style="background:linear-gradient(90deg,
-        var(--good) 0%, var(--good) ${tp}%,
-        var(--warn) ${tp}%, var(--warn) ${bp}%,
-        #f0883e ${bp}%, #f0883e ${hp}%,
-        var(--bad) ${hp}%, var(--bad) 100%)">
-      <div class="burn-marker" style="left:${pos}%"></div>
-    </div>
-    <div class="burn-ticks">
-      <span>tipik ${fmtMoney0(z.typical)}</span>
-      <span>yoğun ${fmtMoney0(z.busy)}</span>
-      <span>ağır ${fmtMoney0(z.heavy)}</span>
-    </div>
-    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border-subtle)">
-      ${(() => {
-        const rows = [];
-        if (fc.today?.projected_eod != null) rows.push(["Gün sonu tahmini", fmtMoney0(fc.today.projected_eod)]);
-        if (cw.active) { const m = Math.floor((cw.remaining_seconds || 0) / 60);
-          rows.push(["5-saat pencere", (m >= 60 ? `${Math.floor(m/60)}sa ${m%60}dk` : `${m}dk`) + " kaldı"]); }
-        const live = (rep.live_active_models_by_window || {})["60"] || {};
-        if (live.models && live.models.length) rows.push(["Aktif model", modelDisplay(live.models[0].model_id || "")]);
-        return rows.map(([l, v]) =>
-          `<div style="display:flex;justify-content:space-between;padding:5px 0">
-            <span style="color:var(--text-3);font-size:12px">${l}</span>
-            <span class="num" style="color:var(--text-2);font-size:12px">${v}</span></div>`).join("");
-      })()}
-    </div>`;
+  // key stats footer — clearly labeled
+  const rows = [];
+  rows.push(["Bugün", fmtMoney0(fc.today?.so_far ?? 0)]);
+  if (fc.today?.projected_eod != null) rows.push(["Gün sonu tahmini", fmtMoney0(fc.today.projected_eod)]);
+  if (!isCodex && cw.projected_close_cost != null) rows.push(["Bu blok ~kapanış", fmtMoney0(cw.projected_close_cost)]);
+  body += `<div style="margin-top:4px;padding-top:12px;border-top:1px solid var(--border-subtle)">` +
+    rows.map(([l, v]) => `<div style="display:flex;justify-content:space-between;padding:5px 0">
+      <span style="color:var(--text-3);font-size:12px">${l}</span>
+      <span class="num" style="color:var(--text-1);font-size:13px">${v}</span></div>`).join("") + `</div>`;
+
+  $("hero-aside-body").innerHTML = body;
 }
 
 // ---------- KPIs ----------
@@ -250,60 +253,40 @@ function renderKPIs(rep, isCodex) {
   });
 }
 
-// ---------- plan limits (per-device meters) ----------
+// ---------- verimlilik · birim ekonomisi (sen vs tipik) ----------
+// "Efficiency nerede?" — her birim maliyetin (saat/gün/commit/turn) senin
+// referansına/endüstri tipiğine göre nerede. token harcaman verimli mi?
 function renderLimits(rep, isCodex) {
-  const title = $("limits-title");
-  title.firstChild.textContent = "Plan limiti ";
-  if (isCodex) {
-    const rl = rep.codex_rate_limits || {};
-    $("limits-sub").textContent = "Codex Pro · 5h + haftalık (gerçek kısıt)";
-    const order = ["mac", "pc"].filter(d => rl[d]);
-    if (!order.length) { $("limits-body").innerHTML = `<div class="empty">Rate-limit verisi yok</div>`; return; }
-    $("limits-body").innerHTML = order.map(dev => {
-      const d = rl[dev];
-      const bar = (name, w) => {
-        if (!w) return "";
-        const p = Math.max(0, Math.min(100, w.used_percent || 0)), c = sevClass(p);
-        return `<div class="meter-row"><span class="meter-name">${name}</span>
-          <div class="meter-track"><div class="meter-fill ${c}" style="width:${p}%"></div></div>
-          <span class="meter-pct ${c}">%${Math.round(p)}</span>
-          <span class="meter-reset">${w.resets_at ? "↻ " + resetIn(w.resets_at) : ""}</span></div>`;
-      };
-      return `<div style="margin-bottom:14px"><div style="margin-bottom:6px"><span class="badge ${dev}">cihan-${dev}</span>
-        <span class="dim" style="font-family:var(--font-mono);font-size:10px;margin-left:6px">${esc(d.limit_name || d.limit_id || "")}</span></div>
-        ${bar("5 saat", d.primary)}${bar("haftalık", d.secondary)}</div>`;
-    }).join("");
-  } else {
-    // Claude: 5h block + weekly cap as meters
-    const cw = rep.current_window || {}, wc = rep.weekly_cap || {};
-    $("limits-sub").textContent = "Claude · 5h blok + haftalık (P90/P95 proxy)";
-    const blockUsed = cw.cost_usd || 0, p90 = cw.baseline_cost_p90 || 1;
-    const blockPct = Math.min(100, blockUsed / p90 * 100);
-    const wkPct = Math.min(100, wc.pct_of_personal_p95 || 0);
-    const bc = sevClass(blockPct), wkc = sevClass(wkPct);
-    $("limits-body").innerHTML =
-      `<div class="meter-row"><span class="meter-name">5h blok</span>
-        <div class="meter-track"><div class="meter-fill ${bc}" style="width:${blockPct}%"></div></div>
-        <span class="meter-pct ${bc}">%${Math.round(blockPct)}</span>
-        <span class="meter-reset">${cw.active ? "↻ " + Math.floor((cw.remaining_seconds || 0) / 60) + "dk" : ""}</span></div>
-       <div class="meter-row"><span class="meter-name">haftalık</span>
-        <div class="meter-track"><div class="meter-fill ${wkc}" style="width:${wkPct}%"></div></div>
-        <span class="meter-pct ${wkc}">%${Math.round(wkPct)}</span>
-        <span class="meter-reset"></span></div>` +
-      (() => {
-        const vk = cw.verdict_kind === "bad" ? "bad" : cw.verdict_kind === "warn" ? "warn" : "good";
-        const proj = cw.projected_close_cost;
-        const eta = cw.block_eta_p50_iso && cw.block_will_hit_p50
-          ? ` · P50'ye ~${cw.block_minutes_to_p50}dk` : "";
-        return `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:14px;padding-top:12px;border-top:1px solid var(--border-subtle)">
-          <div><div class="dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.04em">blok projeksiyonu</div>
-            <div class="num" style="font-size:17px;color:var(--text-1);margin-top:3px">${proj != null ? "~" + fmtMoney0(proj) + " kapanır" : "—"}</div></div>
-          <div style="text-align:right"><div class="dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.04em">tempo</div>
-            <div class="num ${vk === "bad" ? "" : ""}" style="font-size:13px;color:var(--${vk});margin-top:3px">${esc(cw.verdict_label || "—")}${eta}</div></div>
-        </div>
-        <div class="dim" style="font-size:11px;margin-top:10px;line-height:1.5">Bu blokta ${fmtMoney(blockUsed)} · P50 ${fmtMoney(cw.baseline_cost_p50 || 0)} · P90 ${fmtMoney(p90)}. Claude rate-limit %'si API'de açık değil — kişisel P90/P95 baz alınır.</div>`;
-      })();
-  }
+  const fe = rep.fuel_efficiency || {};
+  const vClass = (k) => k === "bad" ? "bad" : k === "warn" ? "warn" : "good";
+  const row = (label, youTxt, refTxt, verdict, kind) => `
+    <div style="display:grid;grid-template-columns:1fr auto 130px;gap:14px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border-subtle)">
+      <div><div style="font-size:13px;color:var(--text-2)">${label}</div>
+        <div class="dim" style="font-size:11px;font-family:var(--font-mono);margin-top:2px">${refTxt}</div></div>
+      <div class="num" style="font-size:17px;color:var(--text-1);text-align:right">${youTxt}</div>
+      <div class="num" style="font-size:11px;text-align:right;font-weight:600;color:var(--${vClass(kind)})">${esc(verdict)}</div>
+    </div>`;
+
+  const ph = fe.per_active_hour || {}, pd = fe.per_active_day || {}, pc = fe.per_commit || {},
+        pt = fe.per_turn || {}, ch = fe.cache_hit_rate || {};
+  let html = "";
+  if (ph.you != null) html += row("Saat başı maliyet",
+    fmtMoney(ph.you) + "/sa", `tipik $${ph.band_normal_low}–${ph.band_normal_high}/sa · ${ph.hours_per_active_day}h/gün çalışıyorsun`,
+    ph.verdict_label || "", ph.verdict_kind);
+  if (pd.you_avg_recent7 != null) html += row("Gün başı maliyet",
+    fmtMoney0(pd.you_avg_recent7), `endüstri ref ~$${pd.baseline_avg}/gün (P90 $${pd.baseline_p90})`,
+    pd.verdict_label || "", pd.verdict_kind);
+  if (pc.you_median != null) html += row("Commit başı maliyet",
+    fmtMoney(pc.you_median), `ref ~$${pc.baseline_implied}/commit · ${pc.matched_commits} commit eşleşti`,
+    pc.verdict_label || "", pc.verdict_kind);
+  if (pt.you != null) html += row("Turn başı maliyet",
+    fmtMoney(pt.you), `tipik $${pt.baseline_low}–${pt.baseline_high}/turn · ${fmtInt(pt.turns)} turn`,
+    pt.verdict_label || "", pt.verdict_kind);
+  if (ch.you != null) html += row("Cache hit",
+    fmtPct(ch.you), `hedef ≥%${Math.round((ch.target_excellent || .85) * 100)} mükemmel`,
+    ch.verdict_label || "", ch.verdict_kind);
+
+  $("eff-body").innerHTML = html || `<div class="empty">Yeterli veri yok</div>`;
 }
 
 // ---------- cache efficiency ----------
@@ -323,27 +306,50 @@ function renderCache(rep) {
 }
 
 // ---------- trend chart ----------
+const MA_COLORS = { 7: "#8b97ff", 25: "#3fd9e8", 50: "#ffc05a", 100: "#ff8a8e" };
+function movingAverage(arr, n) {
+  return arr.map((_, i) => {
+    const w = arr.slice(Math.max(0, i - n + 1), i + 1);
+    return w.reduce((a, b) => a + b, 0) / w.length;
+  });
+}
+// Trade-chart: $/saat bar + seçili hareketli ortalama (MA) çizgileri.
 function renderTrend(rep, isCodex) {
   const tf = localStorage.getItem("ccmeter_trend_tf") || "24";
+  const maList = JSON.parse(localStorage.getItem("ccmeter_trend_ma") || "[7]");
   $("trend-unit").textContent = "$/saat · " + (tf === "24" ? "1 gün" : tf + "h") + " pencere";
   const series = (rep.burn_rate_timeseries || {})[tf] || [];
   const shortWin = (tf === "1" || tf === "4" || tf === "6");
   const labels = series.map(p => {
     const dt = p.start ? new Date(p.start) : null;
     if (!dt) return "";
-    return shortWin
-      ? dt.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
-      : (dt.getMonth() + 1) + "/" + dt.getDate();
+    return shortWin ? dt.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
+                    : (dt.getMonth() + 1) + "/" + dt.getDate();
   });
-  const data = series.map(p => p.cost_per_hour ?? p.rate ?? p.value ?? p.cost ?? 0);
+  const burns = series.map(p => p.cost_per_hour ?? p.cost ?? 0);
+  const datasets = [{ type: "bar", label: `$/sa`, data: burns,
+    backgroundColor: "rgba(94,106,210,.32)", borderColor: "transparent", borderRadius: 2, order: 10 }];
+  for (const n of maList) {
+    datasets.push({ type: "line", label: `MA ${n}`, data: movingAverage(burns, n),
+      borderColor: MA_COLORS[n] || "#fff", borderWidth: 2, fill: false, tension: .3,
+      pointRadius: 0, pointHoverRadius: 3, order: 1 });
+  }
   const ctx = $("chart-trend");
   if (window.__charts.trend) window.__charts.trend.destroy();
-  const grad = ctx.getContext("2d").createLinearGradient(0, 0, 0, 240);
-  grad.addColorStop(0, "rgba(94,106,210,0.22)"); grad.addColorStop(1, "rgba(94,106,210,0)");
   window.__charts.trend = new Chart(ctx, {
-    type: "line",
-    data: { labels, datasets: [{ data, borderColor: "#5E6AD2", backgroundColor: grad, borderWidth: 2, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 4 }] },
-    options: chartOpts({ yMoney: true })
+    type: "bar", data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: {
+        legend: { display: maList.length > 0, position: "top", align: "end",
+          labels: { color: "#8A8F98", font: { size: 10 }, boxWidth: 10, padding: 8, filter: i => i.text !== "$/sa" } },
+        tooltip: { ...tooltipCfg(), callbacks: { label: c => `${c.dataset.label}: ${fmtMoney(c.parsed.y || 0)}/sa` } }
+      },
+      scales: {
+        x: { grid: { display: false }, border: { display: false }, ticks: { color: "#62666D", font: { size: 10, family: "'Geist Mono',monospace" }, maxTicksLimit: 8 } },
+        y: { grid: { color: "rgba(255,255,255,0.05)" }, border: { display: false }, ticks: { color: "#62666D", font: { size: 10, family: "'Geist Mono',monospace" }, maxTicksLimit: 5, callback: v => "$" + v } }
+      }
+    }
   });
 }
 
@@ -516,13 +522,36 @@ function start() {
       window.__refreshInFlight = false; refresh(false);
     });
   });
-  // trend picker
+  // burn-window picker (speedometer ortalama penceresi: 15dk/1h/2h/4h/6h)
+  const bh0 = localStorage.getItem("ccmeter_burn_hours") || "2";
+  document.querySelectorAll("#burn-window-picker button").forEach(b => {
+    b.classList.toggle("active", b.dataset.h === bh0);
+    b.addEventListener("click", () => {
+      localStorage.setItem("ccmeter_burn_hours", b.dataset.h);
+      document.querySelectorAll("#burn-window-picker button").forEach(x => x.classList.toggle("active", x.dataset.h === b.dataset.h));
+      if (window.__lastReport) renderHero(window.__lastReport, window.__source === "codex");
+    });
+  });
+  // trend timeframe picker (1h/4h/6h/12h/1d)
   const tf0 = localStorage.getItem("ccmeter_trend_tf") || "24";
   document.querySelectorAll("#trend-picker button").forEach(b => {
     b.classList.toggle("active", b.dataset.tf === tf0);
     b.addEventListener("click", () => {
       localStorage.setItem("ccmeter_trend_tf", b.dataset.tf);
       document.querySelectorAll("#trend-picker button").forEach(x => x.classList.toggle("active", x.dataset.tf === b.dataset.tf));
+      if (window.__lastReport) renderTrend(window.__lastReport, window.__source === "codex");
+    });
+  });
+  // trend MA toggle buttons (7/25/50/100, multi-select)
+  let maSel = JSON.parse(localStorage.getItem("ccmeter_trend_ma") || "[7]");
+  document.querySelectorAll(".indicator-btn").forEach(b => {
+    const n = parseInt(b.dataset.ma, 10);
+    b.classList.toggle("active", maSel.includes(n));
+    b.addEventListener("click", () => {
+      maSel = JSON.parse(localStorage.getItem("ccmeter_trend_ma") || "[7]");
+      if (maSel.includes(n)) maSel = maSel.filter(x => x !== n); else maSel.push(n);
+      localStorage.setItem("ccmeter_trend_ma", JSON.stringify(maSel));
+      b.classList.toggle("active", maSel.includes(n));
       if (window.__lastReport) renderTrend(window.__lastReport, window.__source === "codex");
     });
   });
