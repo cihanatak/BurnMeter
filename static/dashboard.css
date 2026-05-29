@@ -185,6 +185,29 @@ main {
 .status-row-4 .status-trip    { flex: 1; }
 .status-row-4 .status-live    { flex: 1; }
 .status-row-4 .status-models  { flex: 1; }
+
+/* 5-col layout: 2 speedo (mac+pc) + trip + live + models. */
+.status-row-5 { display: flex; gap: 10px; }
+.status-row-5 .status-speedo  { flex: 1; min-width: 0; }
+.status-row-5 .status-trip    { flex: 0.85; min-width: 0; }
+
+/* Trip kartı içeriği zengin (turn sayısı, gün tahmini, blok, hafta) —
+   sabit 300px yükseklik scrolla zorluyor. İçerik kadar büyüsün. */
+.status-card[data-card-id="trip"] {
+  height: auto !important;
+  min-height: 300px;
+  overflow: visible !important;
+  resize: horizontal;
+}
+.trip-divider { margin: 6px 0 3px; }
+#device-split { margin-top: 5px !important; padding-top: 5px !important; }
+.device-row { margin-top: 2px; }
+.status-row-5 .status-live    { flex: 0.9; min-width: 0; }
+.status-row-5 .status-models  { flex: 0.9; min-width: 0; }
+@media (max-width: 1400px) {
+  .status-row-5 { flex-wrap: wrap; }
+  .status-row-5 .status-card { flex: 1 1 calc(33% - 8px); }
+}
 @media (max-width: 1400px) {
   .status-row-4 { flex-wrap: wrap; }
   .status-row-4 .status-card { flex: 1 1 calc(50% - 5px); }
@@ -356,6 +379,39 @@ main {
   border-color: var(--accent);
 }
 
+/* Source toggle — ccmeter (Claude) / codex_meter (Codex). Header'da. */
+.source-toggle {
+  display: inline-flex;
+  gap: 0;
+  margin-left: 14px;
+  vertical-align: middle;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.source-toggle button {
+  background: var(--bg-3);
+  color: var(--fg-3);
+  border: none;
+  padding: 3px 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  transition: background 0.12s, color 0.12s;
+}
+.source-toggle button:hover { color: var(--fg); }
+.source-toggle button.active {
+  background: var(--accent);
+  color: var(--bg);
+}
+/* codex_meter aktifken yeşil/OpenAI tonu — ayrım net olsun. */
+.source-toggle button[data-source="codex"].active {
+  background: #10a37f;   /* OpenAI green */
+  color: #fff;
+}
+
 /* Section sizing on activity row */
 #card-recent   { flex: 2.4; }
 #card-projects { flex: 1; }
@@ -413,20 +469,20 @@ main {
 .sb-val   { color: var(--fg); font-weight: 700; }
 .sb-share { color: var(--fg-3); font-size: 10px; }
 
-/* Trip computer card */
+/* Trip computer card — sıkı satır aralığı (kutu komşularıyla dengeli kalsın). */
 .trip-big {
   font-family: var(--mono);
-  font-size: 32px;
+  font-size: 30px;
   font-weight: 700;
   color: var(--fg);
-  margin: 2px 0 10px;
+  margin: 0 0 6px;
   line-height: 1;
 }
 .trip-line {
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--fg-2);
-  margin: 4px 0;
-  line-height: 1.5;
+  margin: 2px 0;
+  line-height: 1.35;
 }
 .trip-line strong { color: var(--fg); font-weight: 600; }
 
@@ -605,6 +661,67 @@ tr:hover td { background: var(--bg-3); }
 .pill.sonnet { background: rgba(88, 166, 255, 0.15);  color: var(--sonnet); }
 .pill.haiku  { background: rgba(86, 211, 100, 0.15);  color: var(--haiku); }
 .pill.unknown{ background: var(--bg-3); color: var(--fg-3); }
+/* OpenAI / Codex aileleri — marka rengi (teal/green tonları). */
+.pill.gpt-55    { background: rgba(16, 163, 127, 0.18); color: #1fd6a6; }
+.pill.gpt-54    { background: rgba(16, 163, 127, 0.13); color: #4fcfb0; }
+.pill.gpt-codex { background: rgba(0, 200, 160, 0.16);  color: #2ee6c0; }
+.pill.gpt-mini  { background: rgba(120, 200, 180, 0.12); color: #8fd9c6; }
+
+/* ── Codex plan-limit paneli (5h + haftalık) ───────────────────────── */
+.ratelimit-row {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid #10a37f;     /* OpenAI green accent */
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 10px;
+}
+.rl-title {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+  text-transform: uppercase; color: var(--fg-2); margin-bottom: 10px;
+}
+.rl-grid { display: flex; gap: 28px; flex-wrap: wrap; }
+.rl-card { flex: 1; min-width: 280px; }
+.rl-dev { font-size: 11px; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+.rl-limitname { font-family: var(--mono); font-size: 10px; }
+.rl-bar-row { display: flex; align-items: center; gap: 8px; margin: 5px 0; }
+.rl-bar-label { font-size: 11px; color: var(--fg-2); width: 58px; flex-shrink: 0; font-family: var(--mono); }
+.rl-bar-track { flex: 1; height: 10px; background: var(--bg-3); border-radius: 5px; overflow: hidden; }
+.rl-bar-fill { height: 100%; border-radius: 5px; transition: width 0.3s; }
+.rl-bar-fill.good { background: var(--good); }
+.rl-bar-fill.warn { background: var(--warn); }
+.rl-bar-fill.bad  { background: var(--bad); }
+.rl-bar-pct { font-family: var(--mono); font-size: 12px; font-weight: 700; width: 42px; text-align: right; }
+.rl-bar-pct.good { color: var(--good); }
+.rl-bar-pct.warn { color: var(--warn); }
+.rl-bar-pct.bad  { color: var(--bad); }
+.rl-bar-reset { font-size: 10px; font-family: var(--mono); width: 80px; flex-shrink: 0; }
+
+/* Device badge — Mac (lokal) vs PC (Syncthing mirror). */
+.dev-badge {
+  display: inline-block;
+  padding: 0 5px;
+  margin-left: 6px;
+  font-size: 9px;
+  font-family: var(--mono);
+  border-radius: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  vertical-align: middle;
+}
+.dev-badge.dev-mac { background: rgba(120, 200, 255, 0.18); color: #7bcbff; }
+.dev-badge.dev-pc  { background: rgba(255, 180, 100, 0.22); color: #ffb464; }
+
+
+/* Mac/PC ayrı $ sayacı — Trip kartı altında mini bölüm. */
+.device-row {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 11px;
+}
+.device-row .label { color: var(--fg-3); font-family: var(--mono); }
+.device-row .val { color: var(--fg-1); }
 
 /* Chart — fills remaining vertical space inside its (resizable) card.
    Min-height keeps it readable even when the card is collapsed. */

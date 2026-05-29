@@ -27,12 +27,15 @@ from typing import Iterator, Optional
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
 
-@dataclass
+@dataclass(slots=True)
 class UsageRecord:
     """A single normalized usage event.
 
     One line of JSONL → at most one UsageRecord (only assistant turns
     that have a usage block produce a record).
+
+    slots=True: yarım milyon+ record tutulurken __dict__ overhead'ini keser
+    (~%40 bellek tasarrufu). Commercial ürün için RAM disiplini şart.
     """
     timestamp: datetime
     session_id: str
@@ -47,6 +50,16 @@ class UsageRecord:
     cache_read_tokens: int
     tool_names: list[str] = field(default_factory=list)
     source_file: str = ""
+    # JSONL uuid chain — bir assistant cevabı birden çok record üretir
+    # (her tool call ayrı record). turn_id = ancestor zincirinde ilk user
+    # message'ın uuid'si. Bir user mesaj + sonraki tüm assistant record'lar
+    # aynı turn_id'yi paylaşır → analytics turn başına aggregate edebilir.
+    uuid: str = ""
+    parent_uuid: str = ""
+    turn_id: str = ""
+    # device — "mac" (main root) veya "pc" (extra_root'tan sync'lenmiş).
+    # Cihan paradigm 2026-05-29: PC + Mac ayrı sayaç + her satırda badge.
+    device: str = "mac"
 
     @property
     def total_tokens(self) -> int:
@@ -154,6 +167,9 @@ def parse_line(line: str, source_file: str = "") -> Optional[UsageRecord]:
         cache_read_tokens=int(usage.get("cache_read_input_tokens") or 0),
         tool_names=_extract_tool_names(msg.get("content")),
         source_file=source_file,
+        uuid=str(rec.get("uuid") or ""),
+        parent_uuid=str(rec.get("parentUuid") or ""),
+        # turn_id load_records'ta dosya context'iyle resolve edilir.
     )
 
 
@@ -275,14 +291,13 @@ def parse_tool_events(line: str) -> Optional[dict]:
                     text = first.get("text", "")
             text = str(text or "")
             is_err = block.get("is_error", False)
-            low = text.lower()[:300]
-            text_says_err = any(k in low for k in (
-                "error:", "no such file", "file not found", "permission denied",
-                "command not found", "syntaxerror", "traceback",
-                "no longer exists", "exceeds maximum", "rate limit",
-                "exit code 1", "exit status 1", "timeout",
-            ))
-            if is_err or text_says_err:
+            # Cihan paradigm 2026-05-29: sahte "error" yakalama düzeltildi.
+            # Eski mantık: bir tool_result content'inde "error:" lowercase
+            # geçerse hata sayıyordu — başarılı bash output'unda "0 errors",
+            # "no errors", argparse "usage:" gibi kelimeler false-positive
+            # üretiyordu. Şimdi sadece Claude Code'un explicit `is_error: True`
+            # flag'ine güveniyoruz (gerçek hata sinyali).
+            if is_err:
                 errors.append({
                     "category": _classify_error_text(text),
                     "snippet": text[:160].replace("\n", " "),
@@ -309,6 +324,7 @@ def iter_jsonl_files(root: Path = CLAUDE_PROJECTS_DIR) -> Iterator[Path]:
 def load_records(
     root: Path = CLAUDE_PROJECTS_DIR,
     deduplicate: bool = True,
+    extra_roots: Optional[list[Path]] = None,
 ) -> tuple[list[UsageRecord], dict, dict[str, str]]:
     """Load all usage records from a Claude projects directory tree.
 
@@ -326,21 +342,90 @@ def load_records(
     files = 0
     errors = 0
 
-    if not root.exists():
+    # Build list of all roots to scan. Cihan paradigm 2026-05-29: PC'deki
+    # Claude Code yakımları da görünsün diye Syncthing/rsync ile mirror
+    # edilmiş ek dizinler. dedup `message_id`'ye göre — aynı record iki
+    # root'ta varsa (sync race) ikinci kez sayılmaz.
+    all_roots = [root]
+    if extra_roots:
+        all_roots.extend(extra_roots)
+
+    if not root.exists() and not (extra_roots and any(r.exists() for r in extra_roots)):
         return [], {
             "files_scanned": 0,
             "parse_errors": 0,
             "root": str(root),
             "root_exists": False,
+            "extra_roots": [str(r) for r in (extra_roots or [])],
         }, user_intents, error_events
 
-    for path in iter_jsonl_files(root):
-        files += 1
-        try:
-            with path.open("r", encoding="utf-8", errors="replace") as fh:
-                for raw in fh:
-                    # First user message per session — the "what was the goal"
-                    # label. We keep the EARLIEST one (the opening prompt).
+    for scan_root in all_roots:
+        if not scan_root.exists():
+            continue
+        # device label — main root → "mac", extra_roots → "pc" (varsayım:
+        # Cihan'ın senaryosu tek ek cihaz). İleride çoklu cihaz için
+        # path-tail'inden infer edilebilir (örn. projects-pc → pc).
+        scan_device = "mac" if scan_root == root else "pc"
+        for path in iter_jsonl_files(scan_root):
+            files += 1
+            try:
+                # PASS 1 — file_lines + uuid → (parent_uuid, type, is_human) map.
+                # CRITICAL: Claude Code JSONL'de "type":"user" iki tip içerir:
+                #   (a) gerçek Cihan-typed prompt — content STRING veya yalın list
+                #   (b) tool_result wrapper — content list içinde "tool_result" block
+                # Sadece (a) durumunda zincir takibini DURDURURUZ. Aksi halde
+                # her tool_result wrapper bir "user record" gibi davranır ve her
+                # assistant record kendi tool_result'una bağlanıp ayrı turn_id alır.
+                file_lines: list[str] = []
+                uuid_map: dict[str, tuple[str, str, bool]] = {}
+                with path.open("r", encoding="utf-8", errors="replace") as fh:
+                    for raw in fh:
+                        file_lines.append(raw)
+                        s = raw.strip()
+                        if not s:
+                            continue
+                        try:
+                            parsed = json.loads(s)
+                        except json.JSONDecodeError:
+                            continue
+                        u = parsed.get("uuid")
+                        if not u:
+                            continue
+                        typ = str(parsed.get("type") or "")
+                        parent = str(parsed.get("parentUuid") or "")
+                        is_human = False
+                        if typ == "user":
+                            msg = parsed.get("message") or {}
+                            content = msg.get("content")
+                            if isinstance(content, str) and content.strip():
+                                is_human = True
+                            elif isinstance(content, list):
+                                has_tool_result = any(
+                                    isinstance(b, dict) and b.get("type") == "tool_result"
+                                    for b in content
+                                )
+                                if not has_tool_result:
+                                    is_human = True
+                        uuid_map[str(u)] = (parent, typ, is_human)
+
+                def resolve_turn(start_uuid: str) -> str:
+                    """Walk parent chain until we hit a real human-typed user
+                    message (or root). tool_result wrappers don't count."""
+                    cur = start_uuid
+                    for _ in range(2000):
+                        entry = uuid_map.get(cur)
+                        if entry is None:
+                            return cur
+                        parent_uuid, typ, is_human = entry
+                        if typ == "user" and is_human:
+                            return cur
+                        if not parent_uuid:
+                            return cur
+                        cur = parent_uuid
+                    return cur
+
+                # PASS 2 — process each line normally + resolve turn_id.
+                for raw in file_lines:
                     intent = None
                     try:
                         intent = parse_user_intent(raw)
@@ -353,7 +438,6 @@ def load_records(
                             user_intents[sid] = text[:240]
                             user_intent_ts[sid] = ts
 
-                    # Tool errors + tool_use names — behavioral analytics.
                     try:
                         evt = parse_tool_events(raw)
                     except Exception:
@@ -378,10 +462,14 @@ def load_records(
                         if rec.message_id in seen_ids:
                             continue
                         seen_ids.add(rec.message_id)
+                    # turn_id: ancestor zincirinde ilk user mesajının uuid'si.
+                    if rec.uuid:
+                        rec.turn_id = resolve_turn(rec.uuid)
+                    rec.device = scan_device
                     records.append(rec)
-        except OSError:
-            errors += 1
-            continue
+            except OSError:
+                errors += 1
+                continue
 
     records.sort(key=lambda r: r.timestamp)
     return records, {
@@ -389,5 +477,6 @@ def load_records(
         "parse_errors": errors,
         "root": str(root),
         "root_exists": True,
+        "extra_roots": [str(r) for r in (extra_roots or [])],
         "error_events_count": len(error_events),
     }, user_intents, error_events

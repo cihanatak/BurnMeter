@@ -4,14 +4,21 @@
   <meta charset="utf-8" />
   <title>ccmeter — Claude Code yakıt metresi</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="/static/dashboard.css" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260529i" />
+  <script>window.__CCMETER_BUILD="20260529d";</script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
-  <script src="/static/dashboard.js" defer></script>
+  <script src="/static/dashboard.js?v=20260529i" defer></script>
 </head>
 <body>
 
 <header>
-  <div class="header-title">ccmeter <span id="version" class="dim">…</span></div>
+  <div class="header-title">
+    <span id="app-name">ccmeter</span> <span id="version" class="dim">…</span>
+    <span class="source-toggle" id="source-toggle">
+      <button data-source="claude" class="active">ccmeter</button>
+      <button data-source="codex">codex_meter</button>
+    </span>
+  </div>
   <div class="header-meta">
     <span id="data-source" class="dim">…</span>
     <span id="last-updated" class="dim">…</span>
@@ -28,12 +35,20 @@
     <div class="hero-detail" id="hero-detail">…</div>
   </section>
 
-  <!-- 2. RIGHT NOW: speedometer + trip + live + models (4 columns) -->
-  <section class="status-row status-row-4">
-    <div class="status-card status-speedo" data-card-id="speedo">
+  <!-- 1.5 CODEX RATE LIMIT — Codex Pro'nun GERÇEK kısıtı (5h + haftalık).
+       Sadece codex_meter'da görünür. $ değil, plan limiti asıl bağlayıcı. -->
+  <section class="ratelimit-row" id="codex-ratelimit" style="display:none">
+    <div class="rl-title">CODEX PLAN LİMİTİ · <span class="dim" id="rl-plan">—</span></div>
+    <div class="rl-grid" id="rl-grid"></div>
+  </section>
+
+  <!-- 2. RIGHT NOW: 2x speedometer (mac + pc) + trip + live + models (5 col) -->
+  <section class="status-row status-row-5">
+    <div class="status-card status-speedo" data-card-id="speedo-mac">
       <div class="status-cap">
-        Burn rate · saatte $
+        <span class="dev-badge dev-mac">cihan-mac</span> Burn rate · saatte $
         <span class="window-picker" id="burn-window-picker">
+          <button data-h="0.25">15dk</button>
           <button data-h="1">1h</button>
           <button data-h="2" class="active">2h</button>
           <button data-h="4">4h</button>
@@ -43,7 +58,21 @@
       <svg id="speedo-svg" viewBox="0 0 400 270" preserveAspectRatio="xMidYMid meet"></svg>
       <div class="status-bottom" id="speedo-zone">…</div>
     </div>
-    <div class="status-card status-trip" data-card-id="trip">
+    <div class="status-card status-speedo" data-card-id="speedo-pc">
+      <div class="status-cap">
+        <span class="dev-badge dev-pc">cihan-pc</span> Burn rate · saatte $
+        <span class="window-picker" id="burn-window-picker-pc">
+          <button data-h="0.25">15dk</button>
+          <button data-h="1">1h</button>
+          <button data-h="2" class="active">2h</button>
+          <button data-h="4">4h</button>
+          <button data-h="6">6h</button>
+        </span>
+      </div>
+      <svg id="speedo-svg-pc" viewBox="0 0 400 270" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="status-bottom" id="speedo-zone-pc">…</div>
+    </div>
+    <div class="status-card status-trip" data-card-id="trip" style="flex:0.9">
       <div class="status-cap">Bugün</div>
       <div class="trip-big" id="trip-amount">$—</div>
       <div class="trip-line" id="trip-line">…</div>
@@ -97,7 +126,7 @@
   <!-- 3. WHERE THE MONEY WENT -->
   <section class="status-row">
     <div class="status-card" id="card-recent" data-card-id="recent">
-      <div class="status-cap">Son aktivite · son 2 saatteki oturumlar</div>
+      <div class="status-cap">Son aktivite · her satır 1 TURN (user msg + tüm cevap) — saf net</div>
       <div class="scroll-recent">
         <table id="recent-table">
           <thead><tr>
@@ -113,7 +142,7 @@
       <div class="scroll-recent">
         <table id="projects-table">
           <thead><tr>
-            <th>proje</th><th class="num">$</th>
+            <th>proje</th><th class="num">token</th><th class="num">$</th>
           </tr></thead>
           <tbody></tbody>
         </table>

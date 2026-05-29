@@ -15,6 +15,12 @@ function modelToFamily(m) {
   if (m.includes("opus"))   return "opus";
   if (m.includes("sonnet")) return "sonnet";
   if (m.includes("haiku"))  return "haiku";
+  // OpenAI / Codex aileleri — marka rengi (CSS .pill.gpt*).
+  if (m.includes("codex"))  return "gpt-codex";
+  if (m.includes("mini"))   return "gpt-mini";
+  if (m.includes("gpt-5.5") || m.includes("gpt5.5")) return "gpt-55";
+  if (m.includes("gpt-5.4") || m.includes("gpt5.4")) return "gpt-54";
+  if (m.includes("gpt") || m.startsWith("o1") || m.startsWith("o3")) return "gpt-55";
   return "unknown";
 }
 
@@ -33,6 +39,14 @@ function modelDisplay(m) {
   if (match) {
     const family = match[1].charAt(0).toUpperCase() + match[1].slice(1);
     return `${family} ${match[2]}.${match[3]}`;
+  }
+  // OpenAI / Codex: gpt-5.5 → GPT-5.5, gpt-5.3-codex → GPT-5.3 Codex
+  const gpt = lower.match(/gpt-?(\d+(?:\.\d+)?)(-?(codex|mini))?/);
+  if (gpt) {
+    let s = "GPT-" + gpt[1];
+    if (gpt[3] === "codex") s += " Codex";
+    else if (gpt[3] === "mini") s += " mini";
+    return s;
   }
   return raw;
 }
@@ -57,8 +71,16 @@ function relTime(iso) {
 
 // --- Data load -------------------------------------------------------------
 
+// Active data source: "claude" (ccmeter) or "codex" (codex_meter).
+// Persisted so a reload keeps the chosen meter.
+window.__source = localStorage.getItem("ccmeter_source") || "claude";
+
 async function loadReport(force = false) {
-  const url = "/api/report" + (force ? "?refresh=1" : "");
+  const params = new URLSearchParams();
+  if (force) params.set("refresh", "1");
+  if (window.__source && window.__source !== "claude") params.set("source", window.__source);
+  const qs = params.toString();
+  const url = "/api/report" + (qs ? "?" + qs : "");
   const resp = await fetch(url);
   if (!resp.ok) throw new Error("fetch failed: " + resp.status);
   return await resp.json();
@@ -67,12 +89,25 @@ async function loadReport(force = false) {
 // --- Render orchestrator ---------------------------------------------------
 
 function render(report) {
+  const src = report._meta?.source || "claude";
   document.getElementById("version").textContent = "v" + (report._meta?.version || "?");
+  // Header app name reflects the active meter.
+  const appNameEl = document.getElementById("app-name");
+  if (appNameEl) appNameEl.textContent = (src === "codex") ? "codex_meter" : "ccmeter";
+  document.title = (src === "codex" ? "codex_meter" : "ccmeter") + " — yakıt metresi";
   document.getElementById("data-source").textContent =
     `${report._meta?.files_scanned ?? "?"} files · ${(report.record_count ?? 0).toLocaleString()} records`;
 
   renderHero(report);
-  renderSpeedometer(report);
+  renderCodexRateLimit(report, src);
+  renderSpeedometer(report, { device: "mac" });
+  renderSpeedometer(report, {
+    device: "pc",
+    svgId: "speedo-svg-pc",
+    zoneId: "speedo-zone-pc",
+    pickerId: "burn-window-picker-pc",
+    lsKey: "ccmeter_burn_hours_pc",
+  });
   renderTrip(report);
   renderLive(report);
   renderModels(report);
@@ -96,9 +131,14 @@ function trimToolName(name) {
 }
 
 function renderToolMix(report) {
-  const rows = (report.by_tool || [])
-    .filter(t => t.tool && t.tool !== "(no tool)")
-    .slice(0, 8);
+  // Cihan paradigm 2026-05-29 v6: Chrome MCP (ve diğer tool'lar) her aracın
+  // YAKDIĞI TOKEN'I göster — sadece kaç kez çağrıldığı değil. Sort: token desc
+  // (büyük token yiyenler tepede). Label: `${calls}× · ${total_token}t · ${avg}t/c`.
+  const all = (report.by_tool || []).filter(t => t.tool && t.tool !== "(no tool)");
+  const rows = all
+    .map(t => ({ ...t, tot: t.approx_output_tokens || 0, avg: t.calls ? Math.round((t.approx_output_tokens || 0) / t.calls) : 0 }))
+    .sort((a, b) => b.tot - a.tot)
+    .slice(0, 10);
   const headlineEl = document.getElementById("toolmix-headline");
   const barsEl = document.getElementById("toolmix-bars");
   if (!barsEl) return;
@@ -109,26 +149,30 @@ function renderToolMix(report) {
     return;
   }
 
-  const totalCalls = rows.reduce((s, t) => s + t.calls, 0);
-  const max = Math.max(...rows.map(t => t.calls));
+  const totalCalls = all.reduce((s, t) => s + (t.calls || 0), 0);
+  const totalTokens = all.reduce((s, t) => s + (t.approx_output_tokens || 0), 0);
+  const max = Math.max(...rows.map(t => t.tot)) || 1;
 
-  // No-tool turns share — how often Claude responds without invoking a tool
-  const noTool = (report.by_tool || []).find(t => t.tool === "(no tool)");
-  const noToolShare = noTool && totalCalls + noTool.calls > 0
-    ? (noTool.calls / (totalCalls + noTool.calls) * 100).toFixed(0)
-    : null;
+  // Chrome MCP araçlarının token payı (Cihan'ın asıl ilgilendiği).
+  const chrome = all.filter(t => /Chrome|chrome/.test(t.tool));
+  const chromeTok = chrome.reduce((s, t) => s + (t.approx_output_tokens || 0), 0);
+  const chromeCalls = chrome.reduce((s, t) => s + (t.calls || 0), 0);
+  const chromeShare = totalTokens > 0 ? (chromeTok / totalTokens * 100).toFixed(1) : "0";
 
   headlineEl.innerHTML =
-    `<strong>${fmtInt(totalCalls)}</strong> tool çağrısı (top ${rows.length}). ` +
-    (noToolShare ? `Turn'lerin %${noToolShare}'i tool kullanmıyor (sadece text).` : "");
+    `<strong>${fmtInt(totalTokens)}</strong> tool output token (top ${rows.length}). ` +
+    `Chrome MCP: ${fmtInt(chromeCalls)}× / ${fmtInt(chromeTok)}t (<strong>%${chromeShare}</strong>).`;
 
   barsEl.innerHTML = rows.map(t => {
-    const pct = (t.calls / max * 100).toFixed(1);
+    const pct = (t.tot / max * 100).toFixed(1);
+    const isChrome = /Chrome|chrome/.test(t.tool);
+    const label = trimToolName(t.tool);
+    const dot = isChrome ? '<span class="dev-badge dev-pc" style="margin-right:4px">chrome</span>' : '';
     return `
       <div class="tm-row">
-        <span class="tm-label" title="${escapeHtml(t.tool)}">${escapeHtml(trimToolName(t.tool))}</span>
+        <span class="tm-label" title="${escapeHtml(t.tool)}">${dot}${escapeHtml(label)}</span>
         <div class="tm-bar-wrap"><div class="tm-bar" style="width:${pct}%"></div></div>
-        <span class="tm-val">${fmtInt(t.calls)}</span>
+        <span class="tm-val">${fmtInt(t.calls)}× · ${fmtInt(t.tot)}t · ${fmtInt(t.avg)}t/c</span>
       </div>
     `;
   }).join("");
@@ -205,6 +249,59 @@ function renderHero(report) {
   document.getElementById("hero-detail").textContent = head.detail || "";
 }
 
+// Codex Pro plan-limit paneli — 5h + haftalık window'lar, per-device.
+// Codex'in GERÇEK bağlayıcı kısıtı (abonelik flat-fee, $ notional). Cihan'ın
+// görmek istediği asıl sinyal: "haftalık limite ne kadar kaldı".
+function renderCodexRateLimit(report, src) {
+  const sec = document.getElementById("codex-ratelimit");
+  if (!sec) return;
+  const rl = report.codex_rate_limits;
+  if (src !== "codex" || !rl || typeof rl !== "object" || !Object.keys(rl).length) {
+    sec.style.display = "none";
+    return;
+  }
+  sec.style.display = "";
+  // plan_type — herhangi bir device'tan al
+  const anyDev = Object.values(rl).find(d => d && d.plan_type) || Object.values(rl)[0] || {};
+  document.getElementById("rl-plan").textContent =
+    (anyDev.plan_type ? anyDev.plan_type.toUpperCase() + " plan" : "abonelik") +
+    " · $ değil, plan limiti asıl kısıt";
+
+  const nowSec = Date.now() / 1000;
+  const bar = (label, win) => {
+    if (!win) return "";
+    const pct = Math.max(0, Math.min(100, win.used_percent || 0));
+    const cls = pct >= 90 ? "bad" : pct >= 70 ? "warn" : "good";
+    let resetStr = "";
+    if (win.resets_at) {
+      const rem = Math.max(0, win.resets_at - nowSec);
+      const h = Math.floor(rem / 3600), m = Math.floor((rem % 3600) / 60);
+      resetStr = h >= 1 ? `${h}sa ${m}dk` : `${m}dk`;
+    }
+    return `
+      <div class="rl-bar-row">
+        <span class="rl-bar-label">${label}</span>
+        <div class="rl-bar-track"><div class="rl-bar-fill ${cls}" style="width:${pct}%"></div></div>
+        <span class="rl-bar-pct ${cls}">%${pct.toFixed(0)}</span>
+        <span class="rl-bar-reset dim">${resetStr ? "reset " + resetStr : ""}</span>
+      </div>`;
+  };
+
+  const order = ["mac", "pc"];
+  const cards = order.filter(dev => rl[dev]).map(dev => {
+    const d = rl[dev];
+    return `
+      <div class="rl-card">
+        <div class="rl-dev"><span class="dev-badge dev-${dev}">cihan-${dev}</span>
+          <span class="dim rl-limitname">${escapeHtml(d.limit_name || d.limit_id || "")}</span></div>
+        ${bar("5 saat", d.primary)}
+        ${bar("haftalık", d.secondary)}
+      </div>`;
+  }).join("");
+  document.getElementById("rl-grid").innerHTML = cards ||
+    `<div class="dim">Rate-limit verisi yok.</div>`;
+}
+
 // --- 2. Speedometer (SVG) --------------------------------------------------
 
 function polarToCartesian(cx, cy, r, angleDeg) {
@@ -220,15 +317,33 @@ function arcPath(cx, cy, r, startVal, endVal, maxVal) {
   return `M ${p1.x.toFixed(1)} ${p1.y.toFixed(1)} A ${r} ${r} 0 0 1 ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
 }
 
-function renderSpeedometer(report) {
+function renderSpeedometer(report, opts) {
+  // opts.device: undefined (Mac, default) | "mac" | "pc". UI elementi:
+  // svgId/zoneId/pickerId — Cihan paradigm 2026-05-29: cihan-mac + cihan-pc
+  // yan yana iki ayrı speedometer.
+  opts = opts || {};
+  const device = opts.device || "mac";
+  const svgId = opts.svgId || "speedo-svg";
+  const zoneId = opts.zoneId || "speedo-zone";
+  const pickerId = opts.pickerId || "burn-window-picker";
+  const lsKey = opts.lsKey || "ccmeter_burn_hours";
+
   const fc = report.forecast || {};
   const cw = report.current_window || {};
   const zones = report.burn_rate_zones || { typical: 4, busy: 12, heavy: 25, max: 50 };
-  // Selected burn window: persisted in localStorage, defaults to 2h.
-  const hoursStr = localStorage.getItem("ccmeter_burn_hours") || "2";
-  const burnByHours = fc.burn_rates_by_hours || {};
-  const currentRate = burnByHours[hoursStr] ?? fc.burn_rate_per_hour_recent ?? cw.cost_per_hour ?? 0;
-  window.__currentBurnHours = hoursStr;
+  const hoursStr = localStorage.getItem(lsKey) || "2";
+
+  // PC için by_device.pc.burn_rates_by_hours, Mac için forecast.burn_rates_by_hours
+  // (Mac'te forecast tüm record'ları kapsar — by_device.mac aynısı; tutarlılık için
+  // device==pc'de yalnızca by_device.pc'yi kullan).
+  let burnByHours;
+  if (device === "pc") {
+    burnByHours = ((report.by_device || {}).pc || {}).burn_rates_by_hours || {};
+  } else {
+    burnByHours = ((report.by_device || {}).mac || {}).burn_rates_by_hours || fc.burn_rates_by_hours || {};
+  }
+  const currentRate = burnByHours[hoursStr] ?? 0;
+  if (device === "mac") window.__currentBurnHours = hoursStr;
 
   const cx = 200, cy = 200, r = 150, max = zones.max || 50;
 
@@ -263,7 +378,8 @@ function renderSpeedometer(report) {
   else if (currentRate >= zones.typical) { zoneColor = "#d29922"; zoneWord = "🟡 sarı bölge · normal üstü"; }
   else                                    { zoneColor = "#3fb950"; zoneWord = "🟢 yeşil bölge · sakin"; }
 
-  const svg = document.getElementById("speedo-svg");
+  const svg = document.getElementById(svgId);
+  if (!svg) return;
   svg.innerHTML = `
     ${arcs}
     ${ticksSvg}
@@ -272,11 +388,16 @@ function renderSpeedometer(report) {
           stroke="${zoneColor}" stroke-width="4" stroke-linecap="round" />
     <circle class="speedo-hub" cx="${cx}" cy="${cy}" r="9" />
     <text class="speedo-value" x="${cx}" y="${cy + 38}">${fmtMoney(currentRate)}</text>
-    <text class="speedo-unit"  x="${cx}" y="${cy + 54}">saatte · son ${hoursStr}h ortalama</text>
+    <text class="speedo-unit"  x="${cx}" y="${cy + 54}">saatte · son ${hoursStr === "0.25" ? "15dk" : hoursStr + "h"} ortalama</text>
   `;
 
   // Per-model breakdown of this burn rate — answers "Opus mu Sonnet mi yiyor?"
-  const breakdown = (fc.burn_rates_by_hours_by_model || {})[hoursStr] || [];
+  // PC için forecast.burn_rates_by_hours_by_model Mac-only veriyor (Mac
+  // forecast'ı tüm record'ları sayıyor ama device filter yapmıyor). PC için
+  // doğru veriyi vermiyoruz — şimdilik PC speedo'da breakdown gizli.
+  const breakdown = device === "pc"
+    ? []
+    : ((fc.burn_rates_by_hours_by_model || {})[hoursStr] || []);
   let breakdownHtml = "";
   if (breakdown.length) {
     const visibleModels = breakdown
@@ -294,9 +415,12 @@ function renderSpeedometer(report) {
     `</div>`;
   }
 
-  document.getElementById("speedo-zone").innerHTML =
-    `${zoneWord} · tipiğin <strong>${fmtMoney(zones.typical)}/sa</strong>, yoğunun <strong>${fmtMoney(zones.busy)}/sa</strong>` +
-    breakdownHtml;
+  const zoneEl = document.getElementById(zoneId);
+  if (zoneEl) {
+    zoneEl.innerHTML =
+      `${zoneWord} · tipiğin <strong>${fmtMoney(zones.typical)}/sa</strong>, yoğunun <strong>${fmtMoney(zones.busy)}/sa</strong>` +
+      breakdownHtml;
+  }
 }
 
 // --- 2b. Trip computer (today's narrative) --------------------------------
@@ -357,6 +481,33 @@ function renderTrip(report) {
 
   // --- Weekly cap — rolling 7-gün vs senin P95 haftan
   renderWeeklyCap(report.weekly_cap || {});
+
+  // --- Device split — Cihan paradigm 2026-05-29: Mac + PC ayrı sayaç.
+  renderDeviceSplit(report.by_device || {});
+}
+
+function renderDeviceSplit(byDev) {
+  let host = document.getElementById("device-split");
+  if (!host) {
+    const trip = document.querySelector(".status-trip");
+    if (!trip) return;
+    host = document.createElement("div");
+    host.id = "device-split";
+    host.style.marginTop = "6px";
+    host.style.paddingTop = "6px";
+    host.style.borderTop = "1px solid var(--bg-3)";
+    trip.appendChild(host);
+  }
+  const mac = byDev.mac || {};
+  const pc = byDev.pc || {};
+  const macToday = (mac.today || {}).cost_usd || 0;
+  const pcToday  = (pc.today  || {}).cost_usd || 0;
+  const macH1    = mac.burn_rate_usd_per_hour || 0;
+  const pcH1     = pc.burn_rate_usd_per_hour  || 0;
+  host.innerHTML = `
+    <div class="device-row"><span class="label"><span class="dev-badge dev-mac">mac</span> bugün</span><span class="val">${fmtMoney(macToday)} · ${fmtMoney(macH1)}/sa</span></div>
+    <div class="device-row"><span class="label"><span class="dev-badge dev-pc">pc</span> bugün</span><span class="val">${fmtMoney(pcToday)} · ${fmtMoney(pcH1)}/sa</span></div>
+  `;
 }
 
 function renderBlockEta(cw) {
@@ -371,29 +522,35 @@ function renderBlockEta(cw) {
   const p90 = cw.baseline_cost_p90 || 0;
   const remMin = Math.floor((cw.remaining_seconds || 0) / 60);
 
-  let kind, msg;
+  let kind, msg, tip;
   if (cw.block_already_past_p90) {
     kind = "bad";
-    msg = `🔴 Bu blokta <strong>${fmtMoney(used)}</strong> harcadın — P90 haftanın yoğun bloğunu (${fmtMoney(p90)}) <strong>çoktan aştın</strong>. ${remMin}dk daha var.`;
+    msg = `🔴 Blok <strong>${fmtMoney(used)}</strong> · P90 (${fmtMoney(p90)}) aşıldı`;
+    tip = `Bu blokta ${fmtMoney(used)} harcadın — P90 yoğun bloğunu (${fmtMoney(p90)}) çoktan aştın. ${remMin}dk daha var.`;
   } else if (cw.block_will_hit_p90) {
     const m = cw.block_minutes_to_p90;
     const eta = cw.block_eta_p90_iso ? new Date(cw.block_eta_p90_iso).toLocaleTimeString("tr-TR", {hour:"2-digit",minute:"2-digit"}) : "";
     kind = "bad";
-    msg = `🔴 Bu hızla <strong>${m}dk</strong> sonra (saat ${eta}) P90 blok limitine (${fmtMoney(p90)}) varıyorsun.`;
+    msg = `🔴 ${m}dk sonra P90 (${fmtMoney(p90)})`;
+    tip = `Bu hızla ${m}dk sonra (saat ${eta}) P90 blok limitine (${fmtMoney(p90)}) varıyorsun.`;
   } else if (cw.block_already_past_p50) {
     kind = "warn";
-    msg = `🟠 Bu blokta <strong>${fmtMoney(used)}</strong> · P50 medyan blokunu (${fmtMoney(p50)}) aştın, P90 (${fmtMoney(p90)})'a kadar boş alan var.`;
+    msg = `🟠 Blok <strong>${fmtMoney(used)}</strong> · P50 (${fmtMoney(p50)}) aşıldı`;
+    tip = `P50 medyan blokunu (${fmtMoney(p50)}) aştın, P90 (${fmtMoney(p90)})'a kadar boş alan var.`;
   } else if (cw.block_will_hit_p50) {
     const m = cw.block_minutes_to_p50;
     const eta = cw.block_eta_p50_iso ? new Date(cw.block_eta_p50_iso).toLocaleTimeString("tr-TR", {hour:"2-digit",minute:"2-digit"}) : "";
     kind = "warn";
-    msg = `🟡 <strong>${m}dk</strong> sonra (saat ${eta}) medyan blok limitine (${fmtMoney(p50)}) varacaksın.`;
+    msg = `🟡 ${m}dk sonra P50 (${fmtMoney(p50)})`;
+    tip = `${m}dk sonra (saat ${eta}) medyan blok limitine (${fmtMoney(p50)}) varacaksın.`;
   } else {
     kind = "good";
-    msg = `🟢 Bu blokta <strong>${fmtMoney(used)}</strong> · sakin tempodasın (medyan ${fmtMoney(p50)}, yoğun ${fmtMoney(p90)}).`;
+    msg = `🟢 Blok <strong>${fmtMoney(used)}</strong> · sakin`;
+    tip = `Sakin tempodasın (medyan ${fmtMoney(p50)}, yoğun ${fmtMoney(p90)}).`;
   }
   el.className = "trip-line trip-block " + kind;
   el.innerHTML = msg;
+  el.title = tip;
 }
 
 function renderWeeklyCap(wc) {
@@ -413,66 +570,45 @@ function renderWeeklyCap(wc) {
   const dot = kind === "bad" ? "🔴" : kind === "warn" ? "🟡" : "🟢";
   el.className = "trip-line trip-week " + kind;
   el.innerHTML =
-    `${dot} Bu hafta <strong>${fmtMoney(recent)}</strong> · senin P95 haftan <strong>${fmtMoney(p95)}</strong> · <strong>%${pct.toFixed(0)}</strong> (${label})` +
-    ` <span class="dim">${deltaSign}${Math.abs(wc.delta_pct).toFixed(0)}% vs önceki hafta</span>`;
+    `${dot} Hafta <strong>${fmtMoney(recent)}</strong> · P95 ${fmtMoney(p95)} · <strong>%${pct.toFixed(0)}</strong> ` +
+    `<span class="dim">${deltaSign}${Math.abs(wc.delta_pct).toFixed(0)}%</span>`;
+  el.title = `Bu hafta ${fmtMoney(recent)} · senin P95 haftan ${fmtMoney(p95)} · %${pct.toFixed(0)} (${label}) · ${deltaSign}${Math.abs(wc.delta_pct).toFixed(0)}% vs önceki hafta`;
 }
 
 // --- 3. Recent activity (banka ekstresi) ----------------------------------
 
 function renderRecent(report) {
-  // Show only sessions whose LAST turn was within the last 2 hours — anything
-  // older isn't really "Son aktivite", it's history. Filter out <synthetic>
-  // aggregator rollups too.
-  const now = Date.now();
-  const TWO_HOURS = 2 * 60 * 60 * 1000;
-  const sessions = (report.by_session || [])
-    .filter(s => {
-      if (!s.ended_at) return false;
-      const endMs = new Date(s.ended_at).getTime();
-      if (now - endMs > TWO_HOURS) return false;
-      // Only drop the session if its CURRENT turn is a <synthetic> placeholder.
-      // Earlier filter ("ever touched synthetic") was too aggressive — it killed
-      // real multi-agent sessions whose lifetime model list includes synthetic
-      // sub-agent markers but whose actual active turn is a real model.
-      const latest = String(s.model_latest || "");
-      if (latest.startsWith("<")) return false;
-      return true;
-    })
-    .slice(0, 15);
+  // 2026-05-29 (Cihan paradigm v4): "anlık her turne göre, toplayarak gitmesin".
+  // Her satır = bir assistant TURN (mesaj). Oturum başına aggregate YOK.
+  // Aynı oturumun 5 turn'ü = 5 ayrı satır. Backend `recent_turns` field'ını
+  // veriyor — son 30 record, chronological desc, her birinin effective tokens.
+  const turns = (report.recent_turns || []).filter(t => !(String(t.model || "")).startsWith("<"));
   const tbody = document.querySelector("#recent-table tbody");
-  if (!sessions.length) {
-    tbody.innerHTML = `<tr><td colspan="6" class="dim">Son 2 saatte aktivite yok.</td></tr>`;
+  if (!turns.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="dim">Henüz aktivite yok.</td></tr>`;
     return;
   }
-  tbody.innerHTML = sessions.map(s => {
-    // Use model_latest — the model on the most-recent turn of this session.
-    // That keeps Son aktivite consistent with the live panel: if Haiku was
-    // only used 30 min into the session and Opus took over at the end, we
-    // show Opus here (matching what's "actually active now").
-    const latest = s.model_latest && !String(s.model_latest).startsWith("<")
-      ? s.model_latest
-      : (s.models || []).filter(m => !String(m).startsWith("<")).slice(-1)[0] || "";
-    const fam = modelToFamily(latest);
-    const pills = latest
-      ? `<span class="pill ${fam}">${modelDisplay(latest)}</span>`
-      : "";
-    // Intent: first user prompt of the session. Trimmed for display.
-    const intent = (s.intent || "").replace(/\s+/g, " ").trim();
-    const intentHtml = intent
-      ? `<div class="intent-text" title="${escapeHtml(intent)}">${escapeHtml(intent.length > 90 ? intent.slice(0, 90) + "…" : intent)}</div>`
-      : "";
-    // Show ended_at (last turn) — "most recent activity", not session start.
+  tbody.innerHTML = turns.map(t => {
+    const model = t.model || "";
+    const fam = modelToFamily(model);
+    const dev = t.device || "mac";
+    const devBadge = `<span class="dev-badge dev-${dev}">${dev}</span>`;
+    const pills = model ? `<span class="pill ${fam}">${modelDisplay(model)}</span>` : "";
+    const eff = t.effective_tokens;
+    const cost = t.cost_usd;
+    const cacheRate = t.cache_hit_rate;
+    const sidShort = (t.session_id || "").slice(0, 8);
     return `
       <tr>
-        <td>${relTime(s.ended_at || s.started_at)}</td>
+        <td>${relTime(t.timestamp)}</td>
         <td class="cell-project">
-          <div>${escapeHtml(s.project_label)}</div>
-          ${intentHtml}
+          <div>${escapeHtml(t.project_label)} ${devBadge}</div>
+          <div class="intent-text dim" title="session ${escapeHtml(t.session_id || "")}">sid ${escapeHtml(sidShort)}</div>
         </td>
         <td>${pills}</td>
-        <td class="num">${fmtInt(s.total_tokens)}</td>
-        <td class="num">${fmtMoney(s.cost_usd)}</td>
-        <td class="num">${fmtPct(s.cache_hit_rate)}</td>
+        <td class="num">${fmtInt(eff)}</td>
+        <td class="num">${fmtMoney(cost)}</td>
+        <td class="num">${fmtPct(cacheRate)}</td>
       </tr>
     `;
   }).join("");
@@ -593,12 +729,17 @@ function renderProjects(report) {
   const projects = (report.by_project || []).slice(0, 8);
   const tbody = document.querySelector("#projects-table tbody");
   if (!projects.length) {
-    tbody.innerHTML = `<tr><td colspan="2" class="dim">Proje yok</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="3" class="dim">Proje yok</td></tr>`;
     return;
   }
+  // 2026-05-28 (Cihan paradigm): "EN PAHALI PROJELER · LİFETİME"
+  // panelinde token toplamı da göster — Son aktivite paneli artık
+  // gerçek-zamanlı delta gösterdiği için lifetime totals'a buranın
+  // ihtiyacı doğdu. Kolon order: PROJE | TOKEN | $.
   tbody.innerHTML = projects.map(p => `
     <tr>
       <td>${escapeHtml(p.project_label)}</td>
+      <td class="num">${fmtInt(p.total_tokens || 0)}</td>
       <td class="num">${fmtMoney(p.cost_usd)}</td>
     </tr>
   `).join("");
@@ -841,14 +982,24 @@ function renderFooter(report) {
 // --- Refresh loop ----------------------------------------------------------
 
 async function refresh(force = false) {
+  // In-flight guard — Codex raporu ilk yüklemede yavaş olabilir (büyük veri).
+  // Üst üste binen auto-refresh'ler isteği abort ettirip "Failed to fetch"
+  // veriyordu. Aynı anda tek istek: bir tanesi uçarken yenisini atlıyoruz.
+  if (window.__refreshInFlight && !force) return;
+  window.__refreshInFlight = true;
   try {
     const report = await loadReport(force);
+    // Stale-source guard: kullanıcı fetch sırasında kaynağı değiştirdiyse
+    // (ccmeter↔codex_meter), gecikmeli gelen eski kaynağın raporunu UYGULAMA.
+    if ((report._meta?.source || "claude") !== window.__source) return;
     window.__lastReport = report;            // cached for picker-triggered re-renders
     render(report);
     window.__lastRefreshMs = Date.now();
   } catch (err) {
     console.error(err);
     document.getElementById("last-updated").textContent = "load failed: " + err.message;
+  } finally {
+    window.__refreshInFlight = false;
   }
 }
 
@@ -950,7 +1101,46 @@ function start() {
       document.querySelectorAll("#burn-window-picker button").forEach(b => {
         b.classList.toggle("active", b.dataset.h === h);
       });
-      if (window.__lastReport) renderSpeedometer(window.__lastReport);
+      if (window.__lastReport) renderSpeedometer(window.__lastReport, { device: "mac" });
+    });
+  });
+
+  // PC speedometer window picker (ayrı localStorage key).
+  const savedPc = localStorage.getItem("ccmeter_burn_hours_pc") || "2";
+  document.querySelectorAll("#burn-window-picker-pc button").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.h === savedPc);
+    btn.addEventListener("click", () => {
+      const h = btn.dataset.h;
+      localStorage.setItem("ccmeter_burn_hours_pc", h);
+      document.querySelectorAll("#burn-window-picker-pc button").forEach(b => {
+        b.classList.toggle("active", b.dataset.h === h);
+      });
+      if (window.__lastReport) renderSpeedometer(window.__lastReport, {
+        device: "pc", svgId: "speedo-svg-pc", zoneId: "speedo-zone-pc",
+        pickerId: "burn-window-picker-pc", lsKey: "ccmeter_burn_hours_pc",
+      });
+    });
+  });
+
+  // Source toggle (ccmeter = Claude / codex_meter = Codex). Switching
+  // changes window.__source, persists it, and force-refetches all panels.
+  document.querySelectorAll("#source-toggle button").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.source === window.__source);
+    btn.addEventListener("click", () => {
+      const src = btn.dataset.source;
+      if (src === window.__source) return;
+      window.__source = src;
+      localStorage.setItem("ccmeter_source", src);
+      document.querySelectorAll("#source-toggle button").forEach(b => {
+        b.classList.toggle("active", b.dataset.source === src);
+      });
+      // Codex ilk yükleme yavaş olabilir (cache build) — kullanıcıya işaret.
+      const du = document.getElementById("last-updated");
+      if (du) du.textContent = (src === "codex" ? "codex_meter" : "ccmeter") + " yükleniyor…";
+      // Kullanıcı eylemi — in-flight guard'ı sıfırla ki kaynak değişimi anında
+      // fetch tetiklesin (eski in-flight fetch stale-source guard'la elenecek).
+      window.__refreshInFlight = false;
+      refresh(false);
     });
   });
 

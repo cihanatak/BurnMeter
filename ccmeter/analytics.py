@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from .parser import UsageRecord
-from .pricing import estimate_cost_usd, family_from_model
+from .pricing import estimate_cost_usd, family_from_model, effective_tokens
 
 
 # Anthropic plan token budgets per 5-hour window (approximate; Anthropic
@@ -179,8 +179,20 @@ def aggregate_by_project(records: Iterable[UsageRecord]) -> list[dict]:
 def aggregate_by_session(
     records: Iterable[UsageRecord],
     user_intents: Optional[dict[str, str]] = None,
+    recent_cutoff: Optional[datetime] = None,
 ) -> list[dict]:
+    """Session başına aggregation.
+
+    `recent_cutoff` verilirse her session item'ına ek olarak
+    `recent_window_tokens` / `recent_window_cost_usd` / `recent_window_messages`
+    field'ları eklenir — bu, sadece `r.timestamp >= recent_cutoff` olan
+    record'ların subset toplamıdır. Cihan'ın paradigm itirazı (2026-05-28):
+    "SON AKTİVİTE" panelinde 5 milyar token görünüyordu çünkü session
+    LIFETIME toplam render ediliyordu. Recent-window subset gerçek "son
+    aktivite" yakımını verir — UI bu yeni field'ı render eder.
+    """
     buckets: dict[str, Totals] = defaultdict(Totals)
+    recent_buckets: dict[str, Totals] = defaultdict(Totals)
     meta: dict[str, dict] = {}
     for r in records:
         sid = r.session_id or "unknown"
@@ -194,6 +206,11 @@ def aggregate_by_session(
                 "models": set(),
                 "model_latest": r.model,        # model of the latest record
                 "_latest_ts": r.timestamp,      # internal: track the latest record's ts
+                # LAST TURN snapshot — gerçek "son aktivite" tek bir turn'de
+                # ne yakıldığını gösterir (Cihan paradigm 2026-05-29:
+                # "34M token harcamak diye bişi var mı" — 2h window aggregate
+                # değil, tek son turn'ün fresh token'ı lazım).
+                "_last_record": r,
             }
         # Track the model on the latest record so the UI can show "what was
         # actually running at the end" instead of every model that ever
@@ -201,18 +218,21 @@ def aggregate_by_session(
         if r.timestamp > meta[sid]["_latest_ts"]:
             meta[sid]["_latest_ts"] = r.timestamp
             meta[sid]["model_latest"] = r.model
+            meta[sid]["_last_record"] = r
         meta[sid]["ended_at"] = max(meta[sid]["ended_at"], r.timestamp)
         meta[sid]["started_at"] = min(meta[sid]["started_at"], r.timestamp)
         if r.model:
             meta[sid]["models"].add(r.model)
         buckets[sid].add(r)
+        if recent_cutoff is not None and r.timestamp >= recent_cutoff:
+            recent_buckets[sid].add(r)
 
     intents = user_intents or {}
     out = []
     for sid, t in buckets.items():
         m = meta[sid]
         duration = (m["ended_at"] - m["started_at"]).total_seconds()
-        out.append({
+        item = {
             **{k: v for k, v in m.items() if not k.startswith("_")},
             "started_at": m["started_at"].isoformat(),
             "ended_at": m["ended_at"].isoformat(),
@@ -220,7 +240,44 @@ def aggregate_by_session(
             "models": sorted(m["models"]),
             "intent": intents.get(sid, ""),    # first user prompt (the goal)
             **t.to_dict(),
-        })
+        }
+        if recent_cutoff is not None:
+            rt = recent_buckets[sid].to_dict()
+            # Sadece UI'nin ihtiyacı olan 4 alan — recent_window_* prefix
+            # ile session lifetime toplamlarıyla isim çakışması yok.
+            item["recent_window_tokens"]   = rt["total_tokens"]
+            item["recent_window_cost_usd"] = rt["cost_usd"]
+            item["recent_window_messages"] = rt["messages"]
+            item["recent_window_cache_hit_rate"] = rt["cache_hit_rate"]
+        # LAST TURN — son tek mesaj/turn'ün token'ları (Cihan paradigm
+        # 2026-05-29 v3: "saf net temiz safi limitten düşen token").
+        #
+        # last_turn_effective_tokens — DOĞRU "yakım" sayısı. Anthropic 4
+        # kategoriyi farklı oranda ücretlendirir, plan limiti de cost-weighted
+        # sayar. Ham total cache_read'i 10x şişirir (yanlış). Input-equivalent:
+        #     input + output*5 + cache_creation*1.25 + cache_read*0.10
+        # Oranlar Opus/Sonnet/Haiku için identik (5x out, 1.25x cw, 0.10x cr).
+        #
+        # last_turn_tokens = sadece input+output (fresh); referans.
+        # last_turn_total_tokens = 4'ünün ham toplamı; "Anthropic ne raporladı".
+        # last_turn_cost_usd = gerçek USD.
+        lr = m["_last_record"]
+        lt = Totals()
+        lt.add(lr)
+        ltd = lt.to_dict()
+        item["last_turn_tokens"]            = lr.input_tokens + lr.output_tokens
+        item["last_turn_total_tokens"]      = ltd["total_tokens"]
+        item["last_turn_effective_tokens"]  = effective_tokens(
+            lr.model,
+            input_tokens=lr.input_tokens,
+            output_tokens=lr.output_tokens,
+            cache_read_tokens=lr.cache_read_tokens,
+            cache_creation_tokens=lr.cache_creation_tokens,
+        )
+        item["last_turn_cost_usd"]       = ltd["cost_usd"]
+        item["last_turn_cache_hit_rate"] = ltd["cache_hit_rate"]
+        item["last_turn_iso"]            = lr.timestamp.isoformat()
+        out.append(item)
     # Sort by *ended_at* (last turn) so "most recently active" lands on top —
     # a session that started 4h ago but had a turn 30sec ago is still active.
     out.sort(key=lambda x: x["ended_at"], reverse=True)
@@ -922,6 +979,7 @@ def fuel_efficiency(
     daily: list[dict],
     git_attr: dict,
     totals_dict: dict,
+    tool_label: str = "Claude Code",
 ) -> dict:
     """The 'you vs spec sheet' panel.
 
@@ -1066,7 +1124,7 @@ def fuel_efficiency(
         headline_kind = "good"
         headline_label = "Power user · efficient unit economics"
         headline_detail = (
-            f"You're using Claude Code ~{hours_stats['hours_per_active_day']}h/day "
+            f"You're using {tool_label} ~{hours_stats['hours_per_active_day']}h/day "
             f"(vs typical ~2h). Your per-commit ({fmtUsd(you_median_commit)}), "
             f"per-turn ({fmtUsd(you_per_turn)}), and cache hit ({cache_rate*100:.1f}%) "
             f"are all normal or better. Your high daily spend is from volume, not waste."
@@ -1400,7 +1458,7 @@ def forecast(records: list[UsageRecord], daily: list[dict]) -> dict:
     # which model is eating most of the dollars-per-hour.
     burn_rates_by_hours = {}
     burn_rates_by_hours_by_model: dict[str, list[dict]] = {}
-    for hours in (1, 2, 4, 6):
+    for hours in (0.25, 1, 2, 4, 6):
         c = now - timedelta(hours=hours)
         cost = 0.0
         per_model: dict[str, float] = defaultdict(float)
@@ -1545,21 +1603,157 @@ def build_report(
     plan: Optional[str] = None,
     user_intents: Optional[dict[str, str]] = None,
     error_events: Optional[list[dict]] = None,
+    source: str = "claude",
 ) -> dict:
     """One call → everything the dashboard needs."""
+    tool_label = "Codex" if source == "codex" else "Claude Code"
     daily = aggregate_by_day(records)
     windows = detect_billing_windows(records)
     plan_guess = infer_plan(windows)
     chosen_plan = plan or plan_guess["guess"]
     totals_dict = aggregate_total(records).to_dict()
     git_attr = attribute_to_commits(records, since_days=14)
+    # 2026-05-28 (Cihan paradigm): "SON AKTİVİTE" panelinde session
+    # lifetime toplamı (5 milyar token) yerine yalnızca son 2 saatte
+    # yakılan token'ı göster. recent_cutoff aggregate_by_session'a
+    # geçirilirse her item'a recent_window_* field'ları eklenir.
+    recent_cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+
+    # RECENT TURNS — Cihan paradigm 2026-05-29 v5: 1 TURN = 1 USER MESAJI +
+    # tüm assistant cevap akışı (thinking + tool calls + final text).
+    # JSONL'de bir cevabım 3-5 assistant record üretir (her tool call ayrı
+    # record); hepsi aynı turn_id'yi paylaşır (parser.py'da ancestor
+    # zincirinden user msg uuid çekildi). recent_turns artık turn_id
+    # bazında AGGREGATE — 1 user mesajı = 1 satır.
+    # Her satır = o turn'de yakılan tüm token'ların saf net (cost-weighted)
+    # toplamı. Cache_read maliyeti input'un 0.10x'i (1/10), output 5x,
+    # cache_creation 1.25x. Cihan: "anlık her turne göre, toplayarak gitmesin".
+    turn_buckets: dict[str, dict] = {}
+    for r in records:
+        tid = r.turn_id or r.message_id or r.uuid
+        if not tid:
+            continue
+        b = turn_buckets.get(tid)
+        if b is None:
+            b = {
+                "turn_id": tid,
+                "session_id": r.session_id,
+                "project_label": r.project_label,
+                "model": r.model,
+                "device": getattr(r, "device", "mac"),
+                "last_ts": r.timestamp,
+                "totals": Totals(),
+                "eff": 0,
+                "records": 0,
+            }
+            turn_buckets[tid] = b
+        b["totals"].add(r)
+        # Pricing-aware effective (Claude output 5x, Codex gpt5 output 8x —
+        # her model kendi input fiyatına oranlanır).
+        b["eff"] += effective_tokens(
+            r.model,
+            input_tokens=r.input_tokens,
+            output_tokens=r.output_tokens,
+            cache_read_tokens=r.cache_read_tokens,
+            cache_creation_tokens=r.cache_creation_tokens,
+        )
+        b["records"] += 1
+        if r.timestamp > b["last_ts"]:
+            b["last_ts"] = r.timestamp
+            b["model"] = r.model       # use the latest record's model
+
+    sorted_turns = sorted(turn_buckets.values(), key=lambda b: b["last_ts"], reverse=True)
+    recent_turns_data = []
+    for b in sorted_turns[:30]:
+        td = b["totals"].to_dict()
+        recent_turns_data.append({
+            "timestamp":       b["last_ts"].isoformat(),
+            "turn_id":         b["turn_id"],
+            "session_id":      b["session_id"],
+            "project_label":   b["project_label"],
+            "model":           b["model"],
+            "device":          b["device"],
+            "effective_tokens": b["eff"],
+            "total_tokens":    td["total_tokens"],
+            "input_tokens":    td["input_tokens"],
+            "output_tokens":   td["output_tokens"],
+            "cache_creation_tokens": td["cache_creation_tokens"],
+            "cache_read_tokens":     td["cache_read_tokens"],
+            "cost_usd":        td["cost_usd"],
+            "cache_hit_rate":  td["cache_hit_rate"],
+            "assistant_record_count": b["records"],
+        })
+
+    # BY DEVICE — Cihan paradigm 2026-05-29: Mac vs PC ayrı sayaç.
+    # Her device için lifetime + son 1 saat + bugün totals.
+    now_utc = datetime.now(timezone.utc)
+    today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+    h1_cutoff = now_utc - timedelta(hours=1)
+    # Optimize: tek pass — her record için cihazına ve hangi bucket'lara
+    # düştüğüne göre cost ekle. Önceki implementasyon her cihaz × 5 hour
+    # için ayrı iter ediyordu → 10× iterasyon. Bu 366MB+ PC JSONL'lerle
+    # 18s API gecikmesi yaratıyordu.
+    # Key format: "0.25", "1", "2", "4", "6" — frontend butonları data-h ile
+    # bu key'leri okuyor. Karma int+float liste tut, str(int(h)) if h.is_integer.
+    def _hk(h):
+        return str(int(h)) if float(h).is_integer() else str(h)
+    burn_hours_tuple = (0.25, 1, 2, 4, 6)
+    burn_cutoffs = {_hk(h): (now_utc - timedelta(hours=h), float(h)) for h in burn_hours_tuple}
+    by_device_totals: dict[str, dict] = {}
+    for dev in ("mac", "pc"):
+        by_device_totals[dev] = {
+            "lifetime": Totals(),
+            "today":    Totals(),
+            "h1":       Totals(),
+            "burn_cost": {k: 0.0 for k in burn_cutoffs},
+        }
+    for r in records:
+        dev = getattr(r, "device", "mac")
+        if dev not in by_device_totals:
+            continue
+        slot = by_device_totals[dev]
+        slot["lifetime"].add(r)
+        if r.timestamp >= today_start:
+            slot["today"].add(r)
+        if r.timestamp >= h1_cutoff:
+            slot["h1"].add(r)
+        cost = None
+        for k, (cutoff, _hf) in burn_cutoffs.items():
+            if r.timestamp >= cutoff:
+                if cost is None:
+                    cost = estimate_cost_usd(
+                        r.model,
+                        input_tokens=r.input_tokens,
+                        output_tokens=r.output_tokens,
+                        cache_read_tokens=r.cache_read_tokens,
+                        cache_creation_tokens=r.cache_creation_tokens,
+                    )
+                slot["burn_cost"][k] += cost
+    # Finalize
+    for dev in ("mac", "pc"):
+        slot = by_device_totals[dev]
+        h1_d = slot["h1"]
+        burn_buckets = {k: round(slot["burn_cost"][k] / burn_cutoffs[k][1], 2)
+                        for k in burn_cutoffs}
+        by_device_totals[dev] = {
+            "lifetime": slot["lifetime"].to_dict(),
+            "today":    slot["today"].to_dict(),
+            "h1":       h1_d.to_dict(),
+            "burn_rate_usd_per_hour": round(h1_d.cost_usd, 4),
+            "burn_rates_by_hours": burn_buckets,
+        }
+
     return {
+        "recent_turns": recent_turns_data,
+        "by_device": by_device_totals,
         "totals": totals_dict,
         "daily": daily,
         "by_model": aggregate_by_model(records),
         "by_model_full": aggregate_by_specific_model(records),
         "by_project": aggregate_by_project(records),
-        "by_session": aggregate_by_session(records, user_intents)[:200],  # cap for UI
+        "by_session": aggregate_by_session(
+            records, user_intents, recent_cutoff=recent_cutoff,
+        )[:200],  # cap for UI
         "by_tool": aggregate_by_tool(records),
         "windows": windows[-30:],                            # last 30 windows
         "current_window": current_window_status(windows, chosen_plan),
@@ -1569,7 +1763,7 @@ def build_report(
         "baseline": baseline_stats(records),
         "anomalies": daily_anomalies(daily),
         "git_attribution": git_attr,
-        "fuel_efficiency": fuel_efficiency(records, daily, git_attr, totals_dict),
+        "fuel_efficiency": fuel_efficiency(records, daily, git_attr, totals_dict, tool_label=tool_label),
         "weekly_cap": weekly_cap_status(records, daily),
         "errors": errors_summary(error_events or [], lookback_hours=24),
         "daily_burn_rates": daily_burn_rates(records, days_back=90),

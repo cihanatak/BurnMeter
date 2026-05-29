@@ -238,8 +238,14 @@ def cmd_sessions(args):
 
 def cmd_serve(args):
     from .server import serve
+    extras = [Path(p).expanduser() for p in (args.extra_projects_dir or [])]
+    codex_extras = [Path(p).expanduser() for p in (getattr(args, "codex_extra_dir", []) or [])]
+    codex_dir = Path(args.codex_dir).expanduser() if getattr(args, "codex_dir", None) else None
     serve(host=args.host, port=args.port,
-          projects_dir=Path(args.projects_dir), ttl_seconds=args.ttl)
+          projects_dir=Path(args.projects_dir), ttl_seconds=args.ttl,
+          extra_roots=extras,
+          codex_dir=codex_dir,
+          codex_extra_roots=codex_extras)
     return 0
 
 
@@ -265,6 +271,13 @@ def main(argv=None):
     p_serve.add_argument("--host", default="127.0.0.1")
     p_serve.add_argument("--port", type=int, default=8765)
     p_serve.add_argument("--ttl", type=int, default=15)
+    p_serve.add_argument("--extra-projects-dir", action="append", default=[],
+                         help="ek Claude JSONL dizinleri (PC Syncthing mirror'ı vb.). "
+                              "Birden çok için flag'i tekrarla.")
+    p_serve.add_argument("--codex-dir", default=None,
+                         help="Codex sessions kökü (default ~/.codex/sessions)")
+    p_serve.add_argument("--codex-extra-dir", action="append", default=[],
+                         help="ek Codex sessions dizinleri (PC mirror'ı vb.).")
 
     args = parser.parse_args(argv)
 
