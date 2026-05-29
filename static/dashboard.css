@@ -118,7 +118,8 @@ header {
 
 /* ---------- Layout grid ---------- */
 main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
-  display:grid; grid-template-columns: repeat(12, 1fr); gap: var(--gap); }
+  display:grid; grid-template-columns: repeat(12, 1fr); gap: var(--gap);
+  align-items: start; }   /* kartlar içeriğe göre — boş kart alanı yok */
 .col-3{grid-column:span 3} .col-4{grid-column:span 4} .col-5{grid-column:span 5}
 .col-6{grid-column:span 6} .col-7{grid-column:span 7} .col-8{grid-column:span 8}
 .col-12{grid-column:span 12}

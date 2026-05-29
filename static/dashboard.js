@@ -254,8 +254,20 @@ function renderLimits(rep, isCodex) {
        <div class="meter-row"><span class="meter-name">haftalık</span>
         <div class="meter-track"><div class="meter-fill ${wkc}" style="width:${wkPct}%"></div></div>
         <span class="meter-pct ${wkc}">%${Math.round(wkPct)}</span>
-        <span class="meter-reset"></span></div>
-       <div class="dim" style="font-size:11px;margin-top:10px">Bu blokta ${fmtMoney(blockUsed)} · P50 ${fmtMoney(cw.baseline_cost_p50 || 0)} · P90 ${fmtMoney(p90)}. Claude rate-limit %'si API'de açık değil — kişisel P90/P95 baz alınır.</div>`;
+        <span class="meter-reset"></span></div>` +
+      (() => {
+        const vk = cw.verdict_kind === "bad" ? "bad" : cw.verdict_kind === "warn" ? "warn" : "good";
+        const proj = cw.projected_close_cost;
+        const eta = cw.block_eta_p50_iso && cw.block_will_hit_p50
+          ? ` · P50'ye ~${cw.block_minutes_to_p50}dk` : "";
+        return `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:14px;padding-top:12px;border-top:1px solid var(--border-subtle)">
+          <div><div class="dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.04em">blok projeksiyonu</div>
+            <div class="num" style="font-size:17px;color:var(--text-1);margin-top:3px">${proj != null ? "~" + fmtMoney0(proj) + " kapanır" : "—"}</div></div>
+          <div style="text-align:right"><div class="dim" style="font-size:11px;text-transform:uppercase;letter-spacing:.04em">tempo</div>
+            <div class="num ${vk === "bad" ? "" : ""}" style="font-size:13px;color:var(--${vk});margin-top:3px">${esc(cw.verdict_label || "—")}${eta}</div></div>
+        </div>
+        <div class="dim" style="font-size:11px;margin-top:10px;line-height:1.5">Bu blokta ${fmtMoney(blockUsed)} · P50 ${fmtMoney(cw.baseline_cost_p50 || 0)} · P90 ${fmtMoney(p90)}. Claude rate-limit %'si API'de açık değil — kişisel P90/P95 baz alınır.</div>`;
+      })();
   }
 }
 
