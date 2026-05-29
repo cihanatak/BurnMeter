@@ -26,66 +26,72 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
 class _Cache:
-    """Re-parse JSONL no more than once every `ttl_seconds`.
+    """Memoized report cache backed by a short-lived BUILD WORKER subprocess.
 
-    `loader` is a callable returning (records, stats, intents, errors). Default
-    loads Claude data; codex_meter passes a Codex loader. This keeps the
-    analytics pipeline source-agnostic — same build_report on either record set.
+    RAM disiplini (commercial-grade): the heavy load+build (~half-a-million
+    records, ~800MB transient) runs in `python -m ccmeter._worker`, which prints
+    the report JSON and EXITS — so the OS reclaims that memory immediately. This
+    long-running server only ever caches the small report JSON (~0.5MB). RSS
+    stays tiny and bounded; no streaming-aggregate rewrite, zero logic change.
+
+    `worker_config` is the JSON config sent to the worker (source + dirs).
+    Falls back to the in-process `loader`+`build_fn` if the worker fails.
     """
 
     def __init__(self, projects_dir: Path, ttl_seconds: int = 15,
-                 extra_roots: Optional[list[Path]] = None, loader=None):
+                 extra_roots: Optional[list[Path]] = None, loader=None,
+                 worker_config: Optional[dict] = None):
         self.projects_dir = projects_dir
         self.extra_roots = extra_roots or []
         self.ttl = ttl_seconds
+        self.worker_config = worker_config
         self._loader = loader or (
             lambda: load_records(self.projects_dir, extra_roots=self.extra_roots)
         )
         self._lock = threading.Lock()
-        self._records = None
-        self._stats = None
-        self._intents: dict[str, str] = {}
-        self._errors: list[dict] = []
-        self._loaded_at = 0.0
-        # Built-report memo — build_report is expensive on large record sets
-        # (Codex 525K records ≈ 16s). Cache the BUILT report for TTL so only
-        # the first request after expiry pays the cost; the rest are instant.
         self._report = None
         self._report_key = None
         self._report_at = 0.0
 
-    def get(self, force: bool = False):
-        with self._lock:
-            now = time.time()
-            if force or self._records is None or (now - self._loaded_at) > self.ttl:
-                self._records, self._stats, self._intents, self._errors = self._loader()
-                self._loaded_at = now
-                self._report = None   # records changed → invalidate report memo
-            return self._records, self._stats, self._loaded_at, self._intents, self._errors
+    def _run_worker(self) -> Optional[dict]:
+        """Spawn the build worker; return its report dict or None on failure."""
+        import subprocess
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "ccmeter._worker"],
+                input=json.dumps(self.worker_config or {}),
+                capture_output=True, text=True, timeout=180,
+            )
+            if proc.returncode != 0:
+                sys.stderr.write(f"[ccmeter] worker rc={proc.returncode}: {proc.stderr[:300]}\n")
+                return None
+            return json.loads(proc.stdout)
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError) as e:
+            sys.stderr.write(f"[ccmeter] worker failed: {e}\n")
+            return None
 
     def get_report(self, build_fn, key, force: bool = False):
-        """Return a memoized built report. build_fn(records, stats, intents,
-        errors) → report. Rebuilt when records reload or `key` changes.
-
-        RAM disiplini (commercial): rapor kurulduktan sonra ham record'lar
-        (yarım milyon+ obje) bellekte tutulmaz — atılır, sadece kompakt rapor
-        kalır. Bir sonraki TTL'de tekrar yüklenir. Aralarda RSS düşük kalır."""
+        """Return a memoized report. Built via worker subprocess (RAM-bounded)
+        when worker_config is set; else in-process. Memoized for `ttl` seconds."""
         now = time.time()
-        # Rapor hâlâ taze mi? Öyleyse record'lara HİÇ dokunma (reload etme) —
-        # bu sayede discard edilmiş record'lar gereksiz yere geri yüklenmez.
         if (not force and self._report is not None and self._report_key == key
                 and (now - self._report_at) <= self.ttl):
             return self._report
-        # Rebuild gerek: record'ları yükle, raporu kur, sonra record'ları at.
-        records, stats, loaded_at, intents, errors = self.get(force=force)
+
+        report = None
+        if self.worker_config is not None:
+            report = self._run_worker()   # heavy work in a process that then dies
+        if report is None:
+            # Fallback: in-process (records discarded right after to limit RSS).
+            records, stats, intents, errors = self._loader()
+            report = build_fn(records, stats, now, intents, errors)
+            records = None
+            import gc; gc.collect()
+
         with self._lock:
-            self._report = build_fn(records, stats, loaded_at, intents, errors)
+            self._report = report
             self._report_key = key
             self._report_at = time.time()
-            self._records = None      # ham record'ları bırak → RSS düşük kalsın
-            records = None
-            import gc
-            gc.collect()
             return self._report
 
 
@@ -119,6 +125,19 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
         if src == "codex" and codex_cache is not None:
             return codex_cache, "codex"
         return cache, "claude"
+
+    def build_for(source, plan, force=False):
+        """Cached report for a source (worker-backed). Used by /api/report
+        and /api/statusline so both share one RAM-bounded build per TTL."""
+        sel = codex_cache if (source == "codex" and codex_cache) else cache
+        def _build(records, stats, loaded_at, intents, error_events):
+            rep = build_report(records, plan=plan, user_intents=intents,
+                               error_events=error_events, source=source)
+            rep["_meta"] = {**stats, "source": source}
+            if source == "codex" and stats.get("rate_limits"):
+                rep["codex_rate_limits"] = stats["rate_limits"]
+            return rep
+        return sel.get_report(_build, key=(source, plan), force=force)
 
     class Handler(BaseHTTPRequestHandler):
         # Quieter than the default verbose logger.
@@ -157,8 +176,8 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
             # `statusLine.command` and shown live in the prompt. Returns
             # plain text by default, JSON if ?format=json.
             if path == "/api/statusline":
-                records, stats, loaded_at, intents, error_events = cache.get()
-                report = build_report(records, plan=None, user_intents=intents, error_events=error_events)
+                src = (qs.get("source", ["claude"])[0] or "claude").lower()
+                report = build_for(src, None)   # shared worker-backed cached report
                 cw = report.get("current_window") or {}
                 err = report.get("errors") or {}
                 fc = report.get("forecast") or {}
@@ -235,26 +254,17 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
             if path == "/api/report":
                 force = qs.get("refresh", ["0"])[0] == "1"
                 plan = (qs.get("plan", [None])[0] or None)
-                sel_cache, source = pick_cache(qs)
-
-                def _build(records, stats, loaded_at, intents, error_events):
-                    rep = build_report(records, plan=plan, user_intents=intents,
-                                       error_events=error_events, source=source)
-                    rep["_meta"] = {
-                        **stats, "source": source, "loaded_at": loaded_at,
-                        "version": __version__,
-                    }
-                    if source == "codex" and stats.get("rate_limits"):
-                        rep["codex_rate_limits"] = stats["rate_limits"]
-                    return rep
-
-                report = sel_cache.get_report(_build, key=(source, plan), force=force)
+                _, source = pick_cache(qs)
+                report = build_for(source, plan, force=force)
+                report.setdefault("_meta", {})
+                report["_meta"]["version"] = __version__
                 report["_meta"]["served_at"] = time.time()
                 _json_response(self, 200, report)
                 return
 
             if path == "/api/records.csv":
-                records, _, _, _, _ = cache.get()
+                # Export endpoint (rare) — load transiently, not held in server RAM.
+                records, _, _, _ = cache._loader()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/csv; charset=utf-8")
                 self.send_header(
@@ -299,16 +309,28 @@ def serve(host: str = "127.0.0.1", port: int = 8765,
           codex_dir: Optional[Path] = None,
           codex_extra_roots: Optional[list[Path]] = None) -> None:
     projects_dir = Path(projects_dir) if projects_dir else CLAUDE_PROJECTS_DIR
-    cache = _Cache(projects_dir, ttl_seconds=ttl_seconds, extra_roots=extra_roots)
+    cache = _Cache(
+        projects_dir, ttl_seconds=ttl_seconds, extra_roots=extra_roots,
+        worker_config={
+            "source": "claude",
+            "projects_dir": str(projects_dir),
+            "extra_roots": [str(r) for r in (extra_roots or [])],
+        },
+    )
 
-    # codex_meter — second source. Codex sessions are huge (16GB), so a longer
-    # TTL + the parser's own incremental (path,mtime,size) cache keep it cheap.
+    # codex_meter — second source. Codex sessions are huge (16GB+); the build
+    # worker isolates that memory in a short-lived process. Longer TTL too.
     codex_root = Path(codex_dir) if codex_dir else CODEX_SESSIONS_DIR
     codex_cache = _Cache(
         codex_root,
         ttl_seconds=max(ttl_seconds, 60),
         extra_roots=codex_extra_roots,
         loader=lambda: load_codex_records(codex_root, extra_roots=codex_extra_roots) + ([],),
+        worker_config={
+            "source": "codex",
+            "codex_dir": str(codex_root),
+            "codex_extra_roots": [str(r) for r in (codex_extra_roots or [])],
+        },
     )
 
     if not projects_dir.exists():
