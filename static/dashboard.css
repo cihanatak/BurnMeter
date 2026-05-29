@@ -192,6 +192,12 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
 .meter-pct.good{color:var(--good)} .meter-pct.warn{color:var(--warn)} .meter-pct.bad{color:var(--bad)}
 .meter-reset { font:500 10px/1 var(--font-mono); color: var(--text-4); width:84px; flex-shrink:0; }
 
+/* Burn-rate efficiency gauge — zone bar + marker ("çok mu yakıyor") */
+.burn-track { position:relative; height:10px; border-radius:var(--radius-full); margin:14px 0 6px; overflow:visible; }
+.burn-marker { position:absolute; top:-4px; width:3px; height:18px; border-radius:2px;
+  background:var(--text-1); box-shadow:0 0 0 2px var(--bg-surface); transition:left .5s cubic-bezier(.22,1,.36,1); }
+.burn-ticks { display:flex; justify-content:space-between; font:500 10px/1 var(--font-mono); color:var(--text-4); }
+
 /* ---------- Table ---------- */
 .tbl { width:100%; border-collapse:collapse; font-size:13px; }
 .tbl thead th { background: var(--bg-raised); font:600 11px/1 var(--font-sans); letter-spacing:.04em;

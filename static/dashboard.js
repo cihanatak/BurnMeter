@@ -164,34 +164,69 @@ function renderHero(rep, isCodex) {
   $("hero-stats").innerHTML = stats.map(s => `<div class="hero-stat"><div class="v">${s.v}</div><div class="l">${s.l}</div></div>`).join("");
 }
 
-// ---------- hero aside (şu an) ----------
+// ---------- burn-rate efficiency gauge ("çok mu yakıyorum? normalin neresinde?") ----------
+// Cihan paradigm: araba metaforu — bu araba çok mu yakıyor az mı? Referans
+// zone'larına (tipik/yoğun/ağır) göre konum + "normalinin Nx hızı" verdict.
 function renderHeroAside(rep, isCodex) {
   const fc = rep.forecast || {};
   const cw = rep.current_window || {};
-  $("aside-title").firstChild.textContent = "Şu an ";
-  $("aside-sub").textContent = isCodex ? "Codex" : "Claude Code";
-  const rows = [];
-  // projected EOD
-  if (fc.today?.projected_eod != null) rows.push(["Gün sonu tahmini", fmtMoney0(fc.today.projected_eod)]);
-  // 5h window remaining
-  if (cw.active) {
-    const m = Math.floor((cw.remaining_seconds || 0) / 60);
-    rows.push(["5-saat pencere", (m >= 60 ? `${Math.floor(m / 60)}sa ${m % 60}dk` : `${m}dk`) + " kaldı"]);
-  }
-  // weekly cap (notional)
-  const wc = rep.weekly_cap || {};
-  if (wc.rolling_7d_cost != null) rows.push(["Bu hafta", fmtMoney0(wc.rolling_7d_cost) + (isCodex ? " (notional)" : "")]);
-  // active models
-  const live = (rep.live_active_models_by_window || {})["60"] || {};
-  if (live.models && live.models.length) {
-    const top = live.models[0];
-    rows.push(["Aktif model", modelDisplay(top.model_id || top.model || "")]);
-  }
-  $("hero-aside-body").innerHTML = rows.map(([l, v]) =>
-    `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border-subtle)">
-      <span style="color:var(--text-3);font-size:12px">${l}</span>
-      <span class="num" style="color:var(--text-1);font-size:13px">${v}</span></div>`).join("")
-    || `<div class="empty">Aktif pencere yok</div>`;
+  const z = rep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25, max: 50 };
+  $("aside-title").firstChild.textContent = "Burn rate · şu an ";
+  $("aside-sub").textContent = "çok mu yakıyorsun?";
+
+  const rate = fc.burn_rate_per_hour_recent ?? cw.cost_per_hour ?? 0;
+  const max = z.max || (z.heavy * 1.5) || 50;
+  const pos = Math.max(2, Math.min(100, rate / max * 100));
+  // zone of current rate
+  let zoneCls, zoneWord;
+  if (rate >= z.heavy)        { zoneCls = "bad";  zoneWord = "ağır bölge"; }
+  else if (rate >= z.busy)    { zoneCls = "warn"; zoneWord = "yoğun bölge"; }
+  else if (rate >= z.typical) { zoneCls = "warn"; zoneWord = "normal üstü"; }
+  else                         { zoneCls = "good"; zoneWord = "sakin · verimli"; }
+  // segment stops as % of max
+  const tp = z.typical / max * 100, bp = z.busy / max * 100, hp = z.heavy / max * 100;
+  const ratio = cw.vs_baseline_ratio;
+  const verdict = cw.verdict_label || "";
+  const unit = isCodex ? "/sa<span class='dim' style='font-size:11px'> (notional)</span>" : "/sa";
+
+  const ratioTxt = (ratio != null && ratio > 0)
+    ? `normalinin <strong>${ratio.toFixed(1)}x</strong> hızında`
+    : (rate < z.typical ? "normalinin altında" : "");
+
+  $("hero-aside-body").innerHTML = `
+    <div style="display:flex;align-items:baseline;gap:8px">
+      <span class="num" style="font-size:30px;font-weight:600;color:var(--text-1)">${fmtMoney(rate)}</span>
+      <span class="dim" style="font-size:13px">${unit}</span>
+    </div>
+    <div class="meter-pct ${zoneCls}" style="font-size:12px;width:auto;text-align:left;margin-top:4px;font-family:var(--font-sans);font-weight:600">
+      ${zoneWord}${ratioTxt ? ` · <span style="font-weight:500">${ratioTxt}</span>` : ""}
+    </div>
+    <div class="burn-track" style="background:linear-gradient(90deg,
+        var(--good) 0%, var(--good) ${tp}%,
+        var(--warn) ${tp}%, var(--warn) ${bp}%,
+        #f0883e ${bp}%, #f0883e ${hp}%,
+        var(--bad) ${hp}%, var(--bad) 100%)">
+      <div class="burn-marker" style="left:${pos}%"></div>
+    </div>
+    <div class="burn-ticks">
+      <span>tipik ${fmtMoney0(z.typical)}</span>
+      <span>yoğun ${fmtMoney0(z.busy)}</span>
+      <span>ağır ${fmtMoney0(z.heavy)}</span>
+    </div>
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border-subtle)">
+      ${(() => {
+        const rows = [];
+        if (fc.today?.projected_eod != null) rows.push(["Gün sonu tahmini", fmtMoney0(fc.today.projected_eod)]);
+        if (cw.active) { const m = Math.floor((cw.remaining_seconds || 0) / 60);
+          rows.push(["5-saat pencere", (m >= 60 ? `${Math.floor(m/60)}sa ${m%60}dk` : `${m}dk`) + " kaldı"]); }
+        const live = (rep.live_active_models_by_window || {})["60"] || {};
+        if (live.models && live.models.length) rows.push(["Aktif model", modelDisplay(live.models[0].model_id || "")]);
+        return rows.map(([l, v]) =>
+          `<div style="display:flex;justify-content:space-between;padding:5px 0">
+            <span style="color:var(--text-3);font-size:12px">${l}</span>
+            <span class="num" style="color:var(--text-2);font-size:12px">${v}</span></div>`).join("");
+      })()}
+    </div>`;
 }
 
 // ---------- KPIs ----------
