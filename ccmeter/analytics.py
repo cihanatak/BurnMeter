@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from .parser import UsageRecord
-from .pricing import estimate_cost_usd, family_from_model, effective_tokens
+from .pricing import estimate_cost_usd, family_from_model, effective_tokens, price_for
 
 
 # Anthropic plan token budgets per 5-hour window (approximate; Anthropic
@@ -1598,6 +1598,46 @@ def errors_summary(error_events: list[dict], lookback_hours: int = 24) -> dict:
     }
 
 
+def cache_efficiency(by_model_full: list[dict]) -> dict:
+    """Cache-efficiency paneli — rakiplerin atladığı yüksek-sinyal metrik.
+
+    Cache read maliyeti input'un ~%10'u (90% indirim). "Cache olmasaydı bu
+    token'lar tam input fiyatından gidecekti" → tasarruf = cache_read ×
+    (input_rate − cache_read_rate). Per-model fiyatla gerçek $ hesaplanır.
+
+    Döndürür: hit_rate, cached_tokens, fresh_input_tokens, usd_on_cache (cache
+    read'in gerçek maliyeti), usd_saved (cache sayesinde kaçınılan), discount_pct
+    (cache'in toplam input-maliyetini ne kadar düşürdüğü), full_equiv_usd.
+    """
+    cached_tok = 0
+    fresh_in_tok = 0
+    usd_on_cache = 0.0
+    usd_saved = 0.0
+    for m in by_model_full:
+        mid = m.get("model_id") or ""
+        cr = int(m.get("cache_read_tokens") or 0)
+        fin = int(m.get("input_tokens") or 0)
+        p = price_for(mid)
+        cached_tok += cr
+        fresh_in_tok += fin
+        usd_on_cache += cr * p.cache_read_per_mtok / 1_000_000.0
+        # Cache olmasaydı: cr token tam input fiyatından
+        usd_saved += cr * (p.input_per_mtok - p.cache_read_per_mtok) / 1_000_000.0
+    denom = cached_tok + fresh_in_tok
+    hit_rate = (cached_tok / denom) if denom > 0 else 0.0
+    full_equiv = usd_on_cache + usd_saved        # cache yokken input-okuma maliyeti
+    discount_pct = (usd_saved / full_equiv) if full_equiv > 0 else 0.0
+    return {
+        "hit_rate": round(hit_rate, 4),
+        "cached_tokens": cached_tok,
+        "fresh_input_tokens": fresh_in_tok,
+        "usd_on_cache": round(usd_on_cache, 2),
+        "usd_saved": round(usd_saved, 2),
+        "discount_pct": round(discount_pct, 4),
+        "full_equiv_usd": round(full_equiv, 2),
+    }
+
+
 def build_report(
     records: list[UsageRecord],
     plan: Optional[str] = None,
@@ -1743,13 +1783,15 @@ def build_report(
             "burn_rates_by_hours": burn_buckets,
         }
 
+    bmf = aggregate_by_specific_model(records)
     return {
         "recent_turns": recent_turns_data,
         "by_device": by_device_totals,
         "totals": totals_dict,
+        "cache_efficiency": cache_efficiency(bmf),
         "daily": daily,
         "by_model": aggregate_by_model(records),
-        "by_model_full": aggregate_by_specific_model(records),
+        "by_model_full": bmf,
         "by_project": aggregate_by_project(records),
         "by_session": aggregate_by_session(
             records, user_intents, recent_cutoff=recent_cutoff,

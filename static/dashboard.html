@@ -2,194 +2,131 @@
 <html lang="tr">
 <head>
   <meta charset="utf-8" />
-  <title>ccmeter — Claude Code yakıt metresi</title>
+  <title>ccmeter — AI coding yakıt metresi</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260529i" />
-  <script>window.__CCMETER_BUILD="20260529d";</script>
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260530b" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
-  <script src="/static/dashboard.js?v=20260529i" defer></script>
+  <script src="/static/dashboard.js?v=20260530b" defer></script>
 </head>
 <body>
 
 <header>
-  <div class="header-title">
-    <span id="app-name">ccmeter</span> <span id="version" class="dim">…</span>
+  <div class="brand-mark">
+    <div class="brand-logo" id="brand-logo">◔</div>
+    <span class="brand-name" id="app-name">ccmeter</span>
+    <span class="brand-ver" id="version">…</span>
     <span class="source-toggle" id="source-toggle">
-      <button data-source="claude" class="active">ccmeter</button>
-      <button data-source="codex">codex_meter</button>
+      <button data-source="claude" class="active"><span class="dot"></span>Claude Code</button>
+      <button data-source="codex"><span class="dot"></span>Codex</button>
     </span>
   </div>
   <div class="header-meta">
-    <span id="data-source" class="dim">…</span>
-    <span id="last-updated" class="dim">…</span>
-    <span id="live-pulse" class="pulse" title="auto-refresh 10s"></span>
+    <span class="meta-txt" id="data-source">…</span>
+    <span class="meta-txt" id="last-updated">…</span>
+    <span class="live-dot live" id="live-dot" title="canlı"></span>
     <button id="refresh" title="şimdi yenile">↻</button>
   </div>
 </header>
 
 <main>
 
-  <!-- 1. THE ANSWER -->
-  <section class="hero neutral" id="hero">
-    <div class="hero-label" id="hero-label">…</div>
-    <div class="hero-detail" id="hero-detail">…</div>
-  </section>
-
-  <!-- 1.5 CODEX RATE LIMIT — Codex Pro'nun GERÇEK kısıtı (5h + haftalık).
-       Sadece codex_meter'da görünür. $ değil, plan limiti asıl bağlayıcı. -->
-  <section class="ratelimit-row" id="codex-ratelimit" style="display:none">
-    <div class="rl-title">CODEX PLAN LİMİTİ · <span class="dim" id="rl-plan">—</span></div>
-    <div class="rl-grid" id="rl-grid"></div>
-  </section>
-
-  <!-- 2. RIGHT NOW: 2x speedometer (mac + pc) + trip + live + models (5 col) -->
-  <section class="status-row status-row-5">
-    <div class="status-card status-speedo" data-card-id="speedo-mac">
-      <div class="status-cap">
-        <span class="dev-badge dev-mac">cihan-mac</span> Burn rate · saatte $
-        <span class="window-picker" id="burn-window-picker">
-          <button data-h="0.25">15dk</button>
-          <button data-h="1">1h</button>
-          <button data-h="2" class="active">2h</button>
-          <button data-h="4">4h</button>
-          <button data-h="6">6h</button>
-        </span>
+  <!-- ROW 1 — HERO: binding constraint + aside -->
+  <section class="card card-hero col-8" data-card="hero">
+    <div class="hero-grid">
+      <div class="ring" id="hero-ring" style="--p:0">
+        <div class="ring-inner">
+          <div class="ring-value" id="hero-ring-value">—</div>
+          <div class="ring-label" id="hero-ring-label">…</div>
+        </div>
       </div>
-      <svg id="speedo-svg" viewBox="0 0 400 270" preserveAspectRatio="xMidYMid meet"></svg>
-      <div class="status-bottom" id="speedo-zone">…</div>
-    </div>
-    <div class="status-card status-speedo" data-card-id="speedo-pc">
-      <div class="status-cap">
-        <span class="dev-badge dev-pc">cihan-pc</span> Burn rate · saatte $
-        <span class="window-picker" id="burn-window-picker-pc">
-          <button data-h="0.25">15dk</button>
-          <button data-h="1">1h</button>
-          <button data-h="2" class="active">2h</button>
-          <button data-h="4">4h</button>
-          <button data-h="6">6h</button>
-        </span>
-      </div>
-      <svg id="speedo-svg-pc" viewBox="0 0 400 270" preserveAspectRatio="xMidYMid meet"></svg>
-      <div class="status-bottom" id="speedo-zone-pc">…</div>
-    </div>
-    <div class="status-card status-trip" data-card-id="trip" style="flex:0.9">
-      <div class="status-cap">Bugün</div>
-      <div class="trip-big" id="trip-amount">$—</div>
-      <div class="trip-line" id="trip-line">…</div>
-      <div class="trip-line" id="trip-top-project">…</div>
-      <div class="trip-line" id="trip-top-session">…</div>
-      <div class="trip-line dim" id="trip-window">…</div>
-      <div class="trip-divider"></div>
-      <div class="trip-line trip-block" id="trip-block">…</div>
-      <div class="trip-line trip-week" id="trip-week">…</div>
-    </div>
-    <div class="status-card status-live" data-card-id="live">
-      <div class="status-cap">
-        Aktif modeller
-        <span class="window-picker" id="live-window-picker">
-          <button data-w="15">15dk</button>
-          <button data-w="60">1sa</button>
-          <button data-w="300">5sa</button>
-          <button data-w="1440" class="active">24sa</button>
-        </span>
-        <span class="pulse" style="width:6px;height:6px;vertical-align:middle;margin-left:6px"></span>
-      </div>
-      <div id="live-models-list"></div>
-      <div class="live-window-summary dim" id="live-window-summary">—</div>
-    </div>
-    <div class="status-card status-models" data-card-id="models">
-      <div class="status-cap">Model dağılımı · lifetime</div>
-      <table id="models-table">
-        <thead><tr>
-          <th>model</th><th class="num">turn</th><th class="num">$</th>
-        </tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </section>
-
-  <!-- 2.5 BEHAVIOR ROW: errors + tool mix -->
-  <section class="status-row" id="row-insight">
-    <div class="status-card" data-card-id="behavior">
-      <div class="status-cap">Davranış · son 24h hata pattern'leri</div>
-      <div class="bhv-headline" id="bhv-headline">…</div>
-      <div class="bhv-bars" id="bhv-bars"></div>
-      <div class="bhv-recent dim" id="bhv-recent"></div>
-    </div>
-    <div class="status-card" data-card-id="toolmix">
-      <div class="status-cap">Tool kullanımı · lifetime</div>
-      <div class="toolmix-headline" id="toolmix-headline">…</div>
-      <div class="toolmix-bars" id="toolmix-bars"></div>
-    </div>
-  </section>
-
-  <!-- 3. WHERE THE MONEY WENT -->
-  <section class="status-row">
-    <div class="status-card" id="card-recent" data-card-id="recent">
-      <div class="status-cap">Son aktivite · her satır 1 TURN (user msg + tüm cevap) — saf net</div>
-      <div class="scroll-recent">
-        <table id="recent-table">
-          <thead><tr>
-            <th>ne zaman</th><th>proje</th><th>model</th>
-            <th class="num">token</th><th class="num">$</th><th class="num">cache</th>
-          </tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-    <div class="status-card" id="card-projects" data-card-id="projects">
-      <div class="status-cap">En pahalı projeler · lifetime</div>
-      <div class="scroll-recent">
-        <table id="projects-table">
-          <thead><tr>
-            <th>proje</th><th class="num">token</th><th class="num">$</th>
-          </tr></thead>
-          <tbody></tbody>
-        </table>
+      <div>
+        <div class="hero-headline" id="hero-headline">…</div>
+        <div class="hero-detail" id="hero-detail">…</div>
+        <div class="hero-stats" id="hero-stats"></div>
       </div>
     </div>
   </section>
+  <section class="card col-4" data-card="hero-aside">
+    <div class="card-title" id="aside-title">Şu an <span class="sub" id="aside-sub"></span></div>
+    <div id="hero-aside-body"></div>
+  </section>
 
-  <!-- 4. DAILY chart (narrow) + long-term burn rate trend (wide) -->
-  <section class="status-row" id="row-charts">
-    <div class="status-card card-daily" data-card-id="daily">
-      <div class="status-cap">Son 30 gün · günlük $ harcama</div>
-      <div class="chart-wrap"><canvas id="chart-daily"></canvas></div>
+  <!-- ROW 2 — KPI STRIP -->
+  <section class="card col-3" data-card="kpi"><div class="kpi-label" id="kpi1-l">…</div><div class="kpi-value" id="kpi1-v">—</div><div class="kpi-sub" id="kpi1-s"></div><div class="kpi-spark"><canvas id="kpi1-spark"></canvas></div></section>
+  <section class="card col-3" data-card="kpi"><div class="kpi-label" id="kpi2-l">…</div><div class="kpi-value" id="kpi2-v">—</div><div class="kpi-sub" id="kpi2-s"></div><div class="kpi-spark"><canvas id="kpi2-spark"></canvas></div></section>
+  <section class="card col-3" data-card="kpi"><div class="kpi-label" id="kpi3-l">…</div><div class="kpi-value" id="kpi3-v">—</div><div class="kpi-sub" id="kpi3-s"></div><div class="kpi-spark"><canvas id="kpi3-spark"></canvas></div></section>
+  <section class="card col-3" data-card="kpi"><div class="kpi-label" id="kpi4-l">…</div><div class="kpi-value" id="kpi4-v">—</div><div class="kpi-sub" id="kpi4-s"></div><div class="kpi-spark"><canvas id="kpi4-spark"></canvas></div></section>
+
+  <!-- ROW 3 — plan limit (per-device meters) + cache efficiency -->
+  <section class="card col-8" data-card="limits">
+    <div class="card-title" id="limits-title">Plan limiti <span class="sub" id="limits-sub"></span></div>
+    <div id="limits-body"></div>
+  </section>
+  <section class="card col-4" data-card="cache">
+    <div class="card-title">Cache verimliliği <span class="sub">lifetime</span></div>
+    <div id="cache-body"></div>
+  </section>
+
+  <!-- ROW 4 — usage over time (wide) + model split (donut) -->
+  <section class="card col-8" data-card="trend">
+    <div class="card-title">
+      Burn rate trendi · <span class="sub" id="trend-unit">$/saat</span>
+      <span class="picker" id="trend-picker">
+        <button data-tf="1">1h</button><button data-tf="4">4h</button>
+        <button data-tf="6">6h</button><button data-tf="12">12h</button>
+        <button data-tf="24" class="active">1d</button>
+      </span>
     </div>
-    <div class="status-card card-trend" data-card-id="trend">
-      <div class="status-cap">
-        Burn rate trendi · $/saat
-        <span class="window-picker" id="trend-tf-picker">
-          <button data-tf="1">1h</button>
-          <button data-tf="4">4h</button>
-          <button data-tf="6">6h</button>
-          <button data-tf="12">12h</button>
-          <button data-tf="24" class="active">1d</button>
-        </span>
-      </div>
-      <div class="indicator-bar">
-        <span class="dim" style="font-size:10px">MA:</span>
-        <button class="indicator-btn ma-7"   data-ma="7">MA 7</button>
-        <button class="indicator-btn ma-25"  data-ma="25">MA 25</button>
-        <button class="indicator-btn ma-50"  data-ma="50">MA 50</button>
-        <button class="indicator-btn ma-100" data-ma="100">MA 100</button>
-        <span class="dim" style="font-size:10px;margin-left:auto">son N bar ort.</span>
-      </div>
-      <div class="trend-body">
-        <div class="chart-wrap"><canvas id="chart-trend"></canvas></div>
-        <div class="lit-compare" id="lit-compare"></div>
-      </div>
-      <div class="lit-note">
-        Endüstri değerleri <strong>türetilmiş</strong> ($13/aktif gün, $30/P90 — Anthropic). Saatlik için 2-3h AI-coding varsayımı. Chat-only (claude.ai) 5-10× daha düşük; ccmeter chat'i okumuyor, sadece Claude Code JSONL'lerini.
-      </div>
+    <div class="chart-wrap tall"><canvas id="chart-trend"></canvas></div>
+  </section>
+  <section class="card col-4" data-card="models">
+    <div class="card-title">Model dağılımı <span class="sub">lifetime $</span></div>
+    <div class="donut-wrap"><canvas id="chart-models"></canvas>
+      <div class="donut-center"><div class="v" id="models-total">—</div><div class="l">toplam</div></div>
     </div>
+    <div id="models-legend" style="margin-top:12px"></div>
+  </section>
+
+  <!-- ROW 5 — daily spend (wide) + per-project (side) -->
+  <section class="card col-7" data-card="daily">
+    <div class="card-title">Son 30 gün · günlük $ <span class="sub" id="daily-sub"></span></div>
+    <div class="chart-wrap"><canvas id="chart-daily"></canvas></div>
+  </section>
+  <section class="card col-5" data-card="projects">
+    <div class="card-title">Projeler · lifetime <span class="sub">hangi repo quota yiyor</span></div>
+    <div class="scroll"><table class="tbl" id="projects-tbl">
+      <thead><tr><th>proje</th><th class="num">token</th><th class="num">$</th></tr></thead>
+      <tbody></tbody></table></div>
+  </section>
+
+  <!-- ROW 6 — recent activity (wide) + per-model table (side) -->
+  <section class="card col-7" data-card="recent">
+    <div class="card-title">Son aktivite · her satır 1 turn <span class="sub">saf net (limitten düşen)</span></div>
+    <div class="scroll"><table class="tbl" id="recent-tbl">
+      <thead><tr><th>ne zaman</th><th>proje</th><th>model</th><th class="num">token</th><th class="num">$</th><th class="num">cache</th></tr></thead>
+      <tbody></tbody></table></div>
+  </section>
+  <section class="card col-5" data-card="model-table">
+    <div class="card-title">Modeller · lifetime <span class="sub">gerçek per-model fiyat</span></div>
+    <div class="scroll"><table class="tbl" id="modeltbl">
+      <thead><tr><th>model</th><th class="num">turn</th><th class="num">token</th><th class="num">$</th></tr></thead>
+      <tbody></tbody></table></div>
+  </section>
+
+  <!-- ROW 7 — behavior (errors) + tool usage -->
+  <section class="card col-6" data-card="behavior">
+    <div class="card-title">Davranış · son 24h hata <span class="sub" id="behavior-sub"></span></div>
+    <div id="behavior-body"></div>
+  </section>
+  <section class="card col-6" data-card="tools">
+    <div class="card-title">Tool kullanımı · lifetime <span class="sub" id="tools-sub"></span></div>
+    <div id="tools-body"></div>
   </section>
 
 </main>
 
-<footer class="footer-bar">
-  <span id="footer-text" class="dim">…</span>
-  <span class="dim">— okur: <code>~/.claude/projects/</code> · $ tahmindir, fatura için Anthropic Console'a bak. Plan limiti için Claude Code'un <strong>Plan usage</strong> popup'ı.</span>
+<footer style="max-width:var(--maxw);margin:0 auto;padding:8px var(--page-pad) 32px;color:var(--text-4);font-size:11px;font-family:var(--font-mono);">
+  <span id="footer-text">lokal · ~/.claude/projects + ~/.codex/sessions okur · $ tahmindir</span>
 </footer>
 
 </body>
