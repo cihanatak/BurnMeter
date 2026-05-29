@@ -1,0 +1,37 @@
+                    GNU AFFERO GENERAL PUBLIC LICENSE
+                       Version 3, 19 November 2007
+
+  Copyright (C) 2026 Cihan Atak
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as published
+  by the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+================================================================================
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+
+This project is licensed under the GNU Affero General Public License v3.0.
+The full canonical license text is at: https://www.gnu.org/licenses/agpl-3.0.txt
+(vendor the full text into this file before public release).
+
+WHY AGPL: This is the open-source community license. It keeps the project free
+and open for individuals forever — including commercial use by individuals —
+while requiring that anyone who runs a MODIFIED version as a network service
+share their changes. This closes the "SaaS fork" loophole that MIT/Apache leave
+open, protecting the project's sustainability.
+
+DUAL LICENSING: Organizations that cannot comply with AGPL's network-copyleft
+terms (e.g. deploying a modified internal service without sharing source) may
+obtain a separate commercial license. See COMMERCIAL.md / contact the author.
+This dual-license model (AGPL community + commercial) is used by Grafana, Gitea,
+and many sustainable open-core projects.

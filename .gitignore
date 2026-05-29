@@ -1,25 +1,25 @@
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
 *.egg-info/
-.pytest_cache/
-.mypy_cache/
+.venv/
+venv/
+build/
+dist/
 
-# Logs
-*.log
-ccmeter.log
+# ccmeter / codex_meter runtime caches (parsed-record caches, never commit)
+.codex/.codex_meter_cache.json
+*.codex_meter_cache.json
 
-# macOS
+# OS
 .DS_Store
-._*
+Thumbs.db
 
-# IDE
+# Editor
 .vscode/
 .idea/
+*.swp
 
-# Local data
-*.sqlite
-*.db
+# Logs / scratch
+*.log
+/tmp/

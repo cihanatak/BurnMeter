@@ -1,147 +1,109 @@
 # ccmeter
 
-Local-only token & cost meter for Claude Code. No `pip install`, no
-network calls from Python, nothing leaves your machine.
+**One dashboard for every AI coding agent — see exactly where your tokens go.**
 
-> Built for developers who want **honest, evidence-based** answers to:
-> *"Am I burning too many tokens? Is my cache working? What's normal?"*
+> 🚧 **Rebranding in progress.** This started as *ccmeter* (Claude Code meter) but
+> now tracks **Claude Code + OpenAI Codex** (more agents coming), so the name is
+> moving to something vendor-neutral. Candidates & decision in
+> [`NAMING.md`](./NAMING.md).
 
-## What you actually see
+A **local-first** dashboard that reads the session logs your AI coding agents
+already write to disk and turns them into a real-time view of token usage, cost,
+burn-rate, and — most importantly — **how close you are to your plan's rate
+limit**. No API keys. No cloud account. No phone-home. Your data never leaves
+your machine.
 
-Six layers, each answering a real question:
+---
 
-1. **Today vs your own baseline** — is today's spend in the normal band,
-   elevated, or above your personal P90?
-2. **Active 5-hour window** — how full is the current Claude Code billing
-   window, what's the burn rate (tok/min), and what's the projected
-   close vs your plan limit?
-3. **Cache hit rate** — fraction of input-side tokens served from cache.
-   Cache reads cost ~10% of standard input, so this metric maps directly
-   to your bill. Below 40% is "too low", above 70% is excellent.
-4. **Daily trend** — stacked input/output/cache-write/cache-read bars
-   with a cost line. Anomalous days are auto-flagged (z-score ≥ 2 or
-   cost ratio ≥ 2× trailing median).
-5. **Model breakdown** — Opus / Sonnet / Haiku share, with per-family
-   token & cost rollups. Spotting an "all-Opus week" is the fastest
-   way to find a 3× cost win.
-6. **Tools, projects, sessions** — drill down by tool name, project
-   directory, or individual session.
+## Why this exists
 
-Plus a **personal baseline** (P50/P90/P99 of your own daily cost) and a
-table of **industry reference values** taken from Anthropic's own cost
-docs (avg enterprise dev ≈ $13/active day; P90 ≤ $30/active day).
+Neither Anthropic nor OpenAI exposes a real-time, per-token usage API for
+**individual** Pro / Max / ChatGPT-subscription plans. The in-app usage page and
+the CLI's `/usage` command are point-in-time only — not historical, not
+programmatic. So if you're on a flat-fee subscription, **your local session logs
+are the only accurate source of truth** for what you're actually burning.
+
+ccmeter reads them — `~/.claude/projects/**/*.jsonl` and
+`~/.codex/sessions/**/*.jsonl` — and answers the one question that matters:
+**"Am I about to hit the wall?"**
+
+## Features
+
+- **Binding-constraint hero** — the single most-urgent number, front and center.
+  For subscription plans that's your **rate-limit %** (5-hour + weekly); for API
+  it's burn-rate $. Red ring at 90%+ means "you're about to get throttled."
+- **Real per-model pricing** — Opus / Sonnet / Haiku and GPT-5.5 / 5.4 / Codex /
+  mini, each at its actual rate. Output costs 5–8× input — the model mix *is* the
+  cost story.
+- **Cache-efficiency panel** — cache reads cost ~10% of fresh input. ccmeter
+  shows your hit rate and the **dollars cache saved you** vs. an un-cached run
+  (often the "I'm getting $50k of value for $200" number).
+- **Per-project attribution** — which repo is eating your quota.
+- **Burn-rate trend, daily spend, per-turn activity, model split** — the full
+  "where did it go" picture, with sparklines and clean charts.
+- **Multi-device** — sync a second machine's logs in (e.g. via Syncthing) and see
+  per-device breakdowns.
+- **Tiny footprint** — the long-running server holds ~30 MB; heavy parsing runs
+  in a short-lived worker so memory never balloons.
 
 ## Install
 
-Requires only **Python 3.10+** (uses `tomllib`-style stdlib idioms).
-Nothing to install.
+> Packaging for Homebrew / npm / PyPI is in progress (see [`NAMING.md`](./NAMING.md)).
+> For now, run from source (Python 3.10+, no third-party deps):
 
 ```bash
-git clone <wherever you put this>
-cd ccmeter
-python3 -m ccmeter status
+git clone <repo-url> ccmeter && cd ccmeter
+python3 -m ccmeter serve --port 9876
+# open http://127.0.0.1:9876
 ```
 
-## Usage
-
-### Web dashboard
+Multi-source (Claude + Codex) and a synced second machine:
 
 ```bash
-python3 -m ccmeter serve
-# → http://127.0.0.1:8765
+python3 -m ccmeter serve --port 9876 \
+  --extra-projects-dir ~/.claude/projects-pc \
+  --codex-extra-dir   ~/.codex/sessions-pc
 ```
-
-The page auto-refreshes every 30 s (matching the server's JSONL re-scan
-TTL). The only external resource is Chart.js loaded from a CDN; if you
-need fully air-gapped operation, drop `chart.umd.min.js` into `static/`
-and edit `dashboard.html` to reference it.
-
-### Terminal
-
-```bash
-python3 -m ccmeter status              # one-screen overview
-python3 -m ccmeter daily --limit 30    # last 30 days
-python3 -m ccmeter models              # rollup by model family
-python3 -m ccmeter sessions --limit 50 # recent sessions
-```
-
-All commands accept `--projects-dir` to point at a non-default location
-(e.g. for testing or for inspecting an exported transcript folder).
-The `serve` command accepts `--host`, `--port`, `--ttl`.
-
-### CSV export
-
-`http://127.0.0.1:8765/api/records.csv` returns every parsed assistant
-turn. Useful for ad-hoc analysis in pandas/DuckDB.
 
 ## How it works
 
-Claude Code writes one JSONL file per session under
-`~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`. Each line is a
-JSON record; assistant messages contain a `message.usage` block with
-`input_tokens`, `output_tokens`, `cache_creation_input_tokens`, and
-`cache_read_input_tokens`, plus `message.model`. ccmeter:
-
-1. Walks the projects tree and parses every `.jsonl`.
-2. Deduplicates by `message.id` (parallel tool calls produce multiple
-   records with identical usage; counting them all would inflate
-   totals — Anthropic's SDK docs explicitly warn about this).
-3. Computes per-day, per-session, per-project, per-model, per-tool
-   aggregates plus 5-hour billing-window clusters.
-4. Estimates cost using a built-in price table for Opus / Sonnet / Haiku.
-5. Caches the result for 15 s (`--ttl`) so the dashboard polls cheaply.
-
-## Honest caveats
-
-- **Costs are client-side estimates**, not authoritative billing. The
-  Anthropic Agent SDK docs say the same about its own `total_cost_usd`
-  field.
-- **Plan limits are approximations**. Anthropic now describes them in
-  relative terms; the 44k/88k/220k token anchors come from community
-  reverse-engineering and are widely cited but not contractual. They're
-  also weighted internally (cache reads cost less than fresh input), so
-  the raw token count you see here may exceed the budget while you
-  haven't actually hit a limit.
-- **Tool token attribution is approximate**. Output tokens for a turn
-  cover both prose and tool_use blocks together; we split the turn's
-  output evenly across the tool_use blocks present, which is good
-  enough for ranking but not for exact accounting.
-- **Pricing tables drift**. The price table sits in `ccmeter/pricing.py`
-  — verify against [claude.com/pricing](https://claude.com/pricing) before
-  relying on the cost numbers for invoicing.
-
-## Layout
-
 ```
-ccmeter/
-├── ccmeter/
-│   ├── __init__.py
-│   ├── __main__.py        # python -m ccmeter
-│   ├── analytics.py       # aggregations, anomaly detection, plan inference
-│   ├── cli.py             # status / daily / models / sessions / serve
-│   ├── parser.py          # JSONL → UsageRecord
-│   ├── pricing.py         # model price table & cost estimator
-│   └── server.py          # stdlib HTTP server, /api/report, CSV export
-├── static/
-│   ├── dashboard.html
-│   ├── dashboard.css
-│   └── dashboard.js       # vanilla JS + Chart.js
-└── tests/
-    ├── generate_fixture.py  # synthetic JSONL for offline testing
-    └── test_smoke.py        # parser → analytics → server end-to-end
+~/.claude/projects/**/*.jsonl  ─┐
+~/.codex/sessions/**/*.jsonl   ─┤→ parser → normalized UsageRecord
+                                │            ↓ (in a short-lived worker)
+                                └──────────→ analytics → report JSON
+                                                         ↓
+                                       local web dashboard (127.0.0.1)
 ```
 
-## Run the tests
+No network calls except loading Chart.js from a CDN (vendor it for fully
+air-gapped use). Costs are **client-side estimates** based on published pricing —
+for billing, see your provider's console.
 
-```bash
-python3 -m tests.test_smoke
-```
+## Privacy / local-first
 
-The smoke test generates 14 days of synthetic Claude Code sessions
-(including one deliberately anomalous day), runs the full pipeline,
-spins up the HTTP server on a random port, and asserts that every
-endpoint returns sane data.
+Everything stays on your disk. ccmeter binds to `127.0.0.1` only. There is no
+telemetry, no account, no upload. The optional Pro **sync** feature (see
+[`PRICING.md`](./PRICING.md)) is end-to-end encrypted and entirely opt-in.
+
+## Supported agents
+
+| Agent | Source | Status |
+|-------|--------|--------|
+| Claude Code | `~/.claude/projects` | ✅ |
+| OpenAI Codex | `~/.codex/sessions` | ✅ |
+| Cursor / Copilot / Gemini / others | — | 🛣️ planned |
+
+Adding an agent is a single parser module — see [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+
+## Pricing
+
+The local dashboard is **free and open source forever**. A Pro tier adds
+cross-device sync, unlimited history, and pre-limit alerts; a Team tier adds
+cost aggregation & attribution. Details in [`PRICING.md`](./PRICING.md).
 
 ## License
 
-MIT.
+[AGPL-3.0-or-later](./LICENSE) for the open-source core, with a commercial
+dual-license available for organizations. Free for individuals, including
+commercial use.
