@@ -353,8 +353,14 @@ def serve(host: str = "127.0.0.1", port: int = 8765,
           codex_dir: Optional[Path] = None,
           codex_extra_roots: Optional[list[Path]] = None) -> None:
     projects_dir = Path(projects_dir) if projects_dir else CLAUDE_PROJECTS_DIR
+    # Claude load_records has no per-file cache yet → it re-reads ALL session
+    # files every build (~17s Mac-only, ~29s +PC for ~26k files). With a 15s TTL
+    # that means build > TTL → a worker rebuilds continuously while Claude is
+    # viewed (CPU/IO churn). A 120s floor (matching codex) makes rebuilds periodic
+    # + non-blocking (bg stale-while-revalidate) → no churn. NOTE: the real fix is
+    # a per-file cache (like codex_parser) to make builds fast + data fresh again.
     cache = _Cache(
-        projects_dir, ttl_seconds=ttl_seconds, extra_roots=extra_roots,
+        projects_dir, ttl_seconds=max(ttl_seconds, 120), extra_roots=extra_roots,
         worker_config={
             "source": "claude",
             "projects_dir": str(projects_dir),
