@@ -6,7 +6,9 @@ Codex CLI writes session rollouts to:
 Each line: {timestamp, type, payload}. We care about:
   - session_meta  → payload.{id, cwd, git}
   - turn_context  → payload.model (gpt-5.5), turn_id
-  - event_msg.token_count → payload.info.last_token_usage (PER-TURN delta)
+  - event_msg.token_count → payload.info.last_token_usage (per-RESPONSE delta;
+    Codex turn başına ~13 event yayar ve akışta aynı delta'yı birebir tekrar
+    edebilir → ardışık birebir-aynı olanlar duplicate sayılıp atlanır)
   - event_msg.user_message → first one = the session "intent"
 
 Token mapping → ccmeter UsageRecord:
@@ -32,6 +34,11 @@ from .parser import UsageRecord, _parse_timestamp
 
 CODEX_SESSIONS_DIR = Path.home() / ".codex" / "sessions"
 _CACHE_PATH = Path.home() / ".codex" / ".codex_meter_cache.json"
+# parse mantığı değişince bump et → farklı "v" taşıyan eski cache entry'leri yok
+# sayılır (mtime/size aynı olsa bile yeniden parse edilir, stale turn dönmez).
+# v2: ardışık birebir-aynı token_count delta'ları atlanır (anti-şişme; hesap
+# geneli ground truth'a 1.066x → 1.004x yaklaşır).
+_PARSE_VERSION = 2
 
 # Substring pre-filter — only json-parse lines that might carry what we need.
 # Avoids parsing the giant response_item text lines (the bulk of the 16GB).
@@ -85,6 +92,7 @@ def parse_codex_file(path: Path) -> tuple[dict, list[list], Optional[str], Optio
     turns: list[list] = []
     last_rate_limits: Optional[dict] = None
     idx = 0
+    prev_sig: Optional[tuple] = None   # son eklenen delta imzası (anti-duplicate)
 
     try:
         with path.open("r", encoding="utf-8", errors="replace") as fh:
@@ -129,6 +137,14 @@ def parse_codex_file(path: Path) -> tuple[dict, list[list], Optional[str], Optio
                         in_tok = int(last.get("input_tokens") or 0)
                         cached = int(last.get("cached_input_tokens") or 0)
                         out_tok = int(last.get("output_tokens") or 0)
+                        # ANTI-DUPLICATE: Codex akış sırasında aynı last_token_usage'ı
+                        # ardışık birebir tekrar yayabilir (ölçüm: event'lerin %5.2'si).
+                        # Bunları saymak hesabı %6.6 şişirir. Ardışık birebir-aynı
+                        # (in,cached,out) delta'yı atla — sıfır-kullanım event'i değilse.
+                        sig = (in_tok, cached, out_tok)
+                        if sig == prev_sig and (in_tok or out_tok):
+                            continue
+                        prev_sig = sig
                         fresh_in = max(0, in_tok - cached)
                         ts = r.get("timestamp") or ""
                         # KOMPAKT turn tuple: [ts, model, turn_id, fresh_in, out, cache_read]
@@ -236,7 +252,8 @@ def load_codex_records(
             except OSError:
                 continue
             cached = cache.get(key)
-            if cached and cached.get("sig") == sig and "meta" in cached:
+            if (cached and cached.get("sig") == sig
+                    and cached.get("v") == _PARSE_VERSION and "meta" in cached):
                 meta = cached["meta"]
                 turns = cached.get("turns", [])
                 intent = cached.get("intent")
@@ -245,8 +262,9 @@ def load_codex_records(
                 meta, turns, intent, rl = parse_codex_file(path)
                 reparsed += 1
             # KOMPAKT cache: meta (sid/cwd/branch 1 kez) + turns (tuple list).
-            new_cache[key] = {"sig": sig, "meta": meta, "turns": turns,
-                              "intent": intent, "device": device, "rate_limits": rl}
+            new_cache[key] = {"sig": sig, "v": _PARSE_VERSION, "meta": meta,
+                              "turns": turns, "intent": intent,
+                              "device": device, "rate_limits": rl}
             if rl and isinstance(rl, dict):
                 prev = latest_rl_by_dev.get(device)
                 if prev is None or (rl.get("_ts", 0) > prev.get("_ts", 0)):
