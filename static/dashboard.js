@@ -99,10 +99,10 @@ function render(rep) {
   $("version").textContent = "v" + (rep._meta?.version || "?");
   $("data-source").textContent = `${rep._meta?.files_scanned ?? "?"} dosya · ${fmtInt(rep.record_count || 0)} kayıt`;
 
-  renderHero(rep, isCodex);
+  renderSpeedometer(rep, isCodex);
   renderHeroAside(rep, isCodex);
   renderKPIs(rep, isCodex);
-  renderLimits(rep, isCodex);
+  renderEfficiency(rep, isCodex);
   renderCache(rep);
   renderTrend(rep, isCodex);
   renderModels(rep);
@@ -117,13 +117,14 @@ function render(rep) {
 // ---------- hero SPEEDOMETER (araba göstergesi) ----------
 function polarToCartesian(cx, cy, r, deg) { const a = deg * Math.PI / 180; return { x: cx + r * Math.cos(a), y: cy - r * Math.sin(a) }; }
 function arcPath(cx, cy, r, sv, ev, mv) {
+  if (mv <= 0) return 'M 0 0';
   const a1 = 180 - (Math.min(sv, mv) / mv) * 180, a2 = 180 - (Math.min(ev, mv) / mv) * 180;
   const p1 = polarToCartesian(cx, cy, r, a1), p2 = polarToCartesian(cx, cy, r, a2);
   return `M ${p1.x.toFixed(1)} ${p1.y.toFixed(1)} A ${r} ${r} 0 0 1 ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
 }
 // "Bu araba çok mu yakıyor?" — burn rate $/sa, referans zone'lara (tipik/yoğun/
 // ağır) göre iğne + verdict. Window picker (15dk/1h/2h/4h/6h) ortalama penceresi.
-function renderHero(rep, isCodex) {
+function renderSpeedometer(rep, isCodex) {
   const fc = rep.forecast || {};
   const z = rep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25, max: 50 };
   const hoursStr = localStorage.getItem("ccmeter_burn_hours") || "2";
@@ -162,10 +163,19 @@ function renderHero(rep, isCodex) {
 
   const cw = rep.current_window || {};
   const ratio = cw.vs_baseline_ratio;
-  const ratioTxt = (ratio != null && ratio > 0) ? ` · normalinin <strong>${ratio.toFixed(1)}x</strong> hızı`
-    : (rate < z.typical ? " · normalin altında" : "");
   $("speedo-zone").className = "speedo-zone-txt " + zc;
-  $("speedo-zone").innerHTML = zw + ratioTxt;
+  const zoneEl = $("speedo-zone");
+  zoneEl.textContent = zw;
+  if (ratio != null && ratio > 0) {
+    const span = document.createElement("span");
+    span.append(" · normalinin ");
+    const strong = document.createElement("strong");
+    strong.textContent = ratio.toFixed(1) + "x";
+    span.append(strong, " hızı");
+    zoneEl.appendChild(span);
+  } else if (rate < z.typical) {
+    zoneEl.append(" · normalin altında");
+  }
 
   // efficiency headline (fuel_efficiency) — unit economics narrative
   const fe = rep.fuel_efficiency?.headline || {};
@@ -256,7 +266,7 @@ function renderKPIs(rep, isCodex) {
 // ---------- verimlilik · birim ekonomisi (sen vs tipik) ----------
 // "Efficiency nerede?" — her birim maliyetin (saat/gün/commit/turn) senin
 // referansına/endüstri tipiğine göre nerede. token harcaman verimli mi?
-function renderLimits(rep, isCodex) {
+function renderEfficiency(rep, isCodex) {
   const fe = rep.fuel_efficiency || {};
   const vClass = (k) => k === "bad" ? "bad" : k === "warn" ? "warn" : "good";
   const row = (label, youTxt, refTxt, verdict, kind) => `
@@ -447,7 +457,7 @@ function renderBehavior(rep) {
     `<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px"><span class="num" style="font-size:28px;color:${e.total > 20 ? "var(--warn)" : "var(--text-1)"}">${e.total || 0}</span><span class="dim" style="font-size:12px">son 24h</span></div>` +
     cats.map(c => {
       const col = c.share > 0.5 ? "var(--bad)" : c.share > 0.2 ? "var(--warn)" : "var(--accent)";
-      return `<div class="bar-list-row"><span class="nm">${ERR_LABELS[c.category] || c.category}</span>
+      return `<div class="bar-list-row"><span class="nm">${ERR_LABELS[c.category] || esc(c.category)}</span>
         <span class="tr"><i style="width:${c.count / max * 100}%;background:${col}"></i></span>
         <span class="vl">${c.count}</span></div>`;
     }).join("");
@@ -529,7 +539,7 @@ function start() {
     b.addEventListener("click", () => {
       localStorage.setItem("ccmeter_burn_hours", b.dataset.h);
       document.querySelectorAll("#burn-window-picker button").forEach(x => x.classList.toggle("active", x.dataset.h === b.dataset.h));
-      if (window.__lastReport) renderHero(window.__lastReport, window.__source === "codex");
+      if (window.__lastReport) renderSpeedometer(window.__lastReport, window.__source === "codex");
     });
   });
   // trend timeframe picker (1h/4h/6h/12h/1d)
