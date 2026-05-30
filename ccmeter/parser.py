@@ -321,6 +321,138 @@ def iter_jsonl_files(root: Path = CLAUDE_PROJECTS_DIR) -> Iterator[Path]:
             yield path
 
 
+# ---- per-file parse cache (claude) — codex_parser ile aynı disiplin ----
+# Claude session JSONL'leri append-only; tamamlanmış dosyalar değişmez. Cache
+# (path,mtime,size) ile değişmemiş dosyalar yeniden OKUNMAZ → build ~25s'den
+# ~birkaç saniyeye iner (sadece aktif/yeni dosyalar parse edilir).
+_CLAUDE_CACHE_PATH = CLAUDE_PROJECTS_DIR.parent / ".ccmeter_claude_cache.json"
+_CLAUDE_CACHE_VERSION = 1
+
+
+def _claude_load_cache() -> dict:
+    try:
+        return json.loads(_CLAUDE_CACHE_PATH.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _claude_save_cache(cache: dict) -> None:
+    try:
+        _CLAUDE_CACHE_PATH.write_text(json.dumps(cache))
+    except OSError:
+        pass
+
+
+def _rec_from_dict(d: dict) -> UsageRecord:
+    d = dict(d)
+    d["timestamp"] = _parse_timestamp(d.get("timestamp"))
+    return UsageRecord(**d)
+
+
+def parse_claude_file(path: Path, scan_device: str = "mac"):
+    """Parse ONE Claude JSONL → (records, intents, errors, parse_errors).
+
+    Per-file ONLY: turn_id resolution is within-file; cross-file dedup +
+    earliest-intent merging happen in load_records. Cached by (path,mtime,size).
+      - records: all UsageRecords in this file (turn_id + device set, NO dedup).
+      - intents: {session_id: (text, ts_iso)} earliest user msg within this file.
+      - errors:  list of tool_result error dicts.
+      - parse_errors: count of malformed lines.
+    """
+    records: list[UsageRecord] = []
+    intents: dict[str, tuple] = {}
+    intent_ts: dict[str, datetime] = {}
+    errs: list[dict] = []
+    perr = 0
+    try:
+        file_lines: list[str] = []
+        uuid_map: dict[str, tuple[str, str, bool]] = {}
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            for raw in fh:
+                file_lines.append(raw)
+                s = raw.strip()
+                if not s:
+                    continue
+                try:
+                    parsed = json.loads(s)
+                except json.JSONDecodeError:
+                    continue
+                u = parsed.get("uuid")
+                if not u:
+                    continue
+                typ = str(parsed.get("type") or "")
+                parent = str(parsed.get("parentUuid") or "")
+                is_human = False
+                if typ == "user":
+                    msg = parsed.get("message") or {}
+                    content = msg.get("content")
+                    if isinstance(content, str) and content.strip():
+                        is_human = True
+                    elif isinstance(content, list):
+                        has_tool_result = any(
+                            isinstance(b, dict) and b.get("type") == "tool_result"
+                            for b in content
+                        )
+                        if not has_tool_result:
+                            is_human = True
+                uuid_map[str(u)] = (parent, typ, is_human)
+
+        def resolve_turn(start_uuid: str) -> str:
+            cur = start_uuid
+            for _ in range(2000):
+                entry = uuid_map.get(cur)
+                if entry is None:
+                    return cur
+                parent_uuid, typ, is_human = entry
+                if typ == "user" and is_human:
+                    return cur
+                if not parent_uuid:
+                    return cur
+                cur = parent_uuid
+            return cur
+
+        for raw in file_lines:
+            intent = None
+            try:
+                intent = parse_user_intent(raw)
+            except Exception:
+                pass
+            if intent:
+                sid, text, ts = intent
+                prev = intent_ts.get(sid)
+                if prev is None or (ts and ts < prev):
+                    intents[sid] = (text[:240], ts.isoformat() if ts else None)
+                    intent_ts[sid] = ts
+
+            try:
+                evt = parse_tool_events(raw)
+            except Exception:
+                evt = None
+            if evt and evt["errors"]:
+                for e in evt["errors"]:
+                    errs.append({
+                        "session_id": evt["session_id"],
+                        "timestamp": evt["timestamp"].isoformat() if evt["timestamp"] else None,
+                        "category": e["category"],
+                        "snippet": e["snippet"],
+                    })
+
+            try:
+                rec = parse_line(raw, source_file=str(path))
+            except Exception:
+                perr += 1
+                continue
+            if rec is None:
+                continue
+            if rec.uuid:
+                rec.turn_id = resolve_turn(rec.uuid)
+            rec.device = scan_device
+            records.append(rec)
+    except OSError:
+        perr += 1
+    return records, intents, errs, perr
+
+
 def load_records(
     root: Path = CLAUDE_PROJECTS_DIR,
     deduplicate: bool = True,
@@ -359,6 +491,9 @@ def load_records(
             "extra_roots": [str(r) for r in (extra_roots or [])],
         }, user_intents, error_events
 
+    cache = _claude_load_cache()
+    new_cache: dict = {}
+
     for scan_root in all_roots:
         if not scan_root.exists():
             continue
@@ -369,108 +504,48 @@ def load_records(
         for path in iter_jsonl_files(scan_root):
             files += 1
             try:
-                # PASS 1 — file_lines + uuid → (parent_uuid, type, is_human) map.
-                # CRITICAL: Claude Code JSONL'de "type":"user" iki tip içerir:
-                #   (a) gerçek Cihan-typed prompt — content STRING veya yalın list
-                #   (b) tool_result wrapper — content list içinde "tool_result" block
-                # Sadece (a) durumunda zincir takibini DURDURURUZ. Aksi halde
-                # her tool_result wrapper bir "user record" gibi davranır ve her
-                # assistant record kendi tool_result'una bağlanıp ayrı turn_id alır.
-                file_lines: list[str] = []
-                uuid_map: dict[str, tuple[str, str, bool]] = {}
-                with path.open("r", encoding="utf-8", errors="replace") as fh:
-                    for raw in fh:
-                        file_lines.append(raw)
-                        s = raw.strip()
-                        if not s:
-                            continue
-                        try:
-                            parsed = json.loads(s)
-                        except json.JSONDecodeError:
-                            continue
-                        u = parsed.get("uuid")
-                        if not u:
-                            continue
-                        typ = str(parsed.get("type") or "")
-                        parent = str(parsed.get("parentUuid") or "")
-                        is_human = False
-                        if typ == "user":
-                            msg = parsed.get("message") or {}
-                            content = msg.get("content")
-                            if isinstance(content, str) and content.strip():
-                                is_human = True
-                            elif isinstance(content, list):
-                                has_tool_result = any(
-                                    isinstance(b, dict) and b.get("type") == "tool_result"
-                                    for b in content
-                                )
-                                if not has_tool_result:
-                                    is_human = True
-                        uuid_map[str(u)] = (parent, typ, is_human)
-
-                def resolve_turn(start_uuid: str) -> str:
-                    """Walk parent chain until we hit a real human-typed user
-                    message (or root). tool_result wrappers don't count."""
-                    cur = start_uuid
-                    for _ in range(2000):
-                        entry = uuid_map.get(cur)
-                        if entry is None:
-                            return cur
-                        parent_uuid, typ, is_human = entry
-                        if typ == "user" and is_human:
-                            return cur
-                        if not parent_uuid:
-                            return cur
-                        cur = parent_uuid
-                    return cur
-
-                # PASS 2 — process each line normally + resolve turn_id.
-                for raw in file_lines:
-                    intent = None
-                    try:
-                        intent = parse_user_intent(raw)
-                    except Exception:
-                        pass
-                    if intent:
-                        sid, text, ts = intent
-                        prev_ts = user_intent_ts.get(sid)
-                        if prev_ts is None or ts < prev_ts:
-                            user_intents[sid] = text[:240]
-                            user_intent_ts[sid] = ts
-
-                    try:
-                        evt = parse_tool_events(raw)
-                    except Exception:
-                        evt = None
-                    if evt and evt["errors"]:
-                        for e in evt["errors"]:
-                            error_events.append({
-                                "session_id": evt["session_id"],
-                                "timestamp": evt["timestamp"].isoformat() if evt["timestamp"] else None,
-                                "category": e["category"],
-                                "snippet": e["snippet"],
-                            })
-
-                    try:
-                        rec = parse_line(raw, source_file=str(path))
-                    except Exception:
-                        errors += 1
-                        continue
-                    if rec is None:
-                        continue
-                    if deduplicate and rec.message_id:
-                        if rec.message_id in seen_ids:
-                            continue
-                        seen_ids.add(rec.message_id)
-                    # turn_id: ancestor zincirinde ilk user mesajının uuid'si.
-                    if rec.uuid:
-                        rec.turn_id = resolve_turn(rec.uuid)
-                    rec.device = scan_device
-                    records.append(rec)
+                st = path.stat()
+                sig = [st.st_mtime, st.st_size]
             except OSError:
                 errors += 1
                 continue
+            key = str(path)
+            c = cache.get(key)
+            if c and c.get("v") == _CLAUDE_CACHE_VERSION and c.get("sig") == sig:
+                # unchanged file → reconstruct from cache (no re-read)
+                f_recs = [_rec_from_dict(d) for d in c.get("recs", [])]
+                f_intents = c.get("intents", {})
+                f_errs = c.get("errors", [])
+                f_perr = c.get("perr", 0)
+            else:
+                f_recs, f_intents, f_errs, f_perr = parse_claude_file(path, scan_device)
 
+            new_cache[key] = {
+                "v": _CLAUDE_CACHE_VERSION, "sig": sig,
+                "recs": [r.to_dict() for r in f_recs],
+                "intents": f_intents, "errors": f_errs, "perr": f_perr,
+            }
+
+            # cross-file aggregation: dedup by message_id, earliest intent, errors
+            errors += f_perr
+            for r in f_recs:
+                r.device = scan_device          # re-apply (cache-hit safety)
+                if deduplicate and r.message_id:
+                    if r.message_id in seen_ids:
+                        continue
+                    seen_ids.add(r.message_id)
+                records.append(r)
+            for sid, val in f_intents.items():
+                text = val[0] if isinstance(val, (list, tuple)) else val
+                ts_iso = val[1] if isinstance(val, (list, tuple)) and len(val) > 1 else None
+                ts = _parse_timestamp(ts_iso) if ts_iso else None
+                prev = user_intent_ts.get(sid)
+                if ts and (prev is None or ts < prev):
+                    user_intents[sid] = (text or "")[:240]
+                    user_intent_ts[sid] = ts
+            error_events.extend(f_errs)
+
+    _claude_save_cache(new_cache)
     records.sort(key=lambda r: r.timestamp)
     return records, {
         "files_scanned": files,
