@@ -19,6 +19,7 @@ it from cost (but still count tokens).
 """
 from __future__ import annotations
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Optional
 
 
@@ -94,11 +95,16 @@ PRICES: dict[str, ModelPrice] = {
 }
 
 
+@lru_cache(maxsize=512)
 def family_from_model(model: Optional[str]) -> str:
     """Map a model id like 'claude-sonnet-4-5-20250929' or 'gpt-5.5-codex' to family.
 
     Sıra önemli: 'mini' ve 'codex' versiyon numarasından ÖNCE kontrol edilir
     (gpt-5.4-mini → gpt-5-mini, gpt-5.3-codex → gpt-5-codex).
+
+    @lru_cache: saf fonksiyon, sadece model string'ine bağlı. Build sırasında
+    ~10M kez (her aggregation × her kayıt) çağrılıyor ama distinct model ~10 →
+    string-match'i bir kez yap, gerisi O(1) lookup (codex build ~11s→~7s).
     """
     if not model:
         return "unknown"
@@ -123,6 +129,7 @@ def family_from_model(model: Optional[str]) -> str:
     return "unknown"
 
 
+@lru_cache(maxsize=512)
 def price_for(model: Optional[str]) -> ModelPrice:
     return PRICES[family_from_model(model)]
 
