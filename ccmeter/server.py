@@ -49,6 +49,7 @@ class _Cache:
             lambda: load_records(self.projects_dir, extra_roots=self.extra_roots)
         )
         self._lock = threading.Lock()
+        self._build_lock = threading.Lock()   # single-flight: 1 rebuild at a time
         self._report = None
         self._report_key = None
         self._report_at = 0.0
@@ -70,29 +71,72 @@ class _Cache:
             sys.stderr.write(f"[ccmeter] worker failed: {e}\n")
             return None
 
-    def get_report(self, build_fn, key, force: bool = False):
-        """Return a memoized report. Built via worker subprocess (RAM-bounded)
-        when worker_config is set; else in-process. Memoized for `ttl` seconds."""
-        now = time.time()
-        if (not force and self._report is not None and self._report_key == key
-                and (now - self._report_at) <= self.ttl):
-            return self._report
-
+    def _do_build(self, build_fn, key):
+        """Run the heavy build (worker subprocess, RAM-bounded; in-process on
+        worker failure) and store it. Assumes self._build_lock is held."""
         report = None
         if self.worker_config is not None:
             report = self._run_worker()   # heavy work in a process that then dies
         if report is None:
             # Fallback: in-process (records discarded right after to limit RSS).
             records, stats, intents, errors = self._loader()
-            report = build_fn(records, stats, now, intents, errors)
+            report = build_fn(records, stats, time.time(), intents, errors)
             records = None
             import gc; gc.collect()
-
         with self._lock:
             self._report = report
             self._report_key = key
             self._report_at = time.time()
+        return report
+
+    def _bg_rebuild(self, build_fn, key):
+        """Refresh the cache off the request path; release the build lock after."""
+        try:
+            self._do_build(build_fn, key)
+        except Exception as e:                # never let a bg thread die silently
+            sys.stderr.write(f"[ccmeter] bg rebuild failed: {e}\n")
+        finally:
+            self._build_lock.release()
+
+    def get_report(self, build_fn, key, force: bool = False):
+        """Return a memoized report. Built via worker subprocess (RAM-bounded)
+        when worker_config is set; else in-process.
+
+        SINGLE-FLIGHT + BACKGROUND stale-while-revalidate. The codex build is
+        heavy (~30s over ~0.5M records); the dashboard's 10s auto-refresh would
+        otherwise (a) stampede the cache on every TTL expiry → N concurrent
+        ~800MB builds → OOM + total server hang, and (b) block the source-switch
+        request for the whole build → frozen UI. So a stale-but-present report is
+        returned INSTANTLY and refreshed in ONE background thread; only a cold
+        cache (first load) or an explicit ?refresh=1 blocks on the build."""
+        now = time.time()
+        have = self._report is not None and self._report_key == key
+        if have and not force and (now - self._report_at) <= self.ttl:
+            return self._report                       # fresh
+
+        if force:
+            # Manual refresh: rebuild synchronously, serialized with bg builds.
+            with self._build_lock:
+                if (self._report is not None and self._report_key == key
+                        and (time.time() - self._report_at) <= self.ttl):
+                    return self._report               # a bg build just refreshed it
+                return self._do_build(build_fn, key)
+
+        if have:
+            # Stale: serve instantly, refresh in the background (single-flight).
+            if self._build_lock.acquire(blocking=False):
+                try:
+                    threading.Thread(target=self._bg_rebuild, args=(build_fn, key),
+                                     daemon=True).start()
+                except RuntimeError:                  # thread couldn't start
+                    self._build_lock.release()
             return self._report
+
+        # Cold cache (nothing usable yet): must build now, serialized.
+        with self._build_lock:
+            if self._report is not None and self._report_key == key:
+                return self._report                   # another thread built it
+            return self._do_build(build_fn, key)
 
 
 def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict):
@@ -323,7 +367,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765,
     codex_root = Path(codex_dir) if codex_dir else CODEX_SESSIONS_DIR
     codex_cache = _Cache(
         codex_root,
-        ttl_seconds=max(ttl_seconds, 60),
+        ttl_seconds=max(ttl_seconds, 120),   # ~30s build → bg-refresh, az churn
         extra_roots=codex_extra_roots,
         loader=lambda: load_codex_records(codex_root, extra_roots=codex_extra_roots) + ([],),
         worker_config={
@@ -347,6 +391,21 @@ def serve(host: str = "127.0.0.1", port: int = 8765,
         sys.stderr.write(f"[ccmeter] + claude extra: {er} (exists={er.exists()})\n")
     for er in (codex_extra_roots or []):
         sys.stderr.write(f"[ccmeter] + codex extra:  {er} (exists={er.exists()})\n")
+
+    # Startup warm: pre-build both caches off the request path so the first
+    # source-switch after a (re)boot is instant instead of blocking ~30s on the
+    # cold codex build. Uses the real HTTP path → warms the exact (source, None)
+    # keys the dashboard requests. Daemon thread; failures are non-fatal.
+    def _warm():
+        import urllib.request
+        time.sleep(1.0)   # let the listener bind
+        for path in ("/api/report", "/api/report?source=codex"):
+            try:
+                urllib.request.urlopen(f"http://{host}:{port}{path}", timeout=200).read()
+            except Exception:
+                pass
+    threading.Thread(target=_warm, daemon=True).start()
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
