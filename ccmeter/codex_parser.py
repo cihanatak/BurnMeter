@@ -36,9 +36,10 @@ CODEX_SESSIONS_DIR = Path.home() / ".codex" / "sessions"
 _CACHE_PATH = Path.home() / ".codex" / ".codex_meter_cache.json"
 # parse mantığı değişince bump et → farklı "v" taşıyan eski cache entry'leri yok
 # sayılır (mtime/size aynı olsa bile yeniden parse edilir, stale turn dönmez).
-# v2: ardışık birebir-aynı token_count delta'ları atlanır (anti-şişme; hesap
-# geneli ground truth'a 1.066x → 1.004x yaklaşır).
-_PARSE_VERSION = 2
+# v2: ardışık birebir-aynı token_count delta'ları atlanır (anti-şişme).
+# v3: byte-offset incremental parse (cache entry'sine offset+resume eklendi) —
+# aktif 7.7GB dosya artık baştan değil, sadece eklenen byte'lardan parse edilir.
+_PARSE_VERSION = 3
 
 # Substring pre-filter — only json-parse lines that might carry what we need.
 # Avoids parsing the giant response_item text lines (the bulk of the 16GB).
@@ -71,32 +72,44 @@ def _epoch(iso: Optional[str]) -> float:
         return 0.0
 
 
-def parse_codex_file(path: Path) -> tuple[dict, list[list], Optional[str], Optional[dict]]:
-    """Parse one Codex rollout file → KOMPAKT form (RAM disiplini).
+def parse_codex_file(path: Path, start_offset: int = 0, resume: Optional[dict] = None
+                     ) -> tuple[dict, list, Optional[str], Optional[dict], int, dict]:
+    """Parse a Codex rollout file → KOMPAKT form (RAM disiplini).
 
-    Returns (meta, turns, intent, last_rate_limits):
-      - meta: {"sid", "cwd", "branch"} — dosya-seviyesi sabitler (record başına
-        tekrar ETMEZ; eski 198MB cache'in ana şişme sebebi buydu).
-      - turns: list of [ts, model, turn_id, fresh_in, out, cache_read] — kompakt
-        tuple, dict değil. token_count event başına bir tane.
-      - intent: first user_message text (capped).
-      - last_rate_limits: son token_count event'inin rate_limits'i + "_ts".
-        Codex Pro'nun gerçek kısıtı (5h + haftalık used_percent).
+    INCREMENTAL: with start_offset>0 + a resume state, parse ONLY the bytes
+    appended since last time. Codex rollout files are append-only; the active one
+    is 7.7GB+ and grows on every interaction — a full reparse on each change was
+    the build's dominant cost and an OOM trigger. Only newline-terminated lines
+    are consumed; a partial trailing line is left for the next pass.
+
+    Returns (meta, turns, intent, last_rate_limits, end_offset, state):
+      - turns: turns parsed in THIS call (caller appends to the accumulated list).
+      - end_offset: byte position after the last COMPLETE line (next resume point).
+      - state: {sid,cwd,branch,model,turn_id,idx,prev_sig,intent} to resume from.
     """
-    session_id = ""
-    cwd = ""
-    git_branch = ""
-    cur_model = ""
-    cur_turn_id = ""
-    intent: Optional[str] = None
-    turns: list[list] = []
+    resume = resume or {}
+    session_id = resume.get("sid") or ""
+    cwd = resume.get("cwd") or ""
+    git_branch = resume.get("branch") or ""
+    cur_model = resume.get("model") or ""
+    cur_turn_id = resume.get("turn_id") or ""
+    intent: Optional[str] = resume.get("intent")
+    idx = int(resume.get("idx") or 0)
+    _ps = resume.get("prev_sig")
+    prev_sig: Optional[tuple] = tuple(_ps) if _ps else None
+    turns: list = []
     last_rate_limits: Optional[dict] = None
-    idx = 0
-    prev_sig: Optional[tuple] = None   # son eklenen delta imzası (anti-duplicate)
+    offset = int(start_offset or 0)
 
     try:
-        with path.open("r", encoding="utf-8", errors="replace") as fh:
-            for raw in fh:
+        # Binary so byte offsets are exact; only consume newline-terminated lines.
+        with path.open("rb") as fh:
+            fh.seek(offset)
+            for raw_b in fh:
+                if not raw_b.endswith(b"\n"):
+                    break          # partial trailing line → consume on next pass
+                offset += len(raw_b)
+                raw = raw_b.decode("utf-8", "replace")
                 if not _line_of_interest(raw):
                     continue
                 try:
@@ -159,7 +172,10 @@ def parse_codex_file(path: Path) -> tuple[dict, list[list], Optional[str], Optio
     except OSError:
         pass
     meta = {"sid": session_id or path.stem, "cwd": cwd, "branch": git_branch}
-    return meta, turns, intent, last_rate_limits
+    state = {"sid": session_id, "cwd": cwd, "branch": git_branch,
+             "model": cur_model, "turn_id": cur_turn_id, "idx": idx,
+             "prev_sig": list(prev_sig) if prev_sig else None, "intent": intent}
+    return meta, turns, intent, last_rate_limits, offset, state
 
 
 def _load_cache() -> dict:
@@ -252,19 +268,36 @@ def load_codex_records(
             except OSError:
                 continue
             cached = cache.get(key)
-            if (cached and cached.get("sig") == sig
-                    and cached.get("v") == _PARSE_VERSION and "meta" in cached):
-                meta = cached["meta"]
-                turns = cached.get("turns", [])
-                intent = cached.get("intent")
-                rl = cached.get("rate_limits")
+            if cached and cached.get("v") == _PARSE_VERSION and "meta" in cached:
+                old_sig = cached.get("sig") or [0, 0]
+                off0 = int(cached.get("offset") or 0)
+                if old_sig == sig:
+                    # unchanged → reuse cached fully (no I/O)
+                    meta = cached["meta"]; turns = cached.get("turns", [])
+                    intent = cached.get("intent"); rl = cached.get("rate_limits")
+                    offset = off0; state = cached.get("resume") or {}
+                elif sig[1] > old_sig[1] and off0 <= sig[1]:
+                    # append-only growth → INCREMENTAL: read ONLY the new bytes,
+                    # append to the cached turns (the 7.7GB active file never gets
+                    # fully reparsed → ~30s build collapses to milliseconds).
+                    meta, new_turns, intent2, rl2, offset, state = parse_codex_file(
+                        path, start_offset=off0, resume=cached.get("resume") or {})
+                    turns = (cached.get("turns") or []) + new_turns
+                    intent = cached.get("intent") or intent2
+                    rl = rl2 or cached.get("rate_limits")
+                    reparsed += 1
+                else:
+                    # shrunk / rotated / edited-in-place → safe full reparse
+                    meta, turns, intent, rl, offset, state = parse_codex_file(path)
+                    reparsed += 1
             else:
-                meta, turns, intent, rl = parse_codex_file(path)
+                meta, turns, intent, rl, offset, state = parse_codex_file(path)
                 reparsed += 1
-            # KOMPAKT cache: meta (sid/cwd/branch 1 kez) + turns (tuple list).
+            state["intent"] = intent          # keep resume intent in sync
+            # KOMPAKT cache + byte offset & resume state for incremental reparse.
             new_cache[key] = {"sig": sig, "v": _PARSE_VERSION, "meta": meta,
-                              "turns": turns, "intent": intent,
-                              "device": device, "rate_limits": rl}
+                              "turns": turns, "intent": intent, "device": device,
+                              "rate_limits": rl, "offset": offset, "resume": state}
             if rl and isinstance(rl, dict):
                 prev = latest_rl_by_dev.get(device)
                 if prev is None or (rl.get("_ts", 0) > prev.get("_ts", 0)):
