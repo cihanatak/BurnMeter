@@ -1702,6 +1702,12 @@ def build_report(
     # cache_creation 1.25x. Cihan: "anlık her turne göre, toplayarak gitmesin".
     turn_buckets: dict[str, dict] = {}
     for r in records:
+        # synthetic/placeholder kayıtlar (model "<synthetic>", 0 token) recent listesinde
+        # SLOT işgal edip gerçek turn'leri top-30'dan dışarı itiyordu (kart 2 satır görünüp
+        # altı boş kalıyordu). Frontend zaten "<" ile başlayanı gizliyor; burada top-30
+        # KESİMİNDEN ÖNCE eleyerek 30 GERÇEK turn'ün gelmesini sağlıyoruz.
+        if not r.model or str(r.model).startswith("<"):
+            continue
         tid = r.turn_id or r.message_id or r.uuid
         if not tid:
             continue
