@@ -1,4 +1,4 @@
-// ccmeter / codex_meter — dashboard frontend (modern rebuild 2026-05-30)
+// Burnmeter — dashboard frontend (modern rebuild 2026-05-30)
 // Local /api/report (source=claude|codex). Numbers are the hero.
 
 // ---------- helpers ----------
@@ -104,9 +104,9 @@ function render(rep) {
   const isCodex = src === "codex";
   document.documentElement.style.setProperty("--brand", isCodex ? "var(--brand-codex)" : "var(--brand-claude)");
   document.documentElement.style.setProperty("--brand-soft", isCodex ? "var(--brand-codex-soft)" : "var(--brand-claude-soft)");
-  $("app-name").textContent = isCodex ? "codex_meter" : "ccmeter";
+  $("app-name").textContent = "Burnmeter";
   $("brand-logo").textContent = isCodex ? "⌬" : "◔";
-  document.title = (isCodex ? "codex_meter" : "ccmeter") + " — AI coding yakıt metresi";
+  document.title = "Burnmeter — AI coding yakıt metresi";
   $("version").textContent = "v" + (rep._meta?.version || "?");
   $("data-source").textContent = `${rep._meta?.files_scanned ?? "?"} dosya · ${fmtInt(rep.record_count || 0)} kayıt`;
 
@@ -161,8 +161,8 @@ function renderCombined(cl, cx) {
   if (mn) mn.style.display = "none";
   if (cv) cv.style.display = "flex";
   document.documentElement.style.setProperty("--brand", "var(--brand-claude)");
-  $("app-name").textContent = "ccmeter"; $("brand-logo").textContent = "◫";
-  document.title = "ccmeter — Claude + Codex";
+  $("app-name").textContent = "Burnmeter"; $("brand-logo").textContent = "◫";
+  document.title = "Burnmeter — Claude + Codex";
   $("version").textContent = "v" + (cl._meta?.version || cx._meta?.version || "?");
   $("data-source").textContent = `Claude ${fmtInt(cl.record_count || 0)} · Codex ${fmtInt(cx.record_count || 0)} kayıt`;
   $("last-updated").textContent = "şimdi";
@@ -901,7 +901,7 @@ function start() {
       if (src === window.__source) return;
       window.__source = src; localStorage.setItem("ccmeter_source", src);
       document.querySelectorAll("#source-toggle button").forEach(x => x.classList.toggle("active", x.dataset.source === src));
-      $("last-updated").textContent = (src === "codex" ? "codex_meter" : "ccmeter") + " yükleniyor…";
+      $("last-updated").textContent = "Burnmeter yükleniyor…";
       window.__refreshInFlight = false; refresh(false);
     });
   });
