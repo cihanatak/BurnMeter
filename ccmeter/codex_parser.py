@@ -240,6 +240,9 @@ def load_codex_records(
     cache = _load_cache()
     new_cache: dict = {}
     records: list[UsageRecord] = []
+    # GLOBAL REPLAY DEDUP accumulator — key=(turn_id, in, out, cache_read) → en erken record.
+    # Codex resume/fork dosyaları geçmişi REPLAY eder (bkz. aşağıdaki dedup bloğu).
+    dedup: dict = {}
     user_intents: dict[str, str] = {}
     files = 0
     reparsed = 0
@@ -305,10 +308,23 @@ def load_codex_records(
             sid = meta.get("sid") if meta else None
             if intent and sid and sid not in user_intents:
                 user_intents[sid] = intent
+            # REPLAY DEDUP — Codex resume/fork dosyaları aynı konuşmanın geçmişini
+            # TEKRAR yazar: tek session_id N rollout dosyasına yayılır, her biri ~tüm
+            # turn'leri yeniden logger (sadece timestamp resume-zamanına kayar).
+            # Ölçülen: 1 session = 45 dosya = 543k turn ama gerçek ~14.8k (36.8x şişme)
+            # → burn rate ~700x patlıyordu. Her MANTIKSAL event'i (turn_id, in, out,
+            # cache_read) BİR KEZ say; en ERKEN timestamp'i tut (orijinal yakım anı →
+            # zaman-pencereleri doğru). Replay'ler aynı (turn_id,token) imzasını taşır,
+            # yalnız ts farklı → bu anahtar onları çökertir; replay olmayan session'lar
+            # (her event benzersiz imza) etkilenmez.
             for rec in _compact_to_usages(meta, turns, device):
-                records.append(rec)
+                k = (rec.turn_id, rec.input_tokens, rec.output_tokens, rec.cache_read_tokens)
+                prev = dedup.get(k)
+                if prev is None or rec.timestamp < prev.timestamp:
+                    dedup[k] = rec
 
     _save_cache(new_cache)
+    records = list(dedup.values())
     records.sort(key=lambda r: r.timestamp)
     return records, {
         "files_scanned": files,
