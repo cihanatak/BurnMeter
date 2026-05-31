@@ -9,9 +9,9 @@
 
 A **local-first** dashboard that reads the session logs your AI coding agents
 already write to disk and turns them into a real-time view of token usage, cost,
-burn-rate, and — most importantly — **how close you are to your plan's rate
-limit**. No API keys. No cloud account. No phone-home. Your data never leaves
-your machine.
+burn-rate, and — where the agent actually logs it (e.g. Codex) — **how close you
+are to your plan's rate limit**. No API keys. No cloud account. No phone-home.
+Your data never leaves your machine.
 
 ---
 
@@ -30,8 +30,10 @@ ccmeter reads them — `~/.claude/projects/**/*.jsonl` and
 ## Features
 
 - **Binding-constraint hero** — the single most-urgent number, front and center.
-  For subscription plans that's your **rate-limit %** (5-hour + weekly); for API
-  it's burn-rate $. Red ring at 90%+ means "you're about to get throttled."
+  **Codex** logs real rate-limit usage, so its hero is your **rate-limit %** (5-hour +
+  weekly) — red ring at 90%+ means "about to get throttled." **Claude Code** exposes
+  *no* account-level limit (Anthropic doesn't write one to disk), so its hero is
+  burn-rate $ + live local usage — honestly labelled, never a guessed limit.
 - **Real per-model pricing** — Opus / Sonnet / Haiku and GPT-5.5 / 5.4 / Codex /
   mini, each at its actual rate. Output costs 5–8× input — the model mix *is* the
   cost story.
@@ -48,19 +50,28 @@ ccmeter reads them — `~/.claude/projects/**/*.jsonl` and
 
 ## Install
 
-> Packaging for Homebrew / npm / PyPI is in progress (see [`NAMING.md`](./NAMING.md)).
-> For now, run from source (Python 3.10+, no third-party deps):
+Python 3.10+, **zero third-party dependencies** (Chart.js / GridStack load from a CDN in
+the browser). Recommended: [pipx](https://pipx.pypa.io) for an isolated install.
 
 ```bash
-git clone <repo-url> ccmeter && cd ccmeter
-python3 -m ccmeter serve --port 9876
+pipx install git+https://github.com/cihanatak/CCmeter   # PyPI release coming → `pipx install ccmeter`
+ccmeter serve --port 9876
 # open http://127.0.0.1:9876
+```
+
+Or with pip, or straight from a source checkout:
+
+```bash
+pip install git+https://github.com/cihanatak/CCmeter && ccmeter serve
+# — or —
+git clone https://github.com/cihanatak/CCmeter && cd CCmeter
+python3 -m ccmeter serve --port 9876
 ```
 
 Multi-source (Claude + Codex) and a synced second machine:
 
 ```bash
-python3 -m ccmeter serve --port 9876 \
+ccmeter serve --port 9876 \
   --extra-projects-dir ~/.claude/projects-pc \
   --codex-extra-dir   ~/.codex/sessions-pc
 ```
