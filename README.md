@@ -45,6 +45,9 @@ ccmeter reads them — `~/.claude/projects/**/*.jsonl` and
   "where did it go" picture, with sparklines and clean charts.
 - **Multi-device** — sync a second machine's logs in (e.g. via Syncthing) and see
   per-device breakdowns.
+- **Terminal statusline** — `ccmeter statusline` prints a one-liner for your shell
+  prompt or Claude Code's status bar (verdict · model · $/h · block left · errors ·
+  cache · today). Same numbers as the dashboard, no server needed.
 - **Tiny footprint** — the long-running server holds ~30 MB; heavy parsing runs
   in a short-lived worker so memory never balloons.
 
@@ -74,6 +77,30 @@ Multi-source (Claude + Codex) and a synced second machine:
 ccmeter serve --port 9876 \
   --extra-projects-dir ~/.claude/projects-pc \
   --codex-extra-dir   ~/.codex/sessions-pc
+```
+
+## Terminal statusline
+
+A one-line live readout for your prompt or Claude Code's status bar — verdict
+dot, active model, $/h burn, block time left, 24h errors, cache hit, today's spend:
+
+```bash
+ccmeter statusline
+# 🟠 Sonnet 4.6 $48/h · blok 1h34m · 12err/24h · cache %97 · gün $42
+
+ccmeter statusline --source codex   # Codex instead of Claude
+ccmeter statusline --json           # machine-readable, same numbers
+```
+
+It computes standalone (no running server needed) and shares its logic with the
+`/api/statusline` HTTP endpoint, so the terminal line and the dashboard never drift.
+
+Wire it into **Claude Code** (`~/.claude/settings.json`) so it refreshes in your prompt:
+
+```json
+{
+  "statusLine": { "type": "command", "command": "ccmeter statusline" }
+}
 ```
 
 ## How it works

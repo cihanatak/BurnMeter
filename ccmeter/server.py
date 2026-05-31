@@ -220,73 +220,15 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
             # `statusLine.command` and shown live in the prompt. Returns
             # plain text by default, JSON if ?format=json.
             if path == "/api/statusline":
+                # Single source of truth: ccmeter/statusline.py (shared with the
+                # `ccmeter statusline` CLI subcommand, so HTTP pull + terminal never drift).
+                from .statusline import build_statusline, statusline_text
                 src = (qs.get("source", ["claude"])[0] or "claude").lower()
                 report = build_for(src, None)   # shared worker-backed cached report
-                cw = report.get("current_window") or {}
-                err = report.get("errors") or {}
-                fc = report.get("forecast") or {}
-                totals = report.get("totals") or {}
-
-                # Active model = the model used by the latest session.
-                active_model = "—"
-                sessions = report.get("by_session") or []
-                if sessions and sessions[0].get("models"):
-                    raw = sessions[0]["models"][-1]
-                    if raw and not str(raw).startswith("<"):
-                        m = str(raw).lower()
-                        match = None
-                        for fam in ("opus", "sonnet", "haiku"):
-                            if fam in m:
-                                import re
-                                hit = re.search(r"(opus|sonnet|haiku)-(\d+)-(\d+)", m)
-                                if hit:
-                                    active_model = f"{hit.group(1).capitalize()} {hit.group(2)}.{hit.group(3)}"
-                                    match = True
-                                    break
-                        if not match:
-                            active_model = raw
-
-                burn = fc.get("burn_rate_per_hour_recent", cw.get("cost_per_hour", 0))
-                # Verdict dot based on speedometer zones.
-                zones = report.get("burn_rate_zones") or {}
-                if burn >= (zones.get("heavy", 25)):       dot = "🔴"
-                elif burn >= (zones.get("busy", 15)):     dot = "🟠"
-                elif burn >= (zones.get("typical", 5)):   dot = "🟡"
-                else:                                      dot = "🟢"
-
-                # Block remaining (5h window) — show as mm or h:mm.
-                rem_sec = cw.get("remaining_seconds", 0)
-                rem_min = max(0, rem_sec // 60)
-                if rem_min >= 60:
-                    rem_str = f"{rem_min // 60}h{rem_min % 60:02d}m"
-                else:
-                    rem_str = f"{rem_min}dk"
-
-                # Block-P90-already-past flag — show a warning if blown.
-                p90_flag = "⚠️ P90+" if cw.get("block_already_past_p90") else ""
-
-                err24 = err.get("total", 0)
-                cache_rate = totals.get("cache_hit_rate", 0) * 100
-
-                # Plain text line by default.
-                want_json = qs.get("format", [""])[0] == "json"
-                if want_json:
-                    _json_response(self, 200, {
-                        "verdict": dot,
-                        "active_model": active_model,
-                        "burn_rate_per_hour": round(burn, 2),
-                        "block_remaining_min": int(rem_min),
-                        "block_past_p90": bool(cw.get("block_already_past_p90")),
-                        "errors_24h": err24,
-                        "cache_hit_pct": round(cache_rate, 1),
-                        "today_cost": round(fc.get("today", {}).get("so_far", 0), 2),
-                    })
+                if qs.get("format", [""])[0] == "json":
+                    _json_response(self, 200, build_statusline(report))
                     return
-                line = (
-                    f"{dot} {active_model} ${burn:.0f}/h · blok {rem_str} {p90_flag}· "
-                    f"{err24}err/24h · cache %{cache_rate:.0f} · gün ${fc.get('today', {}).get('so_far', 0):.0f}"
-                )
-                body = line.encode("utf-8")
+                body = statusline_text(report).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")
                 self.send_header("Cache-Control", "no-store")

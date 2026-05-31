@@ -249,6 +249,40 @@ def cmd_serve(args):
     return 0
 
 
+def cmd_statusline(args):
+    """One short line for a prompt / Claude Code statusLine.command.
+
+    Computes standalone (no running server needed) so it works even before
+    `ccmeter serve` is up. Shares ccmeter/statusline.py with the HTTP endpoint,
+    so the terminal line and the web pull are identical.
+    """
+    from .statusline import build_statusline, statusline_text
+    src = (getattr(args, "source", "claude") or "claude").lower()
+    if src == "codex":
+        from .codex_parser import CODEX_SESSIONS_DIR, load_codex_records
+        root = (Path(args.codex_dir).expanduser()
+                if getattr(args, "codex_dir", None) else CODEX_SESSIONS_DIR)
+        records, _stats, intents = load_codex_records(root)
+        errors: list = []
+    else:
+        records, _stats, intents, errors = load_records(Path(args.projects_dir))
+
+    # A statusLine command must ALWAYS print exactly one short line and exit 0,
+    # otherwise Claude Code surfaces it as an error in the prompt.
+    if not records:
+        print(f"○ ccmeter: {src} verisi yok")
+        return 0
+
+    report = build_report(records, plan=args.plan, user_intents=intents,
+                          error_events=errors, source=src)
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps(build_statusline(report), ensure_ascii=False))
+    else:
+        print(statusline_text(report))
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="ccmeter")
     parser.add_argument("--projects-dir", default=str(CLAUDE_PROJECTS_DIR))
@@ -279,6 +313,15 @@ def main(argv=None):
     p_serve.add_argument("--codex-extra-dir", action="append", default=[],
                          help="ek Codex sessions dizinleri (PC mirror'ı vb.).")
 
+    p_sl = sub.add_parser("statusline",
+                          help="tek satır canlı durum (Claude Code statusLine.command için)")
+    p_sl.add_argument("--source", default="claude", choices=["claude", "codex"],
+                      help="hangi araç (default claude)")
+    p_sl.add_argument("--json", action="store_true",
+                      help="plain text yerine JSON çıktı")
+    p_sl.add_argument("--codex-dir", default=None,
+                      help="Codex sessions kökü (default ~/.codex/sessions)")
+
     args = parser.parse_args(argv)
 
     handlers = {
@@ -287,6 +330,7 @@ def main(argv=None):
         "models": cmd_models,
         "sessions": cmd_sessions,
         "serve": cmd_serve,
+        "statusline": cmd_statusline,
     }
     return handlers[args.cmd](args)
 
