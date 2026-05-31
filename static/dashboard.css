@@ -112,9 +112,28 @@ header {
 }
 .live-dot.stale { background: var(--text-4); }
 @keyframes pulse { 0%{transform:scale(.6);opacity:.7} 100%{transform:scale(1.8);opacity:0} }
-#refresh { background:transparent; border:1px solid var(--border-default); color: var(--text-3);
+#refresh, #reset-layout { background:transparent; border:1px solid var(--border-default); color: var(--text-3);
   width:28px;height:28px;border-radius:7px;cursor:pointer;font-size:14px; transition: all .15s; }
-#refresh:hover { color: var(--text-1); border-color: var(--border-strong); background: var(--bg-raised); }
+#refresh:hover, #reset-layout:hover { color: var(--text-1); border-color: var(--border-strong); background: var(--bg-raised); }
+
+/* ---------- modular grid (GridStack: sürükle · resize · yer değiştir) ---------- */
+main.gs-active { display:block; }
+.grid-stack { background:transparent; }
+.grid-stack-item-content { inset:0; }
+.grid-stack-item-content > .card { height:100%; margin:0; overflow:auto; }
+/* grafik/hero kartları: içerik kartı doldursun (resize'da büyüsün) */
+.gs-active [data-card="trend"], .gs-active [data-card="daily"],
+.gs-active [data-card="models"], .gs-active .card-hero {
+  overflow:hidden; display:flex; flex-direction:column; }
+.gs-active [data-card="trend"] .chart-wrap, .gs-active [data-card="daily"] .chart-wrap {
+  flex:1 1 auto; height:auto; min-height:120px; }
+.gs-active [data-card="models"] .donut-wrap { flex:1 1 auto; min-height:120px; }
+.gs-active .card-hero .speedo-wrap { flex:1 1 auto; min-height:0; align-items:flex-start; }
+/* sürükleme imleci + resize handle */
+.gs-active .card { cursor:grab; }
+.gs-active .card:active { cursor:grabbing; }
+.grid-stack-item > .ui-resizable-handle { opacity:0; transition:opacity .15s; }
+.grid-stack-item:hover > .ui-resizable-handle { opacity:.55; }
 
 /* ---------- Layout grid ---------- */
 main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);

@@ -541,6 +541,50 @@ function updateLiveStamp() {
 }
 
 // ---------- init ----------
+// ---------- modular grid (GridStack: sürükle · resize · yer değiştir · kaydet) ----------
+function initModularGrid() {
+  if (typeof GridStack === "undefined") return;   // CDN yüklenmediyse statik layout'a düş
+  const main = document.querySelector("main");
+  if (!main || main.classList.contains("gs-active")) return;
+  const cards = [...main.querySelectorAll(":scope > .card")];
+  if (!cards.length) return;
+  const colW = c => { const m = (c.className.match(/col-(\d+)/) || [])[1]; return m ? +m : 4; };
+  // varsayılan yükseklikler (satır = 76px); kullanıcı resize edip kaydedebilir
+  const H = { hero: 5, "hero-aside": 5, kpi: 2, eff: 5, cache: 5, trend: 5, models: 5,
+              daily: 4, projects: 5, recent: 5, "model-table": 5, behavior: 3, tools: 3 };
+  const gs = document.createElement("div");
+  gs.className = "grid-stack";
+  cards.forEach(card => {
+    const item = document.createElement("div");
+    item.className = "grid-stack-item";
+    item.setAttribute("gs-w", colW(card));
+    item.setAttribute("gs-h", H[card.dataset.card] || 4);
+    item.setAttribute("gs-id", card.dataset.card || ("c" + Math.random().toString(36).slice(2, 8)));
+    const content = document.createElement("div");
+    content.className = "grid-stack-item-content";
+    content.appendChild(card);
+    item.appendChild(content);
+    gs.appendChild(item);
+  });
+  main.appendChild(gs);
+  main.classList.add("gs-active");
+  const grid = GridStack.init({
+    column: 12, cellHeight: 76, margin: 8, float: false, animate: false,
+    // interaktif öğelerden sürükleme başlatma (tıklamalar çalışsın)
+    draggable: { cancel: "button, input, select, a, canvas, table, .picker, .indicator-bar, .scroll, .tbl, .speedo-breakdown, .donut-wrap" },
+    resizable: { handles: "e, se, s, sw, w" },
+  }, gs);
+  window.__grid = grid;
+  try {
+    const saved = JSON.parse(localStorage.getItem("ccmeter_layout_v1") || "null");
+    if (saved && saved.length) grid.load(saved, false);   // gs-id'ye göre konumları geri yükle
+  } catch (e) { /* bozuk kayıt → varsayılan */ }
+  const save = () => { try { localStorage.setItem("ccmeter_layout_v1", JSON.stringify(grid.save(false))); } catch (e) {} };
+  grid.on("change", save);
+  // resize sonrası grafikleri yeni boyuta sığdır
+  grid.on("resizestop", () => { Object.values(window.__charts || {}).forEach(ch => { try { ch.resize(); } catch (e) {} }); });
+}
+
 function start() {
   $("refresh").addEventListener("click", () => refresh(true));
   // source toggle
@@ -588,6 +632,9 @@ function start() {
       if (window.__lastReport) renderTrend(window.__lastReport, window.__source === "codex");
     });
   });
+  initModularGrid();
+  const rl = $("reset-layout");
+  if (rl) rl.addEventListener("click", () => { localStorage.removeItem("ccmeter_layout_v1"); location.reload(); });
   refresh(false);
   setInterval(() => refresh(false), 10000);
   setInterval(updateLiveStamp, 1000);
