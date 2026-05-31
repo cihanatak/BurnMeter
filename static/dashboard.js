@@ -201,7 +201,7 @@ function renderSpeedometer(rep, isCodex) {
 function renderHeroAside(rep, isCodex) {
   const fc = rep.forecast || {};
   const cw = rep.current_window || {};
-  $("aside-title").firstChild.textContent = isCodex ? "Plan limiti · duvar " : "5 saat bloğu · senin temponla kıyas ";
+  $("aside-title").firstChild.textContent = isCodex ? "Plan limiti · duvar " : "Lokal kullanım ";
   $("aside-sub").textContent = isCodex ? "Codex Pro" : "Claude";
 
   const bigPct = (pct, label, sub, resetSec) => {
@@ -223,17 +223,24 @@ function renderHeroAside(rep, isCodex) {
     body += bigPct(wk.used_percent || 0, "haftalık Codex limiti", "bu hafta kullandığın oran", wk.resets_at);
     body += bigPct(h5.used_percent || 0, "5 saat limiti", "son 5 saatte kullandığın oran", h5.resets_at);
   } else {
-    // Claude: no exposed rate-limit % → personal P90/P95 baselines. NET labels.
-    const used = cw.cost_usd || 0, p90 = cw.baseline_cost_p90 || 0, p50 = cw.baseline_cost_p50 || 0;
-    const blockPct = p90 > 0 ? Math.min(100, used / p90 * 100) : 0;
+    // Claude: Anthropic exposes NO account limit/quota → we deliberately do NOT
+    // show any "% of limit" gauge (it would be fabricated). Honest local usage
+    // facts only (estimated $); the user's own peaks shown as plain context.
+    const bigFact = (val, label, sub) => `<div style="margin-bottom:14px">
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <span class="num" style="font-size:32px;font-weight:600;color:var(--text-1)">${val}</span>
+          <span style="color:var(--text-3);font-size:12px;font-weight:600">${label}</span></div>
+        <div class="dim" style="font-size:11px;margin-top:6px">${sub}</div></div>`;
+    const used = cw.cost_usd || 0, p90 = cw.baseline_cost_p90 || 0;
     const wc = rep.weekly_cap || {};
-    const wkPct = Math.min(100, wc.pct_of_personal_p95 || 0);
-    body += bigPct(blockPct, "yoğun bloğuna göre (P90)",
-      `bu blokta ${fmtMoney0(used)} · senin <strong>yoğun bloğun</strong> (P90) ${fmtMoney0(p90)}`,
-      cw.active ? (cw.remaining_seconds || 0) : 0);
-    body += bigPct(wkPct, "yoğun haftana göre (P95)",
-      `bu hafta ${fmtMoney0(wc.rolling_7d_cost || 0)} · senin <strong>yoğun haftan</strong> (P95) ${fmtMoney0(wc.historical_7d_p95 || 0)}`, 0);
-    body += `<div class="dim" style="font-size:10.5px;line-height:1.45;margin:-6px 0 14px;color:var(--text-4)">Anthropic limiti DEĞİL — senin P90/P95 geçmişine göre kıyas.</div>`;
+    const rate = cw.cost_per_hour;
+    body += bigFact("~" + fmtMoney0(used), "bu 5 saatlik blok",
+      (cw.active ? "şu an açık" : "blok kapalı")
+      + (rate ? ` · ~${fmtMoney(rate)}/sa` : "")
+      + (p90 ? ` · yoğun bloğun ~${fmtMoney0(p90)}` : ""));
+    body += bigFact("~" + fmtMoney0(wc.rolling_7d_cost || 0), "bu hafta (7 gün)",
+      wc.historical_7d_p95 ? `yoğun haftan ~${fmtMoney0(wc.historical_7d_p95)}` : "lokal toplam");
+    body += `<div class="dim" style="font-size:10.5px;line-height:1.45;margin:-4px 0 14px;color:var(--text-4)">Anthropic hesap-limiti/kotası vermez — bunlar sadece lokal kullanım (tahmini $).</div>`;
   }
 
   // key stats footer — clearly labeled
