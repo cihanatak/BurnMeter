@@ -250,11 +250,11 @@ def aggregate_by_session(
             item["recent_window_messages"] = rt["messages"]
             item["recent_window_cache_hit_rate"] = rt["cache_hit_rate"]
         # LAST TURN — son tek mesaj/turn'ün token'ları (Cihan paradigm
-        # 2026-05-29 v3: "saf net temiz safi limitten düşen token").
+        # 2026-05-29 v3: "maliyet ağırlıklı giriş eşdeğeri token").
         #
-        # last_turn_effective_tokens — DOĞRU "yakım" sayısı. Anthropic 4
-        # kategoriyi farklı oranda ücretlendirir, plan limiti de cost-weighted
-        # sayar. Ham total cache_read'i 10x şişirir (yanlış). Input-equivalent:
+        # last_turn_effective_tokens — maliyet ağırlıklı "yakım" sayısı.
+        # Anthropic 4 kategoriyi farklı oranda ücretlendirir; ham total
+        # cache_read'i 10x şişirir (yanlış). Input-equivalent:
         #     input + output*5 + cache_creation*1.25 + cache_read*0.10
         # Oranlar Opus/Sonnet/Haiku için identik (5x out, 1.25x cw, 0.10x cr).
         #
@@ -994,9 +994,10 @@ def fuel_efficiency(
     cutoff_30 = today - timedelta(days=30)
 
     # --- 1. Per active HOUR (replaces misleading $/day comparison) ---
-    # $13/day reference assumes ~2h of AI-assisted coding/day, so the
-    # "real" per-hour reference is ~$6.50/hr. We use $7/hr typical and
-    # $15/hr heavy as our band.
+    # Honesty (2026-05-31): there is no verifiable external $/hr norm, and
+    # Anthropic exposes no account-level usage baseline. The per-hour band is
+    # therefore SELF-RELATIVE — derived below from the user's own prior 30d
+    # $/hr. (Earlier hardcoded 4/12/25 constants are removed.)
     hours_stats = active_hours_stats(records, days=7)
     prior_hours_stats = active_hours_stats(
         [r for r in records if r.timestamp.date() < cutoff_7 and r.timestamp.date() >= cutoff_30],
@@ -1012,50 +1013,75 @@ def fuel_efficiency(
     p90_day = INDUSTRY_REFERENCE["active_day_p90_cost_usd"]            # $30
 
     you_per_hour = hours_stats["cost_per_hour"]
-    HOUR_LIGHT, HOUR_NORMAL_HI, HOUR_HEAVY = 4.0, 12.0, 25.0
+    # Self-relative per-hour band: anchor on the user's OWN prior 30d $/hr
+    # (Anthropic exposes no per-hour norm; the earlier 4/12/25 constants had no
+    # verifiable source and contradicted the surrounding comment). The band is
+    # [0.7x .. 1.3x] of the personal anchor; "heavy" = 2x personal.
+    personal_hour_anchor = prior_hours_stats["cost_per_hour"]
+    if personal_hour_anchor and personal_hour_anchor > 0:
+        HOUR_LIGHT = round(personal_hour_anchor * 0.7, 2)
+        HOUR_NORMAL_HI = round(personal_hour_anchor * 1.3, 2)
+        HOUR_HEAVY = round(personal_hour_anchor * 2.0, 2)
+        _hour_anchored = True
+    else:
+        # No personal history yet → conservative defaults, flagged for the UI.
+        HOUR_LIGHT, HOUR_NORMAL_HI, HOUR_HEAVY = 4.0, 12.0, 25.0
+        _hour_anchored = False
     if hours_stats["active_hours"] < 0.5:
         hour_kind, hour_label = "neutral", "barely any recent activity"
+    elif not _hour_anchored:
+        hour_kind, hour_label = "neutral", "henüz kişisel baz yok"
     elif you_per_hour < HOUR_LIGHT:
-        hour_kind, hour_label = "good", "light per hour (~typical)"
+        hour_kind, hour_label = "good", "senin tipiğinin altında"
     elif you_per_hour < HOUR_NORMAL_HI:
-        hour_kind, hour_label = "good", "normal per hour"
+        hour_kind, hour_label = "good", "senin tipik aralığında"
     elif you_per_hour < HOUR_HEAVY:
-        hour_kind, hour_label = "warn", "heavy per hour"
+        hour_kind, hour_label = "warn", "senin yoğun saatlerin seviyesinde"
     else:
-        hour_kind, hour_label = "bad", "very expensive per hour"
+        hour_kind, hour_label = "bad", "senin yoğun saatlerinin üstünde"
 
+    # Self-relative day verdict: compare recent $/day to the user's OWN prior
+    # 30d average (NOT an unverifiable industry constant). Anthropic exposes no
+    # account-level usage baseline, so the only honest anchor is the user's
+    # history. `day_anchor` is the personal prior avg when we have enough prior
+    # samples; otherwise we stay neutral rather than fabricate a comparison.
+    day_anchor = prior_avg if prior_n >= 3 else 0.0
+    # Personal busy-day reference (P90 over the user's own active days, last 30d).
+    _active_day_costs = sorted(
+        d["cost_usd"] for d in daily
+        if d.get("cost_usd", 0) >= 0.5 and d.get("date", "") >= cutoff_30.isoformat()
+    )
+    if len(_active_day_costs) >= 5:
+        _p90_idx = max(0, int(round(0.9 * (len(_active_day_costs) - 1))))
+        personal_day_p90 = _active_day_costs[_p90_idx]
+    else:
+        personal_day_p90 = 0.0
     if recent_n == 0:
         day_kind, day_label = "neutral", "no recent activity"
+    elif day_anchor <= 0:
+        day_kind, day_label = "neutral", "no prior baseline yet"
     else:
-        ratio = recent_avg / baseline_day if baseline_day else 0
-        if recent_avg < baseline_day * 0.7:
-            day_kind, day_label = "good", f"{ratio:.1f}x ref (light)"
-        elif recent_avg < baseline_day * 1.3:
-            day_kind, day_label = "good", f"{ratio:.1f}x ref (normal)"
-        elif recent_avg < p90_day:
-            day_kind, day_label = "warn", f"{ratio:.1f}x ref (heavy)"
+        ratio = recent_avg / day_anchor
+        if ratio < 0.7:
+            day_kind, day_label = "good", f"{ratio:.1f}x senin normalin (düşük)"
+        elif ratio < 1.3:
+            day_kind, day_label = "good", f"{ratio:.1f}x senin normalin"
+        elif ratio < 2.0:
+            day_kind, day_label = "warn", f"{ratio:.1f}x senin normalin (yoğun)"
         else:
-            day_kind, day_label = "bad", f"{ratio:.1f}x ref (very heavy)"
+            day_kind, day_label = "bad", f"{ratio:.1f}x senin normalin (çok yoğun)"
 
     # --- 2. Per commit ---
     you_per_commit = git_attr.get("mean_cost_usd", 0)
     you_median_commit = git_attr.get("median_cost_usd", 0)
-    # Implied baseline: industry-avg $13/day ÷ ~3 commits/day per enterprise dev studies
-    baseline_commit = baseline_day / 3.0     # ~$4.33
     matched = git_attr.get("total_commits_matched", 0)
-
+    # Anthropic exposes no account data and there is NO verifiable industry
+    # $/commit number (the old "industry $13/day ÷ 3 commits" anchor was
+    # fabricated). So this is DESCRIPTIVE only — the raw figure, no judgment.
     if matched < 3:
-        commit_kind, commit_label = "neutral", "not enough commits matched"
+        commit_kind, commit_label = "neutral", "yeterli commit eşleşmedi"
     else:
-        ratio_c = you_median_commit / baseline_commit if baseline_commit else 0
-        if you_median_commit < baseline_commit * 0.7:
-            commit_kind, commit_label = "good", f"{ratio_c:.1f}x reference (efficient)"
-        elif you_median_commit < baseline_commit * 1.3:
-            commit_kind, commit_label = "good", f"{ratio_c:.1f}x reference (normal)"
-        elif you_median_commit < baseline_commit * 2:
-            commit_kind, commit_label = "warn", f"{ratio_c:.1f}x reference (rich)"
-        else:
-            commit_kind, commit_label = "bad", f"{ratio_c:.1f}x reference (heavy)"
+        commit_kind, commit_label = "neutral", "ham · kıyas yok"
 
     # --- 3. Cache hit rate ---
     cache_rate = totals_dict.get("cache_hit_rate", 0)
@@ -1123,9 +1149,13 @@ def fuel_efficiency(
     if per_unit_good and (heavy_hour or warn_hour) and high_hours_per_day:
         headline_kind = "good"
         headline_label = "Power user · efficient unit economics"
+        _prior_hpd = prior_hours_stats.get("hours_per_active_day", 0)
+        _vs_prior = (
+            f" (senin son-30g ort. ~{_prior_hpd}h/gün)" if _prior_hpd and _prior_hpd > 0 else ""
+        )
         headline_detail = (
-            f"You're using {tool_label} ~{hours_stats['hours_per_active_day']}h/day "
-            f"(vs typical ~2h). Your per-commit ({fmtUsd(you_median_commit)}), "
+            f"You're using {tool_label} ~{hours_stats['hours_per_active_day']}h/day"
+            f"{_vs_prior}. Your per-commit ({fmtUsd(you_median_commit)}), "
             f"per-turn ({fmtUsd(you_per_turn)}), and cache hit ({cache_rate*100:.1f}%) "
             f"are all normal or better. Your high daily spend is from volume, not waste."
         )
@@ -1133,8 +1163,7 @@ def fuel_efficiency(
         headline_kind = "good"
         headline_label = "Efficient and within typical volume"
         headline_detail = (
-            "All your per-unit metrics are in the green and your daily volume "
-            "is around the industry typical."
+            "All your per-unit metrics are in the green relative to your own history."
         )
     elif not per_unit_good and (heavy_hour or warn_hour):
         headline_kind = "bad"
@@ -1177,8 +1206,9 @@ def fuel_efficiency(
         },
         "per_active_day": {
             "you_avg_recent7": round(recent_avg, 2),
-            "baseline_avg": baseline_day,
-            "baseline_p90": p90_day,
+            # Personal anchors (user's own history) — NOT an industry constant.
+            "baseline_avg": round(day_anchor, 2),
+            "baseline_p90": round(personal_day_p90, 2),
             "samples_recent": recent_n,
             "verdict_kind": day_kind,
             "verdict_label": day_label,
@@ -1186,8 +1216,6 @@ def fuel_efficiency(
         "per_commit": {
             "you_mean": round(you_per_commit, 2),
             "you_median": round(you_median_commit, 2),
-            "baseline_implied": round(baseline_commit, 2),
-            "baseline_note": "industry $13/day ÷ ~3 commits/day",
             "matched_commits": matched,
             "verdict_kind": commit_kind,
             "verdict_label": commit_label,
@@ -1525,11 +1553,15 @@ def burn_rate_zones(window_baseline_data: dict) -> dict:
     Cost in a 5h window / 5 = average $/hr during that window.
     """
     if not window_baseline_data.get("samples"):
+        # Not enough personal history yet → default thresholds (NOT derived from
+        # the user's own data). Flag it so the UI labels them as "varsayılan"
+        # instead of presenting them as measured personal zones.
         return {
             "typical": 4.0,
             "busy": 12.0,
             "heavy": 25.0,
             "max": 50.0,
+            "insufficient_history": True,
         }
     typical = (window_baseline_data.get("cost_p50") or 0) / 5.0
     busy = (window_baseline_data.get("cost_p90") or 0) / 5.0

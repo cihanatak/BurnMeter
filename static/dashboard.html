@@ -90,7 +90,7 @@
     <div class="chart-wrap tall"><canvas id="chart-trend"></canvas></div>
   </section>
   <section class="card col-4" data-card="models">
-    <div class="card-title">Model dağılımı <span class="sub">lifetime $</span></div>
+    <div class="card-title">Model dağılımı <span class="sub">lifetime $ (tahmini)</span></div>
     <div class="donut-wrap"><canvas id="chart-models"></canvas>
       <div class="donut-center"><div class="v" id="models-total">—</div><div class="l">toplam</div></div>
     </div>
@@ -99,21 +99,21 @@
 
   <!-- ROW 5 — daily spend (wide) + per-project (side) -->
   <section class="card col-7" data-card="daily">
-    <div class="card-title">Son 30 gün · günlük $ <span class="sub" id="daily-sub"></span></div>
+    <div class="card-title">Son 30 gün · günlük $ (tahmini) <span class="sub" id="daily-sub"></span></div>
     <div class="chart-wrap"><canvas id="chart-daily"></canvas></div>
   </section>
   <section class="card col-5" data-card="projects">
     <div class="card-title">Projeler · lifetime <span class="sub">hangi repo quota yiyor</span></div>
     <div class="scroll"><table class="tbl" id="projects-tbl">
-      <thead><tr><th>proje</th><th class="num">token</th><th class="num">$</th></tr></thead>
+      <thead><tr><th>proje</th><th class="num">token</th><th class="num">$ (tahmini)</th></tr></thead>
       <tbody></tbody></table></div>
   </section>
 
   <!-- ROW 6 — recent activity (wide) + per-model table (side) -->
   <section class="card col-7" data-card="recent">
-    <div class="card-title">Son aktivite · her satır 1 turn <span class="sub">saf net (limitten düşen)</span></div>
+    <div class="card-title">Son aktivite · her satır 1 turn <span class="sub" id="recent-sub">maliyet ağırlıklı eşdeğer token</span></div>
     <div class="scroll"><table class="tbl" id="recent-tbl">
-      <thead><tr><th>ne zaman</th><th>proje</th><th>model</th><th class="num">token</th><th class="num">$</th><th class="num">cache</th></tr></thead>
+      <thead><tr><th>ne zaman</th><th>proje</th><th>model</th><th class="num">token</th><th class="num">$ (tahmin)</th><th class="num">cache</th></tr></thead>
       <tbody></tbody></table></div>
   </section>
   <section class="card col-5" data-card="model-table">

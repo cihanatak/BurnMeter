@@ -166,7 +166,7 @@ def effective_tokens(
     cache_read_tokens: int = 0,
     cache_creation_tokens: int = 0,
 ) -> int:
-    """Cost-weighted input-equivalent token count ("saf net / limitten düşen").
+    """Cost-weighted input-equivalent token count (cost-weighted input-equiv.).
 
     Cihan paradigm 2026-05-29: ham toplam yanıltıcı çünkü cache_read 10x ucuz,
     output ise input'tan pahalı. Her token tipini KENDİ MODELİNİN input fiyatına
