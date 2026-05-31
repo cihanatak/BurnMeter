@@ -175,7 +175,7 @@ function renderCombined(cl, cx) {
 // her yarıda GERÇEK burn-rate speedometer (kendi tab'larındaki gibi) + 15dk/1h/2h/4h/6h picker
 function paintCombinedSide(side, rep, isCodex) {
   const root = document.getElementById("cv-" + side); if (!root) return;
-  const els = () => ({ svg: root.querySelector(".cv-speedo"), zone: root.querySelector(".cv-zone2"), breakdown: root.querySelector(".cv-breakdown") });
+  const els = () => ({ svg: root.querySelector(".cv-speedo"), zone: root.querySelector(".cv-zone2"), breakdown: root.querySelector(".cv-breakdown"), title: root.querySelector(".cvb-trow .cvb-t") });
   paintBurnGauge(els(), rep, isCodex, localStorage.getItem("ccmeter_burn_hours_" + side) || "2");
   root.querySelectorAll(".cv-picker button").forEach(b => {
     b.addEventListener("click", () => {
@@ -186,39 +186,103 @@ function paintCombinedSide(side, rep, isCodex) {
   });
 }
 
-// burn-rate gauge'ı verilen elemanlara çiz — single-view renderSpeedometer ile AYNI çizim,
-// combined view'ın her yarısı için ayrı çağrılabilir hale getirildi.
-function paintBurnGauge(els, rep, isCodex, hoursStr) {
-  if (!els.svg) return;
+// ===== gauge TEK KAYNAK (single tab renderSpeedometer + İkisi paintBurnGauge ortak) =====
+// Hangi gauge: CODEX rate-limit verisi varsa → binding-constraint rate-limit % (duvar);
+// yoksa (Claude veya limitsiz) → burn-rate $/saat. İki yer de bunu çağırır → ASLA ayrışmaz.
+function computeGaugeSpec(rep, isCodex, hoursStr) {
   const fc = rep.forecast || {};
-  const z = rep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25, max: 50 };
   const rate = (fc.burn_rates_by_hours || {})[hoursStr] ?? fc.burn_rate_per_hour_recent ?? 0;
-  const cx = 200, cy = 200, r = 150, max = z.max || 50;
+  const rl = rep.codex_rate_limits || {};
+  const dev = rl.mac || Object.values(rl)[0] || {};
+  const h5 = dev.primary || {}, wk = dev.secondary || {};
+  const useLimit = isCodex && (h5.used_percent != null || wk.used_percent != null);
+  let g;
+  if (useLimit) {
+    const h5p = h5.used_percent || 0, wkp = wk.used_percent || 0;
+    const bw = wkp >= h5p;                                 // hangi limit bağlayıcı (duvara yakın)
+    const bp = bw ? wkp : h5p, bind = bw ? wk : h5, op = bw ? h5p : wkp;
+    const winSec = (bind.window_minutes || (bw ? 10080 : 300)) * 60;
+    const eta = (() => {
+      const remaining = (bind.resets_at || 0) - Date.now() / 1000;
+      if (bp <= 0.5 || remaining <= 60) return null;
+      const elapsed = winSec - remaining; if (elapsed <= 60) return null;
+      const rt = bp / elapsed, to100 = (100 - bp) / rt;
+      return { to100, proj: Math.min(100, bp + rt * remaining), remaining, danger: to100 < remaining };
+    })();
+    const etaTxt = eta ? (eta.danger
+      ? `⚠ bu hızla ~${resetIn(Date.now() / 1000 + eta.to100)} sonra limit DOLAR (reset'ten önce!)`
+      : `bu hızla reset'te ~%${Math.round(eta.proj)} · güvende`) : null;
+    g = {
+      value: bp, max: 100, zones: { typical: 50, busy: 75, heavy: 90, max: 100 },
+      ticks: [{ v: 0, l: "%0" }, { v: 50, l: "yarı" }, { v: 75, l: "yoğun" }, { v: 90, l: "⚠ duvar" }],
+      valueText: "%" + Math.round(bp),
+      unitText: (bw ? "haftalık Codex limiti" : "5 saat limiti") + (bind.resets_at ? " · ↻ " + resetIn(bind.resets_at) : ""),
+      zone: bp >= 90 ? ["bad", "🔴 duvara çok yakın — throttle riski"]
+          : bp >= 75 ? ["warn", "🟠 yüksek kullanım"]
+          : bp >= 50 ? ["warn", "🟡 yarıyı geçtin"]
+          :            ["good", "🟢 bol alan var"],
+      ratio: rep.current_window?.vs_baseline_ratio, below: false,
+      note: (etaTxt ? etaTxt + " · " : "") + `öbür limit %${Math.round(op)} (${bw ? "5sa" : "haftalık"})`,
+    };
+  } else {
+    const z = rep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25, max: 50 };
+    const zd = !!z.insufficient_history;
+    g = {
+      value: rate, max: z.max || 50, zones: z,
+      ticks: zd
+        ? [{ v: 0, l: "$0" }, { v: z.typical, l: "tipik (varsayılan)" }, { v: z.busy, l: "yoğun (varsayılan)" }, { v: z.heavy, l: "ağır" }]
+        : [{ v: 0, l: "$0" }, { v: z.typical, l: "senin tipik" }, { v: z.busy, l: "senin yoğun (P90)" }, { v: z.heavy, l: "çok yoğun" }],
+      valueText: fmtMoney(rate),
+      unitText: `/saat · son ${hoursStr === "0.25" ? "15dk" : hoursStr + "h"} ort.${isCodex ? " (notional)" : " (tahmini $)"}`,
+      zone: rate >= z.heavy ? ["bad", "🔴 ağır bölge · çok yoğun yakıyorsun"]
+          : rate >= z.busy ? ["warn", "🟠 yoğun bölge"]
+          : rate >= z.typical ? ["warn", "🟡 normal üstü"]
+          :                  ["good", "🟢 sakin · verimli"],
+      ratio: rep.current_window?.vs_baseline_ratio, below: rate < z.typical,
+      note: zd ? "Eşikler varsayılan — henüz kişisel hız geçmişin yok."
+               : "Eşikler senin geçmiş 5s pencerelerinden (P50/P90).",
+    };
+  }
+  return { g, rate, fc, isLimit: useLimit };
+}
+
+// gauge SVG çizimi (arcs + ticks + iğne + value + unit) — verilen svg elemanına.
+function drawGaugeSvg(svgEl, g) {
+  if (!svgEl) return;
+  const cx = 200, cy = 200, r = 150, max = g.max, z = g.zones;
   const arcs =
     `<path class="speedo-zone-green"  d="${arcPath(cx,cy,r,0,z.typical,max)}" stroke-width="26" fill="none"/>` +
     `<path class="speedo-zone-yellow" d="${arcPath(cx,cy,r,z.typical,z.busy,max)}" stroke-width="26" fill="none"/>` +
     `<path class="speedo-zone-orange" d="${arcPath(cx,cy,r,z.busy,z.heavy,max)}" stroke-width="26" fill="none"/>` +
     `<path class="speedo-zone-red"    d="${arcPath(cx,cy,r,z.heavy,max,max)}" stroke-width="26" fill="none"/>`;
-  const ticks = [{ v: 0, l: "$0" }, { v: z.typical, l: "tipik" }, { v: z.busy, l: "P90" }, { v: z.heavy, l: "ağır" }];
-  const ticksSvg = ticks.map(t => {
+  const ticksSvg = g.ticks.map(t => {
     const a = 180 - (Math.min(t.v, max) / max) * 180, p = polarToCartesian(cx, cy, r + 20, a);
     const anc = a < 90 ? "start" : a > 90 ? "end" : "middle";
     return `<text class="speedo-tick-label" x="${p.x.toFixed(1)}" y="${p.y.toFixed(1)}" text-anchor="${anc}" dominant-baseline="middle">${t.l}</text>`;
   }).join("");
-  const clamped = Math.max(0, Math.min(rate, max)), na = 180 - (clamped / max) * 180;
+  const clamped = Math.max(0, Math.min(g.value, max)), na = 180 - (clamped / max) * 180;
   const tip = polarToCartesian(cx, cy, r - 6, na), tail = polarToCartesian(cx, cy, -24, na);
-  const zc = rate >= z.heavy ? "bad" : rate >= z.typical ? "warn" : "good";
-  const zt = rate >= z.heavy ? "🔴 ağır bölge" : rate >= z.busy ? "🟠 yoğun" : rate >= z.typical ? "🟡 normal üstü" : "🟢 sakin";
-  const needleCol = zc === "bad" ? "#F2555A" : zc === "warn" ? "#F5A623" : "#2BD96B";
-  els.svg.innerHTML = `${arcs}${ticksSvg}
+  const needleCol = g.zone[0] === "bad" ? "#F2555A" : g.zone[0] === "warn" ? "#F5A623" : "#2BD96B";
+  svgEl.innerHTML = `${arcs}${ticksSvg}
     <line x1="${tail.x.toFixed(1)}" y1="${tail.y.toFixed(1)}" x2="${tip.x.toFixed(1)}" y2="${tip.y.toFixed(1)}" stroke="${needleCol}" stroke-width="4" stroke-linecap="round"/>
     <circle class="speedo-hub" cx="${cx}" cy="${cy}" r="8"/>
-    <text class="speedo-value" x="${cx}" y="${cy + 36}">${fmtMoney(rate)}</text>
-    <text class="speedo-unit" x="${cx}" y="${cy + 52}">/saat · ${hoursStr === "0.25" ? "15dk" : hoursStr + "h"}${isCodex ? " notional" : " tahmini"}</text>`;
+    <text class="speedo-value" x="${cx}" y="${cy + 36}">${g.valueText}</text>
+    <text class="speedo-unit" x="${cx}" y="${cy + 52}">${g.unitText}</text>`;
+}
+
+// İkisi yarısının gauge'ı — single tab ile AYNI computeGaugeSpec/drawGaugeSvg → Codex'te
+// de rate-limit % gauge + burn breakdown (single Codex tab'in birebir aynısı).
+function paintBurnGauge(els, rep, isCodex, hoursStr) {
+  if (!els.svg) return;
+  const { g, fc, isLimit } = computeGaugeSpec(rep, isCodex, hoursStr);
+  drawGaugeSvg(els.svg, g);
+  if (els.title) els.title.textContent = isLimit ? "Limit · duvara ne kadar var?" : "Burn rate · çok mu yakıyorsun?";
   if (els.zone) {
-    const ratio = rep.current_window?.vs_baseline_ratio;
-    els.zone.className = "cv-zone2 " + zc;
-    els.zone.textContent = zt + (ratio != null && ratio > 0 ? ` · normalinin ${ratio.toFixed(1)}x` : "");
+    els.zone.className = "cv-zone2 " + g.zone[0];
+    let txt = g.zone[1];
+    if (g.ratio != null && g.ratio > 0) txt += ` · normalinin ${g.ratio.toFixed(1)}x`;
+    else if (g.below) txt += " · normalin altında";
+    els.zone.textContent = txt;
   }
   if (els.breakdown) {
     const bd = (fc.burn_rates_by_hours_by_model || {})[hoursStr] || [];
@@ -265,96 +329,13 @@ function arcPath(cx, cy, r, sv, ev, mv) {
 // "Bu araba çok mu yakıyor?" — burn rate $/sa, referans zone'lara (tipik/yoğun/
 // ağır) göre iğne + verdict. Window picker (15dk/1h/2h/4h/6h) ortalama penceresi.
 function renderSpeedometer(rep, isCodex) {
-  const fc = rep.forecast || {};
-  const cx = 200, cy = 200, r = 150;
   const hoursStr = localStorage.getItem("ccmeter_burn_hours_" + (isCodex ? "codex" : "claude")) || "2";
-  const rate = (fc.burn_rates_by_hours || {})[hoursStr] ?? fc.burn_rate_per_hour_recent ?? 0;
   // picker'ı aktif kaynağın penceresine senkronla (kaynak değişince doğru buton yansısın)
   document.querySelectorAll("#burn-window-picker button").forEach(x => x.classList.toggle("active", x.dataset.h === hoursStr));
-
-  // ----- choose the hero gauge -----
-  // CODEX → binding-constraint = the REAL rate-limit % (the wall you actually hit). This
-  //   is the market's #1 need ("am I about to get throttled?") and Codex logs it, while
-  //   most competitors are Claude-only and can't show it. Notional $/hr → demoted line.
-  // CLAUDE → Anthropic exposes NO account limit, so the burn-rate gauge stays (most-real).
-  const rl = rep.codex_rate_limits || {};
-  const dev = rl.mac || Object.values(rl)[0] || {};
-  const h5 = dev.primary || {}, wk = dev.secondary || {};
-  const useLimit = isCodex && (h5.used_percent != null || wk.used_percent != null);
-
-  let g;
-  if (useLimit) {
-    const h5p = h5.used_percent || 0, wkp = wk.used_percent || 0;
-    const bw = wkp >= h5p;                                 // which limit binds (closer to wall)
-    const bp = bw ? wkp : h5p, bind = bw ? wk : h5, op = bw ? h5p : wkp;
-    // ETA-to-limit — bu hızla ne zaman limite çarparsın (deterministik linear extrapolation;
-    // rakiplerin "ML tahmin"i de aslında bu). bp=%kullanım, reset=sıfırlanmaya kalan sn.
-    const winSec = (bind.window_minutes || (bw ? 10080 : 300)) * 60;   // pencere (data'dan: 300=5h, 10080=hafta)
-    const eta = (() => {
-      const remaining = (bind.resets_at || 0) - Date.now() / 1000;      // sıfırlanmaya kalan sn (resets_at = epoch)
-      if (bp <= 0.5 || remaining <= 60) return null;
-      const elapsed = winSec - remaining; if (elapsed <= 60) return null;
-      const rt = bp / elapsed, to100 = (100 - bp) / rt;                 // %/sn → 100%'e kalan sn
-      return { to100, proj: Math.min(100, bp + rt * remaining), remaining, danger: to100 < remaining };
-    })();
-    const etaTxt = eta ? (eta.danger
-      ? `⚠ bu hızla ~${resetIn(Date.now() / 1000 + eta.to100)} sonra limit DOLAR (reset'ten önce!)`
-      : `bu hızla reset'te ~%${Math.round(eta.proj)} · güvende`) : null;
-    g = {
-      value: bp, max: 100, zones: { typical: 50, busy: 75, heavy: 90, max: 100 },
-      ticks: [{ v: 0, l: "%0" }, { v: 50, l: "yarı" }, { v: 75, l: "yoğun" }, { v: 90, l: "⚠ duvar" }],
-      valueText: "%" + Math.round(bp),
-      unitText: (bw ? "haftalık Codex limiti" : "5 saat limiti") + (bind.resets_at ? " · ↻ " + resetIn(bind.resets_at) : ""),
-      zone: bp >= 90 ? ["bad", "🔴 duvara çok yakın — throttle riski"]
-          : bp >= 75 ? ["warn", "🟠 yüksek kullanım"]
-          : bp >= 50 ? ["warn", "🟡 yarıyı geçtin"]
-          :            ["good", "🟢 bol alan var"],
-      ratio: rep.current_window?.vs_baseline_ratio, below: false,
-      note: (etaTxt ? etaTxt + " · " : "") + `öbür limit %${Math.round(op)} (${bw ? "5sa" : "haftalık"})`,
-    };
-  } else {
-    const z = rep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25, max: 50 };
-    const zd = !!z.insufficient_history;
-    g = {
-      value: rate, max: z.max || 50, zones: z,
-      ticks: zd
-        ? [{ v: 0, l: "$0" }, { v: z.typical, l: "tipik (varsayılan)" }, { v: z.busy, l: "yoğun (varsayılan)" }, { v: z.heavy, l: "ağır" }]
-        : [{ v: 0, l: "$0" }, { v: z.typical, l: "senin tipik" }, { v: z.busy, l: "senin yoğun (P90)" }, { v: z.heavy, l: "çok yoğun" }],
-      valueText: fmtMoney(rate),
-      unitText: `/saat · son ${hoursStr === "0.25" ? "15dk" : hoursStr + "h"} ort.${isCodex ? " (notional)" : " (tahmini $)"}`,
-      zone: rate >= z.heavy ? ["bad", "🔴 ağır bölge · çok yoğun yakıyorsun"]
-          : rate >= z.busy ? ["warn", "🟠 yoğun bölge"]
-          : rate >= z.typical ? ["warn", "🟡 normal üstü"]
-          :                  ["good", "🟢 sakin · verimli"],
-      ratio: rep.current_window?.vs_baseline_ratio, below: rate < z.typical,
-      note: zd ? "Eşikler varsayılan — henüz kişisel hız geçmişin yok."
-               : "Eşikler senin geçmiş 5s pencerelerinden (P50/P90).",
-    };
-  }
-
-  const max = g.max, z = g.zones;
-  const arcs =
-    `<path class="speedo-zone-green"  d="${arcPath(cx,cy,r,0,z.typical,max)}" stroke-width="26" fill="none"/>` +
-    `<path class="speedo-zone-yellow" d="${arcPath(cx,cy,r,z.typical,z.busy,max)}" stroke-width="26" fill="none"/>` +
-    `<path class="speedo-zone-orange" d="${arcPath(cx,cy,r,z.busy,z.heavy,max)}" stroke-width="26" fill="none"/>` +
-    `<path class="speedo-zone-red"    d="${arcPath(cx,cy,r,z.heavy,max,max)}" stroke-width="26" fill="none"/>`;
-  const ticksSvg = g.ticks.map(t => {
-    const a = 180 - (Math.min(t.v, max) / max) * 180, p = polarToCartesian(cx, cy, r + 20, a);
-    const anc = a < 90 ? "start" : a > 90 ? "end" : "middle";
-    return `<text class="speedo-tick-label" x="${p.x.toFixed(1)}" y="${p.y.toFixed(1)}" text-anchor="${anc}" dominant-baseline="middle">${t.l}</text>`;
-  }).join("");
-  const clamped = Math.max(0, Math.min(g.value, max));
-  const na = 180 - (clamped / max) * 180;
-  const tip = polarToCartesian(cx, cy, r - 6, na), tail = polarToCartesian(cx, cy, -24, na);
+  // TEK KAYNAK: computeGaugeSpec — İkisi paintBurnGauge ile AYNI → single tab ↔ İkisi asla ayrışmaz.
+  const { g, fc } = computeGaugeSpec(rep, isCodex, hoursStr);
+  drawGaugeSvg($("speedo-svg"), g);
   const [zc, zw] = g.zone;
-  const needleCol = zc === "bad" ? "#F2555A" : zc === "warn" ? "#F5A623" : "#2BD96B";
-
-  const svg = $("speedo-svg");
-  if (svg) svg.innerHTML = `${arcs}${ticksSvg}
-    <line x1="${tail.x.toFixed(1)}" y1="${tail.y.toFixed(1)}" x2="${tip.x.toFixed(1)}" y2="${tip.y.toFixed(1)}" stroke="${needleCol}" stroke-width="4" stroke-linecap="round"/>
-    <circle class="speedo-hub" cx="${cx}" cy="${cy}" r="8"/>
-    <text class="speedo-value" x="${cx}" y="${cy + 36}">${g.valueText}</text>
-    <text class="speedo-unit" x="${cx}" y="${cy + 52}">${g.unitText}</text>`;
 
   $("speedo-zone").className = "speedo-zone-txt " + zc;
   const zoneEl = $("speedo-zone");
