@@ -122,6 +122,16 @@ header {
   font:600 11px/1 var(--font-sans); display:inline-flex; align-items:center; gap:5px; transition: all .15s; }
 #reset-layout:hover { color: var(--text-1); border-color: var(--accent); background: var(--bg-overlay); }
 #reset-layout:active { transform: scale(.96); }
+#alert-toggle { background:transparent; border:1px solid var(--border-default); color:var(--text-3); width:28px; height:28px; border-radius:7px; cursor:pointer; font-size:13px; transition:all .15s; }
+#alert-toggle:hover { color:var(--text-1); border-color:var(--border-strong); }
+#alert-toggle.on { color:var(--brand-codex); border-color:var(--brand-codex); box-shadow:inset 0 0 0 1px var(--brand-codex); }
+.alert-toast { position:fixed; top:52px; left:50%; transform:translateX(-50%) translateY(-12px); z-index:9999;
+  background:var(--bg-overlay); border:1px solid var(--border-strong); border-radius:10px; padding:11px 18px;
+  font-size:13px; font-weight:600; box-shadow:0 10px 34px rgba(0,0,0,.55); opacity:0; pointer-events:none;
+  transition:opacity .25s, transform .25s; max-width:90vw; }
+.alert-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+.alert-toast.warn { border-color:#F5A623; color:#F5A623; }
+.alert-toast.crit { border-color:#F2555A; color:#F2555A; }
 
 /* ---------- kaliteli scrollbar (ince · yuvarlak · temalı) ---------- */
 * { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }

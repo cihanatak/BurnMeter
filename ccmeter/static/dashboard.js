@@ -124,6 +124,7 @@ function render(rep) {
   renderBehavior(rep);
   renderTools(rep);
   renderActiveModel(rep);
+  checkAlerts(rep, isCodex);
 }
 
 // ---------- live ACTIVE MODEL (canlı çalışan model · 15dk/1sa/5sa) ----------
@@ -773,8 +774,57 @@ function initModularGrid() {
   grid.on("resizestop", () => { Object.values(window.__charts || {}).forEach(ch => { try { ch.resize(); } catch (e) {} }); });
 }
 
+// ---------- pre-limit ALERTS (free: tarayıcı bildirimi + in-page toast; Pro: desktop/Slack push) ----------
+function alertLevelOf(rep, isCodex) {
+  // binding-constraint tehlike: 0 güvende · 2 uyarı · 3 kritik
+  if (isCodex && rep.codex_rate_limits && Object.keys(rep.codex_rate_limits).length) {
+    const dev = rep.codex_rate_limits.mac || Object.values(rep.codex_rate_limits)[0] || {};
+    const bp = Math.max(dev.primary?.used_percent || 0, dev.secondary?.used_percent || 0);
+    if (bp >= 95) return { level: 3, msg: `🔴 Codex limiti %${Math.round(bp)} — throttle ÇOK YAKIN` };
+    if (bp >= 85) return { level: 2, msg: `🟠 Codex limiti %${Math.round(bp)} — duvara yaklaşıyorsun` };
+    return { level: 0, msg: "" };
+  }
+  // Claude (hesap limiti yok) → aşırı burn uyarısı
+  const fc = rep.forecast || {}, z = rep.burn_rate_zones || {};
+  const rate = (fc.burn_rates_by_hours || {})["2"] ?? fc.burn_rate_per_hour_recent ?? 0;
+  if (z.heavy && rate >= z.heavy * 1.6) return { level: 2, msg: `🟠 Burn rate çok yüksek: ${fmtMoney(rate)}/sa` };
+  return { level: 0, msg: "" };
+}
+function checkAlerts(rep, isCodex) {
+  if (localStorage.getItem("ccmeter_alerts_on") !== "1") return;
+  const key = "ccmeter_alert_lvl_" + (isCodex ? "codex" : "claude");
+  const { level, msg } = alertLevelOf(rep, isCodex);
+  const prev = parseInt(localStorage.getItem(key) || "0", 10);
+  localStorage.setItem(key, String(level));
+  if (level >= 2 && level > prev) fireAlert(msg, level);   // SADECE eşik aşıldığında (de-dup)
+}
+function fireAlert(msg, level) {
+  let t = $("alert-toast");
+  if (!t) { t = document.createElement("div"); t.id = "alert-toast"; document.body.appendChild(t); }
+  t.className = "alert-toast " + (level >= 3 ? "crit" : "warn") + " show";
+  t.textContent = msg;
+  clearTimeout(window.__alertHide);
+  window.__alertHide = setTimeout(() => t.classList.remove("show"), 12000);
+  try { if (window.Notification && Notification.permission === "granted") new Notification("ccmeter · limit uyarısı", { body: msg }); } catch (e) {}
+}
+function wireAlerts() {
+  const b = $("alert-toggle"); if (!b) return;
+  const sync = () => { const on = localStorage.getItem("ccmeter_alerts_on") === "1"; b.classList.toggle("on", on); b.title = on ? "limit uyarıları AÇIK" : "limit uyarıları kapalı (tıkla)"; };
+  sync();
+  b.addEventListener("click", async () => {
+    const on = localStorage.getItem("ccmeter_alerts_on") === "1";
+    if (!on) {
+      localStorage.setItem("ccmeter_alerts_on", "1");
+      try { if (window.Notification && Notification.permission === "default") await Notification.requestPermission(); } catch (e) {}
+      fireAlert("🔔 Limit uyarıları açıldı — duvara %85'te haber veririm.", 2);
+    } else { localStorage.setItem("ccmeter_alerts_on", "0"); }
+    sync();
+  });
+}
+
 function start() {
   $("refresh").addEventListener("click", () => refresh(true));
+  wireAlerts();
   // source toggle
   document.querySelectorAll("#source-toggle button").forEach(b => {
     b.classList.toggle("active", b.dataset.source === window.__source);
