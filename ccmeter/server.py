@@ -308,7 +308,9 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
 
             if path == "/api/records.csv":
                 # Export endpoint (rare) — load transiently, not held in server RAM.
-                records, _, _, _ = cache._loader()
+                # source-aware: ?source=codex → Codex kayıtları (yoksa default cache).
+                src_cache, _ = pick_cache(qs)
+                records, _, _, _ = src_cache._loader()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/csv; charset=utf-8")
                 self.send_header(

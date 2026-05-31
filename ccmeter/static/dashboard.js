@@ -825,6 +825,10 @@ function wireAlerts() {
 function start() {
   $("refresh").addEventListener("click", () => refresh(true));
   wireAlerts();
+  $("export-csv")?.addEventListener("click", () => {
+    const s = window.__source === "both" ? "claude" : (window.__source || "claude");
+    window.location.href = "/api/records.csv" + (s !== "claude" ? "?source=" + s : "");
+  });
   // source toggle
   document.querySelectorAll("#source-toggle button").forEach(b => {
     b.classList.toggle("active", b.dataset.source === window.__source);
