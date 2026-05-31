@@ -282,6 +282,19 @@ function renderSpeedometer(rep, isCodex) {
     const h5p = h5.used_percent || 0, wkp = wk.used_percent || 0;
     const bw = wkp >= h5p;                                 // which limit binds (closer to wall)
     const bp = bw ? wkp : h5p, bind = bw ? wk : h5, op = bw ? h5p : wkp;
+    // ETA-to-limit — bu hızla ne zaman limite çarparsın (deterministik linear extrapolation;
+    // rakiplerin "ML tahmin"i de aslında bu). bp=%kullanım, reset=sıfırlanmaya kalan sn.
+    const winSec = (bind.window_minutes || (bw ? 10080 : 300)) * 60;   // pencere (data'dan: 300=5h, 10080=hafta)
+    const eta = (() => {
+      const remaining = (bind.resets_at || 0) - Date.now() / 1000;      // sıfırlanmaya kalan sn (resets_at = epoch)
+      if (bp <= 0.5 || remaining <= 60) return null;
+      const elapsed = winSec - remaining; if (elapsed <= 60) return null;
+      const rt = bp / elapsed, to100 = (100 - bp) / rt;                 // %/sn → 100%'e kalan sn
+      return { to100, proj: Math.min(100, bp + rt * remaining), remaining, danger: to100 < remaining };
+    })();
+    const etaTxt = eta ? (eta.danger
+      ? `⚠ bu hızla ~${resetIn(Date.now() / 1000 + eta.to100)} sonra limit DOLAR (reset'ten önce!)`
+      : `bu hızla reset'te ~%${Math.round(eta.proj)} · güvende`) : null;
     g = {
       value: bp, max: 100, zones: { typical: 50, busy: 75, heavy: 90, max: 100 },
       ticks: [{ v: 0, l: "%0" }, { v: 50, l: "yarı" }, { v: 75, l: "yoğun" }, { v: 90, l: "⚠ duvar" }],
@@ -292,7 +305,7 @@ function renderSpeedometer(rep, isCodex) {
           : bp >= 50 ? ["warn", "🟡 yarıyı geçtin"]
           :            ["good", "🟢 bol alan var"],
       ratio: rep.current_window?.vs_baseline_ratio, below: false,
-      note: `öbür limit %${Math.round(op)} (${bw ? "5sa" : "haftalık"}) · burn ~${fmtMoney(rate)}/sa notional`,
+      note: (etaTxt ? etaTxt + " · " : "") + `öbür limit %${Math.round(op)} (${bw ? "5sa" : "haftalık"})`,
     };
   } else {
     const z = rep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25, max: 50 };
