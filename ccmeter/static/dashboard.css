@@ -153,6 +153,19 @@ main.gs-active { display:block; }
 .grid-stack-item > .ui-resizable-handle { opacity:0; transition:opacity .15s; }
 .grid-stack-item:hover > .ui-resizable-handle { opacity:.55; }
 
+/* ---------- canlı aktif model kartı ---------- */
+.am-row { display:grid; grid-template-columns:12px minmax(80px,1.3fr) auto auto auto auto; align-items:center;
+  gap:12px; padding:8px 0; border-bottom:1px solid var(--border-subtle); font-size:12px; white-space:nowrap; }
+.am-row:last-child { border-bottom:none; }
+.am-dot { width:8px; height:8px; border-radius:50%; background:var(--border-strong); }
+.am-dot.live { background:#2BD96B; box-shadow:0 0 8px rgba(43,217,107,.7); animation:am-pulse 1.6s ease-in-out infinite; }
+@keyframes am-pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+.am-name { font-weight:600; overflow:hidden; text-overflow:ellipsis; color:var(--text-2); }
+.am-top .am-name { color:var(--text-1); }
+.am-tpm, .am-rate { font-variant-numeric:tabular-nums; color:var(--text-2); }
+.am-msg { font-size:11px; }
+.am-seen { font-size:10.5px; text-align:right; min-width:52px; color:var(--text-3); }
+
 /* ---------- Layout grid ---------- */
 main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
   display:grid; grid-template-columns: repeat(12, 1fr); gap: var(--gap);

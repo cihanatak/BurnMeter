@@ -5,10 +5,10 @@
   <title>ccmeter — AI coding yakıt metresi</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack.min.css" />
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260531e" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260531f" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack-all.js" defer></script>
-  <script src="/static/dashboard.js?v=20260531e" defer></script>
+  <script src="/static/dashboard.js?v=20260531f" defer></script>
 </head>
 <body>
 
@@ -98,6 +98,16 @@
       <div class="donut-center"><div class="v" id="models-total">—</div><div class="l">toplam</div></div>
     </div>
     <div id="models-legend" style="margin-top:12px"></div>
+  </section>
+
+  <!-- live ACTIVE MODEL — şu an çalışan model (15dk/1sa/5sa) -->
+  <section class="card col-6" data-card="active-model">
+    <div class="card-title">Canlı aktif model <span class="sub">şu an çalışan</span>
+      <span class="picker" id="active-window-picker">
+        <button data-w="15" class="active">15dk</button><button data-w="60">1sa</button><button data-w="300">5sa</button>
+      </span>
+    </div>
+    <div id="active-model-body"></div>
   </section>
 
   <!-- ROW 5 — daily spend (wide) + per-project (side) -->

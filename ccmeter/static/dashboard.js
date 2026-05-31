@@ -112,6 +112,33 @@ function render(rep) {
   renderModelTable(rep);
   renderBehavior(rep);
   renderTools(rep);
+  renderActiveModel(rep);
+}
+
+// ---------- live ACTIVE MODEL (canlı çalışan model · 15dk/1sa/5sa) ----------
+// Eski ccmeter'da çok sevilen kutu: o an hangi model(ler) çalışıyor, ne hızla.
+// Veri rep.live_active_models_by_window[15|60|300|1440] — her model: tokens_per_min,
+// messages, cost_per_hour, seconds_since_last (canlı mı). En yakın = "şu an çalışan".
+function renderActiveModel(rep) {
+  const body = $("active-model-body"); if (!body) return;
+  const w = localStorage.getItem("ccmeter_active_window") || "15";
+  const lam = (rep.live_active_models_by_window || {})[w] || {};
+  let models = (lam.models || []).filter(m => !String(m.model_id).startsWith("<"));
+  const wl = w === "60" ? "1 saatte" : w === "300" ? "5 saatte" : w === "1440" ? "1 günde" : w + "dk'da";
+  if (!models.length) { body.innerHTML = `<div class="dim" style="padding:16px 2px">Son ${wl} aktif model yok.</div>`; return; }
+  models = models.slice().sort((a, b) => (a.seconds_since_last ?? 9e9) - (b.seconds_since_last ?? 9e9));
+  body.innerHTML = models.map((m, i) => {
+    const s = m.seconds_since_last ?? 9e9, live = s < 120;
+    const seen = live ? "● şimdi" : s < 3600 ? `${Math.round(s / 60)}dk önce` : `${(s / 3600).toFixed(1)}sa önce`;
+    return `<div class="am-row${i === 0 ? " am-top" : ""}">
+      <span class="am-dot${live ? " live" : ""}"></span>
+      <span class="am-name ${modelToFamily(m.model_id)}">${esc(modelDisplay(m.model_id))}</span>
+      <span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/dk</span></span>
+      <span class="am-msg dim">${m.messages || 0} msg</span>
+      <span class="am-rate num">${fmtMoney(m.cost_per_hour || 0)}<span class="dim">/sa</span></span>
+      <span class="am-seen dim">${seen}</span>
+    </div>`;
+  }).join("");
 }
 
 // ---------- hero SPEEDOMETER (araba göstergesi) ----------
@@ -584,7 +611,7 @@ function initModularGrid() {
   const colW = c => { const m = (c.className.match(/col-(\d+)/) || [])[1]; return m ? +m : 4; };
   // varsayılan yükseklikler (satır = 76px); kullanıcı resize edip kaydedebilir
   const H = { hero: 5, "hero-aside": 5, kpi: 2, eff: 5, cache: 3, trend: 5, models: 5,
-              daily: 4, projects: 5, recent: 5, "model-table": 5, behavior: 3, tools: 3 };
+              "active-model": 4, daily: 4, projects: 5, recent: 5, "model-table": 5, behavior: 3, tools: 3 };
   const gs = document.createElement("div");
   gs.className = "grid-stack";
   cards.forEach(card => {
@@ -655,6 +682,16 @@ function start() {
       localStorage.setItem("ccmeter_trend_tf", b.dataset.tf);
       document.querySelectorAll("#trend-picker button").forEach(x => x.classList.toggle("active", x.dataset.tf === b.dataset.tf));
       if (window.__lastReport) renderTrend(window.__lastReport, window.__source === "codex");
+    });
+  });
+  // active-model window picker (15dk/1sa/5sa)
+  const aw0 = localStorage.getItem("ccmeter_active_window") || "15";
+  document.querySelectorAll("#active-window-picker button").forEach(b => {
+    b.classList.toggle("active", b.dataset.w === aw0);
+    b.addEventListener("click", () => {
+      localStorage.setItem("ccmeter_active_window", b.dataset.w);
+      document.querySelectorAll("#active-window-picker button").forEach(x => x.classList.toggle("active", x.dataset.w === b.dataset.w));
+      if (window.__lastReport) renderActiveModel(window.__lastReport);
     });
   });
   // trend MA toggle buttons (7/25/50/100, multi-select)
