@@ -192,58 +192,27 @@ function paintCombinedSide(side, rep, isCodex) {
 function computeGaugeSpec(rep, isCodex, hoursStr) {
   const fc = rep.forecast || {};
   const rate = (fc.burn_rates_by_hours || {})[hoursStr] ?? fc.burn_rate_per_hour_recent ?? 0;
-  const rl = rep.codex_rate_limits || {};
-  const dev = rl.mac || Object.values(rl)[0] || {};
-  const h5 = dev.primary || {}, wk = dev.secondary || {};
-  const useLimit = isCodex && (h5.used_percent != null || wk.used_percent != null);
-  let g;
-  if (useLimit) {
-    const h5p = h5.used_percent || 0, wkp = wk.used_percent || 0;
-    const bw = wkp >= h5p;                                 // hangi limit bağlayıcı (duvara yakın)
-    const bp = bw ? wkp : h5p, bind = bw ? wk : h5, op = bw ? h5p : wkp;
-    const winSec = (bind.window_minutes || (bw ? 10080 : 300)) * 60;
-    const eta = (() => {
-      const remaining = (bind.resets_at || 0) - Date.now() / 1000;
-      if (bp <= 0.5 || remaining <= 60) return null;
-      const elapsed = winSec - remaining; if (elapsed <= 60) return null;
-      const rt = bp / elapsed, to100 = (100 - bp) / rt;
-      return { to100, proj: Math.min(100, bp + rt * remaining), remaining, danger: to100 < remaining };
-    })();
-    const etaTxt = eta ? (eta.danger
-      ? `⚠ bu hızla ~${resetIn(Date.now() / 1000 + eta.to100)} sonra limit DOLAR (reset'ten önce!)`
-      : `bu hızla reset'te ~%${Math.round(eta.proj)} · güvende`) : null;
-    g = {
-      value: bp, max: 100, zones: { typical: 50, busy: 75, heavy: 90, max: 100 },
-      ticks: [{ v: 0, l: "%0" }, { v: 50, l: "yarı" }, { v: 75, l: "yoğun" }, { v: 90, l: "⚠ duvar" }],
-      valueText: "%" + Math.round(bp),
-      unitText: (bw ? "haftalık Codex limiti" : "5 saat limiti") + (bind.resets_at ? " · ↻ " + resetIn(bind.resets_at) : ""),
-      zone: bp >= 90 ? ["bad", "🔴 duvara çok yakın — throttle riski"]
-          : bp >= 75 ? ["warn", "🟠 yüksek kullanım"]
-          : bp >= 50 ? ["warn", "🟡 yarıyı geçtin"]
-          :            ["good", "🟢 bol alan var"],
-      ratio: rep.current_window?.vs_baseline_ratio, below: false,
-      note: (etaTxt ? etaTxt + " · " : "") + `öbür limit %${Math.round(op)} (${bw ? "5sa" : "haftalık"})`,
-    };
-  } else {
-    const z = rep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25, max: 50 };
-    const zd = !!z.insufficient_history;
-    g = {
-      value: rate, max: z.max || 50, zones: z,
-      ticks: zd
-        ? [{ v: 0, l: "$0" }, { v: z.typical, l: "tipik (varsayılan)" }, { v: z.busy, l: "yoğun (varsayılan)" }, { v: z.heavy, l: "ağır" }]
-        : [{ v: 0, l: "$0" }, { v: z.typical, l: "senin tipik" }, { v: z.busy, l: "senin yoğun (P90)" }, { v: z.heavy, l: "çok yoğun" }],
-      valueText: fmtMoney(rate),
-      unitText: `/saat · son ${hoursStr === "0.25" ? "15dk" : hoursStr + "h"} ort.${isCodex ? " (notional)" : " (tahmini $)"}`,
-      zone: rate >= z.heavy ? ["bad", "🔴 ağır bölge · çok yoğun yakıyorsun"]
-          : rate >= z.busy ? ["warn", "🟠 yoğun bölge"]
-          : rate >= z.typical ? ["warn", "🟡 normal üstü"]
-          :                  ["good", "🟢 sakin · verimli"],
-      ratio: rep.current_window?.vs_baseline_ratio, below: rate < z.typical,
-      note: zd ? "Eşikler varsayılan — henüz kişisel hız geçmişin yok."
-               : "Eşikler senin geçmiş 5s pencerelerinden (P50/P90).",
-    };
-  }
-  return { g, rate, fc, isLimit: useLimit };
+  // Hem Claude HEM Codex → AYNI burn-rate $/saat göstergesi (tutarlılık — kullanıcı
+  // talebi). Codex'in rate-limit %'si hero'da DEĞİL; yan kutuda ("Plan limiti · duvar")
+  // gösterilir (renderHeroAside) → bilgi kaybolmaz, ama hero her iki araçta da burn.
+  const z = rep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25, max: 50 };
+  const zd = !!z.insufficient_history;
+  const g = {
+    value: rate, max: z.max || 50, zones: z,
+    ticks: zd
+      ? [{ v: 0, l: "$0" }, { v: z.typical, l: "tipik (varsayılan)" }, { v: z.busy, l: "yoğun (varsayılan)" }, { v: z.heavy, l: "ağır" }]
+      : [{ v: 0, l: "$0" }, { v: z.typical, l: "senin tipik" }, { v: z.busy, l: "senin yoğun (P90)" }, { v: z.heavy, l: "çok yoğun" }],
+    valueText: fmtMoney(rate),
+    unitText: `/saat · son ${hoursStr === "0.25" ? "15dk" : hoursStr + "h"} ort.${isCodex ? " (notional)" : " (tahmini $)"}`,
+    zone: rate >= z.heavy ? ["bad", "🔴 ağır bölge · çok yoğun yakıyorsun"]
+        : rate >= z.busy ? ["warn", "🟠 yoğun bölge"]
+        : rate >= z.typical ? ["warn", "🟡 normal üstü"]
+        :                  ["good", "🟢 sakin · verimli"],
+    ratio: rep.current_window?.vs_baseline_ratio, below: rate < z.typical,
+    note: zd ? "Eşikler varsayılan — henüz kişisel hız geçmişin yok."
+             : "Eşikler senin geçmiş 5s pencerelerinden (P50/P90).",
+  };
+  return { g, rate, fc, isLimit: false };
 }
 
 // gauge SVG çizimi (arcs + ticks + iğne + value + unit) — verilen svg elemanına.
