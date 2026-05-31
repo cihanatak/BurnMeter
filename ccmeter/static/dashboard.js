@@ -170,47 +170,50 @@ function renderCombined(cl, cx) {
 function combinedHalf(rep, isCodex) {
   const fc = rep.forecast || {};
   const rate = (fc.burn_rates_by_hours || {})["2"] ?? fc.burn_rate_per_hour_recent ?? 0;
-  let bigVal, bigSub, zc, zt;
+  const z = rep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25 };
+  const zc = rate >= z.heavy ? "bad" : (rate >= z.typical ? "warn" : "good");
+  const zt = rate >= z.heavy ? "🔴 ağır bölge" : rate >= z.busy ? "🟠 yoğun" : rate >= z.typical ? "🟡 normal üstü" : "🟢 sakin";
+  const est = isCodex ? "notional" : "tahmini";
+  const today = fc.today?.so_far ?? 0, cache = rep.cache_efficiency?.hit_rate, life = rep.totals?.cost_usd ?? 0;
+  const ago = (iso) => { const s = (Date.now() - new Date(iso).getTime()) / 1000; return s < 60 ? "şimdi" : s < 3600 ? Math.round(s / 60) + "dk" : s < 86400 ? Math.round(s / 3600) + "sa" : Math.round(s / 86400) + "g"; };
+
+  // TUTARLI kutular: her iki agent AYNI yapı → karşılaştırılabilir. Ana sayı = burn $/sa
+  // İKİSİNDE DE. Binding (Codex limit %, Claude 5sa blok $) ETİKETLİ ikincil stat.
+  let bind;
   const rl = rep.codex_rate_limits || {}, dev = rl.mac || Object.values(rl)[0] || {};
   const h5 = dev.primary || {}, wk = dev.secondary || {};
   if (isCodex && (h5.used_percent != null || wk.used_percent != null)) {
-    const h5p = h5.used_percent || 0, wkp = wk.used_percent || 0, bw = wkp >= h5p;
-    const bp = bw ? wkp : h5p, bind = bw ? wk : h5;
-    bigVal = "%" + Math.round(bp);
-    bigSub = (bw ? "haftalık limit" : "5 saat limiti") + (bind.resets_at ? " · ↻ " + resetIn(bind.resets_at) : "");
-    zc = bp >= 90 ? "bad" : bp >= 50 ? "warn" : "good";
-    zt = bp >= 90 ? "🔴 duvara yakın" : bp >= 75 ? "🟠 yüksek kullanım" : bp >= 50 ? "🟡 yarıyı geçtin" : "🟢 bol alan var";
+    const h5p = h5.used_percent || 0, wkp = wk.used_percent || 0, bw = wkp >= h5p, bp = bw ? wkp : h5p, b = bw ? wk : h5;
+    bind = `<div class="cvb-stat"><span class="dim">${bw ? "Haftalık limit" : "5sa limit"}</span><b class="${bp >= 90 ? "bad" : bp >= 50 ? "warn" : "good"}">%${Math.round(bp)}${b.resets_at ? ` <span class="dim" style="font-size:9px;font-weight:400">↻${resetIn(b.resets_at)}</span>` : ""}</b></div>`;
   } else {
-    const z = rep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25 };
-    bigVal = fmtMoney(rate); bigSub = "/saat burn" + (isCodex ? " (notional)" : " (tahmini)");
-    zc = rate >= z.heavy ? "bad" : rate >= z.typical ? "warn" : "good";
-    zt = rate >= z.heavy ? "🔴 ağır bölge" : rate >= z.busy ? "🟠 yoğun" : rate >= z.typical ? "🟡 normal üstü" : "🟢 sakin";
+    bind = `<div class="cvb-stat"><span class="dim">5sa blok</span><b>${fmtMoney0((rep.current_window || {}).cost_usd || 0)}</b></div>`;
   }
-  const today = fc.today?.so_far ?? 0, cache = rep.cache_efficiency?.hit_rate, life = rep.totals?.cost_usd ?? 0;
-  const est = isCodex ? "notional" : "tahmini";
+
+  const burnBox = `<div class="cvb">
+    <div class="cvb-t dim">Burn rate</div>
+    <div class="cvb-big ${zc}">${fmtMoney(rate)}<span class="cvb-unit">/sa ${est}</span></div>
+    <div class="cvb-zone ${zc}">${zt}</div>
+    <div class="cvb-stats">
+      <div class="cvb-stat"><span class="dim">Bugün</span><b>${fmtMoney0(today)}</b></div>
+      <div class="cvb-stat"><span class="dim">Cache</span><b>${cache != null ? "%" + (cache * 100).toFixed(0) : "—"}</b></div>
+      <div class="cvb-stat"><span class="dim">Lifetime</span><b>${fmtMoney0(life)}</b></div>
+      ${bind}
+    </div></div>`;
+
   const lam = (rep.live_active_models_by_window || {})["15"] || {};
   const models = (lam.models || []).filter(m => !String(m.model_id).startsWith("<"))
-    .sort((a, b) => (a.seconds_since_last ?? 9e9) - (b.seconds_since_last ?? 9e9)).slice(0, 3);
-  const am = models.length ? models.map(m => {
+    .sort((a, b) => (a.seconds_since_last ?? 9e9) - (b.seconds_since_last ?? 9e9)).slice(0, 4);
+  const amRows = models.length ? models.map(m => {
     const s = m.seconds_since_last ?? 9e9, live = s < 120;
-    return `<div class="am-row"><span class="am-dot${live ? " live" : ""}"></span>
-      <span class="am-name ${modelToFamily(m.model_id)}">${esc(modelDisplay(m.model_id))}</span>
-      <span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/dk</span></span>
-      <span class="am-seen dim">${live ? "● şimdi" : Math.round(s / 60) + "dk"}</span></div>`;
+    return `<div class="am-row"><span class="am-dot${live ? " live" : ""}"></span><span class="am-name ${modelToFamily(m.model_id)}">${esc(modelDisplay(m.model_id))}</span><span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/dk</span></span><span class="am-seen dim">${live ? "● şimdi" : Math.round(s / 60) + "dk"}</span></div>`;
   }).join("") : `<div class="dim" style="padding:6px 0">son 15dk aktif model yok</div>`;
-  return `<div class="cv-head"><span class="cv-logo">${isCodex ? "⌬" : "◔"}</span>
-      <span class="cv-title">${isCodex ? "Codex" : "Claude Code"}</span>
-      <span class="cv-sub dim">${fmtInt(rep.record_count || 0)} kayıt</span></div>
-    <div class="cv-big ${zc}">${bigVal}</div>
-    <div class="cv-bigsub dim">${esc(bigSub)}</div>
-    <div class="cv-zone ${zc}">${zt}</div>
-    <div class="cv-stats">
-      <div><span class="dim">Bugün</span><b>${fmtMoney0(today)}</b></div>
-      <div><span class="dim">Burn</span><b>${fmtMoney(rate)}/sa</b></div>
-      <div><span class="dim">Cache</span><b>${cache != null ? "%" + (cache * 100).toFixed(0) : "—"}</b></div>
-      <div><span class="dim">Lifetime</span><b>${fmtMoney0(life)} <span class="dim" style="font-size:9px">${est}</span></b></div>
-    </div>
-    <div class="cv-am-title dim">Canlı aktif model</div>${am}`;
+  const modelBox = `<div class="cvb"><div class="cvb-t dim">Canlı aktif model</div>${amRows}</div>`;
+
+  const recent = (rep.recent_turns || []).filter(t => !String(t.model || "").startsWith("<")).slice(0, 6);
+  const recRows = recent.length ? recent.map(t => `<div class="cvr-row"><span class="cvr-when dim">${ago(t.timestamp)}</span><span class="cvr-proj">${esc(t.project_label || "?")}</span><span class="cvr-model ${modelToFamily(t.model)}">${esc(modelDisplay(t.model))}</span><span class="cvr-tok num">${fmtInt(t.total_tokens || 0)}</span></div>`).join("") : `<div class="dim" style="padding:6px 0">aktivite yok</div>`;
+  const recentBox = `<div class="cvb"><div class="cvb-t dim">Son işler</div>${recRows}</div>`;
+
+  return `<div class="cv-head"><span class="cv-logo">${isCodex ? "⌬" : "◔"}</span><span class="cv-title">${isCodex ? "Codex" : "Claude Code"}</span><span class="cv-sub dim">${fmtInt(rep.record_count || 0)} kayıt</span></div>${burnBox}${modelBox}${recentBox}`;
 }
 
 // ---------- hero SPEEDOMETER (araba göstergesi) ----------
