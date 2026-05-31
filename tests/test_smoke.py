@@ -43,8 +43,8 @@ def main():
         assert_true(len(files) >= 5, f"expected several jsonl files, got {len(files)}")
         print(f"[ok] generated {len(files)} synthetic session files")
 
-        # 2. Parser loads them.
-        records, stats = load_records(tmp)
+        # 2. Parser loads them. (load_records → records, stats, intents, error_events)
+        records, stats, _intents, _error_events = load_records(tmp)
         assert_true(stats["files_scanned"] == len(files), "files_scanned mismatch")
         assert_true(stats["parse_errors"] == 0, f"unexpected parse errors: {stats}")
         assert_true(len(records) > 100, f"too few records: {len(records)}")
@@ -121,6 +121,11 @@ def main():
         print("\nALL SMOKE TESTS PASSED ✓")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_smoke_suite():
+    """pytest entrypoint — runs the full parser → analytics → server smoke suite."""
+    main()
 
 
 if __name__ == "__main__":
