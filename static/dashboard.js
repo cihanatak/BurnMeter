@@ -391,7 +391,7 @@ function renderModels(rep) {
   window.__charts.models = new Chart(ctx, {
     type: "doughnut",
     data: { labels, datasets: [{ data, backgroundColor: palette, borderColor: "#0F1011", borderWidth: 2 }] },
-    options: { responsive: true, maintainAspectRatio: false, cutout: "66%", plugins: { legend: { display: false }, tooltip: tooltipCfg() } }
+    options: { responsive: true, maintainAspectRatio: false, animation: false, cutout: "66%", plugins: { legend: { display: false }, tooltip: tooltipCfg() } }
   });
   $("models-total").textContent = fmtMoney0(total);
   $("models-legend").innerHTML = bmf.map((m, i) =>
@@ -510,7 +510,7 @@ function tooltipCfg() {
 }
 function chartOpts({ yMoney }) {
   return {
-    responsive: true, maintainAspectRatio: false,
+    responsive: true, maintainAspectRatio: false, animation: false,
     plugins: { legend: { display: false }, tooltip: { ...tooltipCfg(), callbacks: yMoney ? { label: (c) => fmtMoney(c.parsed.y) + "/sa" } : {} } },
     scales: {
       x: { grid: { display: false }, border: { display: false }, ticks: { color: "#62666D", font: { size: 10, family: "'Geist Mono',monospace" }, maxTicksLimit: 8 } },
@@ -527,7 +527,7 @@ function drawSpark(canvasId, data) {
   window.__charts[canvasId] = new Chart(ctx, {
     type: "line",
     data: { labels: data.map((_, i) => i), datasets: [{ data, borderColor: "#5E6AD2", borderWidth: 1.5, fill: false, tension: 0.4, pointRadius: 0 }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: { x: { display: false }, y: { display: false } } }
+    options: { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: { x: { display: false }, y: { display: false } } }
   });
 }
 
