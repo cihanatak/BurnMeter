@@ -570,6 +570,9 @@ function initModularGrid() {
   main.classList.add("gs-active");
   const grid = GridStack.init({
     column: 12, cellHeight: 76, margin: 8, float: false, animate: false,
+    // (A) ekran çözünürlüğüne göre otomatik kolon sayısı: dar ekranda yığ, geniş ekranda yay
+    //   >1100px → 12 kolon (2K/4K/laptop tam grid) · 700-1100 → 6 kolon · <700 → 1 kolon (stack)
+    columnOpts: { breakpointForWindow: true, breakpoints: [{ w: 700, c: 1 }, { w: 1100, c: 6 }] },
     // interaktif öğelerden sürükleme başlatma (tıklamalar çalışsın)
     draggable: { cancel: "button, input, select, a, canvas, table, .picker, .indicator-bar, .scroll, .tbl, .speedo-breakdown, .donut-wrap" },
     resizable: { handles: "e, se, s, sw, w" },
@@ -577,9 +580,11 @@ function initModularGrid() {
   window.__grid = grid;
   try {
     const saved = JSON.parse(localStorage.getItem("ccmeter_layout_v1") || "null");
-    if (saved && saved.length) grid.load(saved, false);   // gs-id'ye göre konumları geri yükle
+    // kaydet/yükle YALNIZCA tam grid'de (12 kolon). Dar ekranda GridStack otomatik reflow
+    // yapar; o geçici dar düzeni kaydetmeyiz ki geniş ekran düzenini bozmasın.
+    if (saved && saved.length && grid.getColumn() === 12) grid.load(saved, false);
   } catch (e) { /* bozuk kayıt → varsayılan */ }
-  const save = () => { try { localStorage.setItem("ccmeter_layout_v1", JSON.stringify(grid.save(false))); } catch (e) {} };
+  const save = () => { try { if (grid.getColumn() === 12) localStorage.setItem("ccmeter_layout_v1", JSON.stringify(grid.save(false))); } catch (e) {} };
   grid.on("change", save);
   // resize sonrası grafikleri yeni boyuta sığdır
   grid.on("resizestop", () => { Object.values(window.__charts || {}).forEach(ch => { try { ch.resize(); } catch (e) {} }); });

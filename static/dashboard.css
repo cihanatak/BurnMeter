@@ -140,11 +140,13 @@ main.gs-active { display:block; }
 /* grafik/hero kartları: içerik kartı doldursun (resize'da büyüsün) */
 .gs-active [data-card="trend"], .gs-active [data-card="daily"],
 .gs-active [data-card="models"], .gs-active .card-hero {
-  overflow:hidden; display:flex; flex-direction:column; }
+  overflow:auto; display:flex; flex-direction:column; }   /* (B) küçültünce clip değil SCROLL → veri kaybı yok */
 .gs-active [data-card="trend"] .chart-wrap, .gs-active [data-card="daily"] .chart-wrap {
   flex:1 1 auto; height:auto; min-height:120px; }
 .gs-active [data-card="models"] .donut-wrap { flex:1 1 auto; min-height:120px; }
 .gs-active .card-hero .speedo-wrap { flex:1 1 auto; min-height:0; align-items:flex-start; }
+/* (B) gs modunda tablo kartlarında iç-cap KALK → tek temiz scroll KARTIN kendisinde (nested yok) */
+.gs-active .scroll { max-height:none; overflow:visible; }
 /* sürükleme imleci + resize handle */
 .gs-active .card { cursor:grab; }
 .gs-active .card:active { cursor:grabbing; }
