@@ -88,16 +88,16 @@ header {
 .brand-ver { font-size:11px; color: var(--text-4); font-family: var(--font-mono); margin-left:2px; }
 
 .source-toggle {
-  display:inline-flex; margin-left:16px; padding:3px;
-  background: var(--bg-raised); border:1px solid var(--border-subtle); border-radius:9px;
+  display:inline-flex; margin-left:14px; padding:2px;
+  background: var(--bg-raised); border:1px solid var(--border-subtle); border-radius:8px;
 }
 .source-toggle button {
   background:transparent; border:none; cursor:pointer;
-  padding:5px 13px; border-radius:6px;
-  font:600 12px/1 var(--font-sans); color: var(--text-3);
-  display:inline-flex; align-items:center; gap:6px; transition: all .15s;
+  padding:4px 9px; border-radius:6px;
+  font:600 11px/1 var(--font-sans); color: var(--text-3);
+  display:inline-flex; align-items:center; gap:5px; transition: all .15s;
 }
-.source-toggle button .dot { width:6px;height:6px;border-radius:50%; background: currentColor; opacity:.7; }
+.source-toggle button .dot { width:5px;height:5px;border-radius:50%; background: currentColor; opacity:.65; }
 .source-toggle button:hover { color: var(--text-1); }
 .source-toggle button.active { background: var(--bg-overlay); color: var(--text-1); box-shadow: inset 0 1px 0 rgba(255,255,255,0.06); }
 .source-toggle button[data-source="claude"].active { color: var(--brand-claude); }
