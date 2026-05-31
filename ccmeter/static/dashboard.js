@@ -175,10 +175,10 @@ function renderCombined(cl, cx) {
 function paintCombinedSide(side, rep, isCodex) {
   const root = document.getElementById("cv-" + side); if (!root) return;
   const els = () => ({ svg: root.querySelector(".cv-speedo"), zone: root.querySelector(".cv-zone2"), breakdown: root.querySelector(".cv-breakdown") });
-  paintBurnGauge(els(), rep, isCodex, localStorage.getItem("ccmeter_both_hours_" + side) || "2");
+  paintBurnGauge(els(), rep, isCodex, localStorage.getItem("ccmeter_burn_hours_" + side) || "2");
   root.querySelectorAll(".cv-picker button").forEach(b => {
     b.addEventListener("click", () => {
-      localStorage.setItem("ccmeter_both_hours_" + side, b.dataset.h);
+      localStorage.setItem("ccmeter_burn_hours_" + side, b.dataset.h);
       root.querySelectorAll(".cv-picker button").forEach(x => x.classList.toggle("active", x.dataset.h === b.dataset.h));
       paintBurnGauge(els(), rep, isCodex, b.dataset.h);
     });
@@ -229,7 +229,7 @@ function paintBurnGauge(els, rep, isCodex, hoursStr) {
 
 // bir yarının iskeleti: head + GERÇEK speedometer (svg + window picker) + canlı model + son işler
 function halfStructure(rep, isCodex, side) {
-  const h = localStorage.getItem("ccmeter_both_hours_" + side) || "2";
+  const h = localStorage.getItem("ccmeter_burn_hours_" + side) || "2";
   const picker = [["0.25", "15dk"], ["1", "1h"], ["2", "2h"], ["4", "4h"], ["6", "6h"]]
     .map(([v, l]) => `<button data-h="${v}"${v === h ? ' class="active"' : ""}>${l}</button>`).join("");
   const ago = (iso) => { const s = (Date.now() - new Date(iso).getTime()) / 1000; return s < 60 ? "şimdi" : s < 3600 ? Math.round(s / 60) + "dk" : s < 86400 ? Math.round(s / 3600) + "sa" : Math.round(s / 86400) + "g"; };
@@ -266,8 +266,10 @@ function arcPath(cx, cy, r, sv, ev, mv) {
 function renderSpeedometer(rep, isCodex) {
   const fc = rep.forecast || {};
   const cx = 200, cy = 200, r = 150;
-  const hoursStr = localStorage.getItem("ccmeter_burn_hours") || "2";
+  const hoursStr = localStorage.getItem("ccmeter_burn_hours_" + (isCodex ? "codex" : "claude")) || "2";
   const rate = (fc.burn_rates_by_hours || {})[hoursStr] ?? fc.burn_rate_per_hour_recent ?? 0;
+  // picker'ı aktif kaynağın penceresine senkronla (kaynak değişince doğru buton yansısın)
+  document.querySelectorAll("#burn-window-picker button").forEach(x => x.classList.toggle("active", x.dataset.h === hoursStr));
 
   // ----- choose the hero gauge -----
   // CODEX → binding-constraint = the REAL rate-limit % (the wall you actually hit). This
@@ -862,11 +864,11 @@ function start() {
     });
   });
   // burn-window picker (speedometer ortalama penceresi: 15dk/1h/2h/4h/6h)
-  const bh0 = localStorage.getItem("ccmeter_burn_hours") || "2";
+  const bh0 = localStorage.getItem("ccmeter_burn_hours_" + window.__source) || "2";
   document.querySelectorAll("#burn-window-picker button").forEach(b => {
     b.classList.toggle("active", b.dataset.h === bh0);
     b.addEventListener("click", () => {
-      localStorage.setItem("ccmeter_burn_hours", b.dataset.h);
+      localStorage.setItem("ccmeter_burn_hours_" + window.__source, b.dataset.h);
       document.querySelectorAll("#burn-window-picker button").forEach(x => x.classList.toggle("active", x.dataset.h === b.dataset.h));
       if (window.__lastReport) renderSpeedometer(window.__lastReport, window.__source === "codex");
     });
