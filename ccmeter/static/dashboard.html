@@ -5,10 +5,10 @@
   <title>ccmeter — AI coding yakıt metresi</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack.min.css" />
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260531i" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260531j" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack-all.js" defer></script>
-  <script src="/static/dashboard.js?v=20260531i" defer></script>
+  <script src="/static/dashboard.js?v=20260531j" defer></script>
 </head>
 <body>
 
@@ -63,7 +63,23 @@
   <section class="card col-3" data-card="kpi"><div class="kpi-label" id="kpi3-l">…</div><div class="kpi-value" id="kpi3-v">—</div><div class="kpi-sub" id="kpi3-s"></div><div class="kpi-spark"><canvas id="kpi3-spark"></canvas></div></section>
   <section class="card col-3" data-card="kpi"><div class="kpi-label" id="kpi4-l">…</div><div class="kpi-value" id="kpi4-v">—</div><div class="kpi-sub" id="kpi4-s"></div><div class="kpi-spark"><canvas id="kpi4-spark"></canvas></div></section>
 
-  <!-- ROW 3 — verimlilik (sen vs tipik) + cache efficiency -->
+  <!-- ROW 3 — CANLI ŞİMDİ (önem: en taze): şu an çalışan model + son aktivite -->
+  <section class="card col-5" data-card="active-model">
+    <div class="card-title">Canlı aktif model <span class="sub">şu an çalışan</span>
+      <span class="picker" id="active-window-picker">
+        <button data-w="15" class="active">15dk</button><button data-w="60">1sa</button><button data-w="300">5sa</button>
+      </span>
+    </div>
+    <div id="active-model-body"></div>
+  </section>
+  <section class="card col-7" data-card="recent">
+    <div class="card-title">Son aktivite · her satır 1 turn <span class="sub" id="recent-sub">maliyet ağırlıklı eşdeğer token</span></div>
+    <div class="scroll"><table class="tbl" id="recent-tbl">
+      <thead><tr><th>ne zaman</th><th>proje</th><th>model</th><th class="num">token</th><th class="num">$ (tahmin)</th><th class="num">cache</th></tr></thead>
+      <tbody></tbody></table></div>
+  </section>
+
+  <!-- ROW 4 — verimlilik (sen vs tipik) + cache efficiency -->
   <section class="card col-8" data-card="eff">
     <div class="card-title">Verimlilik · birim ekonomisi <span class="sub">sen vs tipik — token harcaman verimli mi?</span></div>
     <div id="eff-body"></div>
@@ -101,17 +117,7 @@
     <div id="models-legend" style="margin-top:12px"></div>
   </section>
 
-  <!-- live ACTIVE MODEL — şu an çalışan model (15dk/1sa/5sa) -->
-  <section class="card col-6" data-card="active-model">
-    <div class="card-title">Canlı aktif model <span class="sub">şu an çalışan</span>
-      <span class="picker" id="active-window-picker">
-        <button data-w="15" class="active">15dk</button><button data-w="60">1sa</button><button data-w="300">5sa</button>
-      </span>
-    </div>
-    <div id="active-model-body"></div>
-  </section>
-
-  <!-- ROW 5 — daily spend (wide) + per-project (side) -->
+  <!-- daily spend (wide) + per-project (side) -->
   <section class="card col-7" data-card="daily">
     <div class="card-title">Son 30 gün · günlük $ (tahmini) <span class="sub" id="daily-sub"></span></div>
     <div class="chart-wrap"><canvas id="chart-daily"></canvas></div>
@@ -123,14 +129,8 @@
       <tbody></tbody></table></div>
   </section>
 
-  <!-- ROW 6 — recent activity (wide) + per-model table (side) -->
-  <section class="card col-7" data-card="recent">
-    <div class="card-title">Son aktivite · her satır 1 turn <span class="sub" id="recent-sub">maliyet ağırlıklı eşdeğer token</span></div>
-    <div class="scroll"><table class="tbl" id="recent-tbl">
-      <thead><tr><th>ne zaman</th><th>proje</th><th>model</th><th class="num">token</th><th class="num">$ (tahmin)</th><th class="num">cache</th></tr></thead>
-      <tbody></tbody></table></div>
-  </section>
-  <section class="card col-5" data-card="model-table">
+  <!-- per-model table (lifetime) + davranış + tool -->
+  <section class="card col-6" data-card="model-table">
     <div class="card-title">Modeller · lifetime <span class="sub">gerçek per-model fiyat</span></div>
     <div class="scroll"><table class="tbl" id="modeltbl">
       <thead><tr><th>model</th><th class="num">turn</th><th class="num">token</th><th class="num">$</th></tr></thead>
