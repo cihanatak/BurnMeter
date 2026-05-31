@@ -163,43 +163,74 @@ function renderCombined(cl, cx) {
   $("version").textContent = "v" + (cl._meta?.version || cx._meta?.version || "?");
   $("data-source").textContent = `Claude ${fmtInt(cl.record_count || 0)} · Codex ${fmtInt(cx.record_count || 0)} kayıt`;
   $("last-updated").textContent = "şimdi";
-  const a = $("cv-claude"); if (a) a.innerHTML = combinedHalf(cl, false);
-  const b = $("cv-codex");  if (b) b.innerHTML = combinedHalf(cx, true);
+  const a = $("cv-claude"); if (a) a.innerHTML = halfStructure(cl, false, "claude");
+  const b = $("cv-codex");  if (b) b.innerHTML = halfStructure(cx, true, "codex");
+  paintCombinedSide("claude", cl, false);
+  paintCombinedSide("codex", cx, true);
 }
 
-function combinedHalf(rep, isCodex) {
+// her yarıda GERÇEK burn-rate speedometer (kendi tab'larındaki gibi) + 15dk/1h/2h/4h/6h picker
+function paintCombinedSide(side, rep, isCodex) {
+  const root = document.getElementById("cv-" + side); if (!root) return;
+  const els = () => ({ svg: root.querySelector(".cv-speedo"), zone: root.querySelector(".cv-zone2"), breakdown: root.querySelector(".cv-breakdown") });
+  paintBurnGauge(els(), rep, isCodex, localStorage.getItem("ccmeter_both_hours_" + side) || "2");
+  root.querySelectorAll(".cv-picker button").forEach(b => {
+    b.addEventListener("click", () => {
+      localStorage.setItem("ccmeter_both_hours_" + side, b.dataset.h);
+      root.querySelectorAll(".cv-picker button").forEach(x => x.classList.toggle("active", x.dataset.h === b.dataset.h));
+      paintBurnGauge(els(), rep, isCodex, b.dataset.h);
+    });
+  });
+}
+
+// burn-rate gauge'ı verilen elemanlara çiz — single-view renderSpeedometer ile AYNI çizim,
+// combined view'ın her yarısı için ayrı çağrılabilir hale getirildi.
+function paintBurnGauge(els, rep, isCodex, hoursStr) {
+  if (!els.svg) return;
   const fc = rep.forecast || {};
-  const rate = (fc.burn_rates_by_hours || {})["2"] ?? fc.burn_rate_per_hour_recent ?? 0;
-  const z = rep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25 };
-  const zc = rate >= z.heavy ? "bad" : (rate >= z.typical ? "warn" : "good");
+  const z = rep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25, max: 50 };
+  const rate = (fc.burn_rates_by_hours || {})[hoursStr] ?? fc.burn_rate_per_hour_recent ?? 0;
+  const cx = 200, cy = 200, r = 150, max = z.max || 50;
+  const arcs =
+    `<path class="speedo-zone-green"  d="${arcPath(cx,cy,r,0,z.typical,max)}" stroke-width="26" fill="none"/>` +
+    `<path class="speedo-zone-yellow" d="${arcPath(cx,cy,r,z.typical,z.busy,max)}" stroke-width="26" fill="none"/>` +
+    `<path class="speedo-zone-orange" d="${arcPath(cx,cy,r,z.busy,z.heavy,max)}" stroke-width="26" fill="none"/>` +
+    `<path class="speedo-zone-red"    d="${arcPath(cx,cy,r,z.heavy,max,max)}" stroke-width="26" fill="none"/>`;
+  const ticks = [{ v: 0, l: "$0" }, { v: z.typical, l: "tipik" }, { v: z.busy, l: "P90" }, { v: z.heavy, l: "ağır" }];
+  const ticksSvg = ticks.map(t => {
+    const a = 180 - (Math.min(t.v, max) / max) * 180, p = polarToCartesian(cx, cy, r + 20, a);
+    const anc = a < 90 ? "start" : a > 90 ? "end" : "middle";
+    return `<text class="speedo-tick-label" x="${p.x.toFixed(1)}" y="${p.y.toFixed(1)}" text-anchor="${anc}" dominant-baseline="middle">${t.l}</text>`;
+  }).join("");
+  const clamped = Math.max(0, Math.min(rate, max)), na = 180 - (clamped / max) * 180;
+  const tip = polarToCartesian(cx, cy, r - 6, na), tail = polarToCartesian(cx, cy, -24, na);
+  const zc = rate >= z.heavy ? "bad" : rate >= z.typical ? "warn" : "good";
   const zt = rate >= z.heavy ? "🔴 ağır bölge" : rate >= z.busy ? "🟠 yoğun" : rate >= z.typical ? "🟡 normal üstü" : "🟢 sakin";
-  const est = isCodex ? "notional" : "tahmini";
-  const today = fc.today?.so_far ?? 0, cache = rep.cache_efficiency?.hit_rate, life = rep.totals?.cost_usd ?? 0;
-  const ago = (iso) => { const s = (Date.now() - new Date(iso).getTime()) / 1000; return s < 60 ? "şimdi" : s < 3600 ? Math.round(s / 60) + "dk" : s < 86400 ? Math.round(s / 3600) + "sa" : Math.round(s / 86400) + "g"; };
-
-  // TUTARLI kutular: her iki agent AYNI yapı → karşılaştırılabilir. Ana sayı = burn $/sa
-  // İKİSİNDE DE. Binding (Codex limit %, Claude 5sa blok $) ETİKETLİ ikincil stat.
-  let bind;
-  const rl = rep.codex_rate_limits || {}, dev = rl.mac || Object.values(rl)[0] || {};
-  const h5 = dev.primary || {}, wk = dev.secondary || {};
-  if (isCodex && (h5.used_percent != null || wk.used_percent != null)) {
-    const h5p = h5.used_percent || 0, wkp = wk.used_percent || 0, bw = wkp >= h5p, bp = bw ? wkp : h5p, b = bw ? wk : h5;
-    bind = `<div class="cvb-stat"><span class="dim">${bw ? "Haftalık limit" : "5sa limit"}</span><b class="${bp >= 90 ? "bad" : bp >= 50 ? "warn" : "good"}">%${Math.round(bp)}${b.resets_at ? ` <span class="dim" style="font-size:9px;font-weight:400">↻${resetIn(b.resets_at)}</span>` : ""}</b></div>`;
-  } else {
-    bind = `<div class="cvb-stat"><span class="dim">5sa blok</span><b>${fmtMoney0((rep.current_window || {}).cost_usd || 0)}</b></div>`;
+  const needleCol = zc === "bad" ? "#F2555A" : zc === "warn" ? "#F5A623" : "#2BD96B";
+  els.svg.innerHTML = `${arcs}${ticksSvg}
+    <line x1="${tail.x.toFixed(1)}" y1="${tail.y.toFixed(1)}" x2="${tip.x.toFixed(1)}" y2="${tip.y.toFixed(1)}" stroke="${needleCol}" stroke-width="4" stroke-linecap="round"/>
+    <circle class="speedo-hub" cx="${cx}" cy="${cy}" r="8"/>
+    <text class="speedo-value" x="${cx}" y="${cy + 36}">${fmtMoney(rate)}</text>
+    <text class="speedo-unit" x="${cx}" y="${cy + 52}">/saat · ${hoursStr === "0.25" ? "15dk" : hoursStr + "h"}${isCodex ? " notional" : " tahmini"}</text>`;
+  if (els.zone) {
+    const ratio = rep.current_window?.vs_baseline_ratio;
+    els.zone.className = "cv-zone2 " + zc;
+    els.zone.textContent = zt + (ratio != null && ratio > 0 ? ` · normalinin ${ratio.toFixed(1)}x` : "");
   }
+  if (els.breakdown) {
+    const bd = (fc.burn_rates_by_hours_by_model || {})[hoursStr] || [];
+    const vis = bd.filter(m => !String(m.model_id).startsWith("<")).slice(0, 4);
+    els.breakdown.innerHTML = vis.length ? vis.map(m =>
+      `<span class="sb-row ${modelToFamily(m.model_id)}"><span class="sb-name">${esc(modelDisplay(m.model_id))}</span><span class="sb-val">${fmtMoney(m.cost_per_hour)}/sa</span><span class="sb-share">%${(m.share * 100).toFixed(0)}</span></span>`).join("") : "";
+  }
+}
 
-  const burnBox = `<div class="cvb">
-    <div class="cvb-t dim">Burn rate</div>
-    <div class="cvb-big ${zc}">${fmtMoney(rate)}<span class="cvb-unit">/sa ${est}</span></div>
-    <div class="cvb-zone ${zc}">${zt}</div>
-    <div class="cvb-stats">
-      <div class="cvb-stat"><span class="dim">Bugün</span><b>${fmtMoney0(today)}</b></div>
-      <div class="cvb-stat"><span class="dim">Cache</span><b>${cache != null ? "%" + (cache * 100).toFixed(0) : "—"}</b></div>
-      <div class="cvb-stat"><span class="dim">Lifetime</span><b>${fmtMoney0(life)}</b></div>
-      ${bind}
-    </div></div>`;
-
+// bir yarının iskeleti: head + GERÇEK speedometer (svg + window picker) + canlı model + son işler
+function halfStructure(rep, isCodex, side) {
+  const h = localStorage.getItem("ccmeter_both_hours_" + side) || "2";
+  const picker = [["0.25", "15dk"], ["1", "1h"], ["2", "2h"], ["4", "4h"], ["6", "6h"]]
+    .map(([v, l]) => `<button data-h="${v}"${v === h ? ' class="active"' : ""}>${l}</button>`).join("");
+  const ago = (iso) => { const s = (Date.now() - new Date(iso).getTime()) / 1000; return s < 60 ? "şimdi" : s < 3600 ? Math.round(s / 60) + "dk" : s < 86400 ? Math.round(s / 3600) + "sa" : Math.round(s / 86400) + "g"; };
   const lam = (rep.live_active_models_by_window || {})["15"] || {};
   const models = (lam.models || []).filter(m => !String(m.model_id).startsWith("<"))
     .sort((a, b) => (a.seconds_since_last ?? 9e9) - (b.seconds_since_last ?? 9e9)).slice(0, 4);
@@ -207,13 +238,17 @@ function combinedHalf(rep, isCodex) {
     const s = m.seconds_since_last ?? 9e9, live = s < 120;
     return `<div class="am-row"><span class="am-dot${live ? " live" : ""}"></span><span class="am-name ${modelToFamily(m.model_id)}">${esc(modelDisplay(m.model_id))}</span><span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/dk</span></span><span class="am-seen dim">${live ? "● şimdi" : Math.round(s / 60) + "dk"}</span></div>`;
   }).join("") : `<div class="dim" style="padding:6px 0">son 15dk aktif model yok</div>`;
-  const modelBox = `<div class="cvb"><div class="cvb-t dim">Canlı aktif model</div>${amRows}</div>`;
-
   const recent = (rep.recent_turns || []).filter(t => !String(t.model || "").startsWith("<")).slice(0, 6);
   const recRows = recent.length ? recent.map(t => `<div class="cvr-row"><span class="cvr-when dim">${ago(t.timestamp)}</span><span class="cvr-proj">${esc(t.project_label || "?")}</span><span class="cvr-model ${modelToFamily(t.model)}">${esc(modelDisplay(t.model))}</span><span class="cvr-tok num">${fmtInt(t.total_tokens || 0)}</span></div>`).join("") : `<div class="dim" style="padding:6px 0">aktivite yok</div>`;
-  const recentBox = `<div class="cvb"><div class="cvb-t dim">Son işler</div>${recRows}</div>`;
-
-  return `<div class="cv-head"><span class="cv-logo">${isCodex ? "⌬" : "◔"}</span><span class="cv-title">${isCodex ? "Codex" : "Claude Code"}</span><span class="cv-sub dim">${fmtInt(rep.record_count || 0)} kayıt</span></div>${burnBox}${modelBox}${recentBox}`;
+  return `<div class="cv-head"><span class="cv-logo">${isCodex ? "⌬" : "◔"}</span><span class="cv-title">${isCodex ? "Codex" : "Claude Code"}</span><span class="cv-sub dim">${fmtInt(rep.record_count || 0)} kayıt</span></div>
+    <div class="cvb cv-herobox">
+      <div class="cvb-trow"><span class="cvb-t dim">Burn rate · çok mu yakıyorsun?</span><span class="picker cv-picker">${picker}</span></div>
+      <svg class="cv-speedo" viewBox="0 0 400 272" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="cv-zone2"></div>
+      <div class="cv-breakdown speedo-breakdown"></div>
+    </div>
+    <div class="cvb"><div class="cvb-t dim">Canlı aktif model</div>${amRows}</div>
+    <div class="cvb"><div class="cvb-t dim">Son işler</div>${recRows}</div>`;
 }
 
 // ---------- hero SPEEDOMETER (araba göstergesi) ----------

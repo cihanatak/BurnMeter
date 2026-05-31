@@ -189,6 +189,11 @@ main.gs-active { display:block; }
 .cvr-row:last-child { border-bottom:none; }
 .cvr-proj { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-2); }
 .cvr-tok { font-variant-numeric:tabular-nums; color:var(--text-3); }
+.cv-herobox .cvb-trow { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:6px; }
+.cv-speedo { width:100%; max-width:330px; height:auto; display:block; margin:2px auto 0; }
+.cv-zone2 { font-size:13px; font-weight:600; text-align:center; margin-top:2px; }
+.cv-zone2.good{ color:#2BD96B } .cv-zone2.warn{ color:#F5A623 } .cv-zone2.bad{ color:#F2555A }
+.cv-breakdown { margin-top:12px; }
 .source-toggle button[data-source="both"].active { background:linear-gradient(95deg, var(--brand-claude), var(--brand-codex)); }
 @media (max-width:760px){ .combined-view{ flex-direction:column }
   .cv-half:first-child{ border-right:none; border-bottom:1px solid var(--border-default) } }
