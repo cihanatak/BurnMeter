@@ -126,66 +126,99 @@ function arcPath(cx, cy, r, sv, ev, mv) {
 // ağır) göre iğne + verdict. Window picker (15dk/1h/2h/4h/6h) ortalama penceresi.
 function renderSpeedometer(rep, isCodex) {
   const fc = rep.forecast || {};
-  const z = rep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25, max: 50 };
+  const cx = 200, cy = 200, r = 150;
   const hoursStr = localStorage.getItem("ccmeter_burn_hours") || "2";
-  const burnByHours = fc.burn_rates_by_hours || {};
-  const rate = burnByHours[hoursStr] ?? fc.burn_rate_per_hour_recent ?? 0;
-  const cx = 200, cy = 200, r = 150, max = z.max || 50;
+  const rate = (fc.burn_rates_by_hours || {})[hoursStr] ?? fc.burn_rate_per_hour_recent ?? 0;
 
+  // ----- choose the hero gauge -----
+  // CODEX → binding-constraint = the REAL rate-limit % (the wall you actually hit). This
+  //   is the market's #1 need ("am I about to get throttled?") and Codex logs it, while
+  //   most competitors are Claude-only and can't show it. Notional $/hr → demoted line.
+  // CLAUDE → Anthropic exposes NO account limit, so the burn-rate gauge stays (most-real).
+  const rl = rep.codex_rate_limits || {};
+  const dev = rl.mac || Object.values(rl)[0] || {};
+  const h5 = dev.primary || {}, wk = dev.secondary || {};
+  const useLimit = isCodex && (h5.used_percent != null || wk.used_percent != null);
+
+  let g;
+  if (useLimit) {
+    const h5p = h5.used_percent || 0, wkp = wk.used_percent || 0;
+    const bw = wkp >= h5p;                                 // which limit binds (closer to wall)
+    const bp = bw ? wkp : h5p, bind = bw ? wk : h5, op = bw ? h5p : wkp;
+    g = {
+      value: bp, max: 100, zones: { typical: 50, busy: 75, heavy: 90, max: 100 },
+      ticks: [{ v: 0, l: "%0" }, { v: 50, l: "yarı" }, { v: 75, l: "yoğun" }, { v: 90, l: "⚠ duvar" }],
+      valueText: "%" + Math.round(bp),
+      unitText: (bw ? "haftalık Codex limiti" : "5 saat limiti") + (bind.resets_at ? " · ↻ " + resetIn(bind.resets_at) : ""),
+      zone: bp >= 90 ? ["bad", "🔴 duvara çok yakın — throttle riski"]
+          : bp >= 75 ? ["warn", "🟠 yüksek kullanım"]
+          : bp >= 50 ? ["warn", "🟡 yarıyı geçtin"]
+          :            ["good", "🟢 bol alan var"],
+      ratio: rep.current_window?.vs_baseline_ratio, below: false,
+      note: `öbür limit %${Math.round(op)} (${bw ? "5sa" : "haftalık"}) · burn ~${fmtMoney(rate)}/sa notional`,
+    };
+  } else {
+    const z = rep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25, max: 50 };
+    const zd = !!z.insufficient_history;
+    g = {
+      value: rate, max: z.max || 50, zones: z,
+      ticks: zd
+        ? [{ v: 0, l: "$0" }, { v: z.typical, l: "tipik (varsayılan)" }, { v: z.busy, l: "yoğun (varsayılan)" }, { v: z.heavy, l: "ağır" }]
+        : [{ v: 0, l: "$0" }, { v: z.typical, l: "senin tipik" }, { v: z.busy, l: "senin yoğun (P90)" }, { v: z.heavy, l: "çok yoğun" }],
+      valueText: fmtMoney(rate),
+      unitText: `/saat · son ${hoursStr === "0.25" ? "15dk" : hoursStr + "h"} ort.${isCodex ? " (notional)" : " (tahmini $)"}`,
+      zone: rate >= z.heavy ? ["bad", "🔴 ağır bölge · çok yoğun yakıyorsun"]
+          : rate >= z.busy ? ["warn", "🟠 yoğun bölge"]
+          : rate >= z.typical ? ["warn", "🟡 normal üstü"]
+          :                  ["good", "🟢 sakin · verimli"],
+      ratio: rep.current_window?.vs_baseline_ratio, below: rate < z.typical,
+      note: zd ? "Eşikler varsayılan — henüz kişisel hız geçmişin yok."
+               : "Eşikler senin geçmiş 5s pencerelerinden (P50/P90).",
+    };
+  }
+
+  const max = g.max, z = g.zones;
   const arcs =
     `<path class="speedo-zone-green"  d="${arcPath(cx,cy,r,0,z.typical,max)}" stroke-width="26" fill="none"/>` +
     `<path class="speedo-zone-yellow" d="${arcPath(cx,cy,r,z.typical,z.busy,max)}" stroke-width="26" fill="none"/>` +
     `<path class="speedo-zone-orange" d="${arcPath(cx,cy,r,z.busy,z.heavy,max)}" stroke-width="26" fill="none"/>` +
     `<path class="speedo-zone-red"    d="${arcPath(cx,cy,r,z.heavy,max,max)}" stroke-width="26" fill="none"/>`;
-  const zoneDefault = !!z.insufficient_history;
-  const ticks = zoneDefault
-    ? [{ v: 0, l: "$0" }, { v: z.typical, l: "tipik (varsayılan)" }, { v: z.busy, l: "yoğun (varsayılan)" }, { v: z.heavy, l: "ağır" }]
-    : [{ v: 0, l: "$0" }, { v: z.typical, l: "senin tipik" }, { v: z.busy, l: "senin yoğun (P90)" }, { v: z.heavy, l: "çok yoğun" }];
-  const ticksSvg = ticks.map(t => {
+  const ticksSvg = g.ticks.map(t => {
     const a = 180 - (Math.min(t.v, max) / max) * 180, p = polarToCartesian(cx, cy, r + 20, a);
     const anc = a < 90 ? "start" : a > 90 ? "end" : "middle";
     return `<text class="speedo-tick-label" x="${p.x.toFixed(1)}" y="${p.y.toFixed(1)}" text-anchor="${anc}" dominant-baseline="middle">${t.l}</text>`;
   }).join("");
-  const clamped = Math.max(0, Math.min(rate, max));
+  const clamped = Math.max(0, Math.min(g.value, max));
   const na = 180 - (clamped / max) * 180;
   const tip = polarToCartesian(cx, cy, r - 6, na), tail = polarToCartesian(cx, cy, -24, na);
-
-  let zc, zw;
-  if (rate >= z.heavy)        { zc = "bad";  zw = "🔴 ağır bölge · çok yoğun yakıyorsun"; }
-  else if (rate >= z.busy)    { zc = "warn"; zw = "🟠 yoğun bölge"; }
-  else if (rate >= z.typical) { zc = "warn"; zw = "🟡 normal üstü"; }
-  else                         { zc = "good"; zw = "🟢 sakin · verimli"; }
+  const [zc, zw] = g.zone;
   const needleCol = zc === "bad" ? "#F2555A" : zc === "warn" ? "#F5A623" : "#2BD96B";
 
   const svg = $("speedo-svg");
   if (svg) svg.innerHTML = `${arcs}${ticksSvg}
     <line x1="${tail.x.toFixed(1)}" y1="${tail.y.toFixed(1)}" x2="${tip.x.toFixed(1)}" y2="${tip.y.toFixed(1)}" stroke="${needleCol}" stroke-width="4" stroke-linecap="round"/>
     <circle class="speedo-hub" cx="${cx}" cy="${cy}" r="8"/>
-    <text class="speedo-value" x="${cx}" y="${cy + 36}">${fmtMoney(rate)}</text>
-    <text class="speedo-unit" x="${cx}" y="${cy + 52}">/saat · son ${hoursStr === "0.25" ? "15dk" : hoursStr + "h"} ort.${isCodex ? " (notional)" : " (tahmini $)"}</text>`;
+    <text class="speedo-value" x="${cx}" y="${cy + 36}">${g.valueText}</text>
+    <text class="speedo-unit" x="${cx}" y="${cy + 52}">${g.unitText}</text>`;
 
-  const cw = rep.current_window || {};
-  const ratio = cw.vs_baseline_ratio;
   $("speedo-zone").className = "speedo-zone-txt " + zc;
   const zoneEl = $("speedo-zone");
   zoneEl.textContent = zw;
-  if (ratio != null && ratio > 0) {
+  if (g.ratio != null && g.ratio > 0) {
     const span = document.createElement("span");
     span.append(" · normalinin ");
     const strong = document.createElement("strong");
-    strong.textContent = ratio.toFixed(1) + "x";
+    strong.textContent = g.ratio.toFixed(1) + "x";
     span.append(strong, " hızı");
     zoneEl.appendChild(span);
-  } else if (rate < z.typical) {
+  } else if (g.below) {
     zoneEl.append(" · normalin altında");
   }
 
-  // efficiency headline (fuel_efficiency) — unit economics narrative
+  // efficiency headline (fuel_efficiency) + demoted note (öbür limit / eşik kaynağı)
   const fe = rep.fuel_efficiency?.headline || {};
-  const zoneNote = zoneDefault
-    ? `<div class="dim" style="font-size:10.5px;margin-top:5px;color:var(--text-4)">Eşikler varsayılan — henüz kişisel hız geçmişin yok.</div>`
-    : `<div class="dim" style="font-size:10.5px;margin-top:5px;color:var(--text-4)">Eşikler senin geçmiş 5s pencerelerinden (P50/P90).</div>`;
-  $("hero-detail").innerHTML = `<strong>${esc(fe.label || "")}</strong>${fe.detail ? " — " + esc(fe.detail) : ""}${zoneNote}`;
+  const noteHtml = `<div class="dim" style="font-size:10.5px;margin-top:5px;color:var(--text-4)">${esc(g.note)}</div>`;
+  $("hero-detail").innerHTML = `<strong>${esc(fe.label || "")}</strong>${fe.detail ? " — " + esc(fe.detail) : ""}${noteHtml}`;
 
   // per-model breakdown of this burn (which model is eating the $/hr)
   const bd = (fc.burn_rates_by_hours_by_model || {})[hoursStr] || [];
