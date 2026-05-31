@@ -119,6 +119,7 @@ function render(rep) {
   renderModels(rep);
   renderDaily(rep);
   renderProjects(rep);
+  renderHeatmap(rep);
   renderRecent(rep);
   renderModelTable(rep);
   renderBehavior(rep);
@@ -638,6 +639,25 @@ function renderRecent(rep) {
   }).join("");
 }
 
+// ---------- aktivite ısı haritası (saat × gün · yerel) ----------
+function renderHeatmap(rep) {
+  const body = $("heatmap-body"); if (!body) return;
+  const hm = rep.usage_heatmap || {}, grid = hm.grid || [], mx = hm.max || 0;
+  if (!grid.length || !mx) { body.innerHTML = `<div class="dim" style="padding:10px 0">aktivite verisi yok</div>`; return; }
+  const days = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"];
+  let h = `<div class="hm-grid"><div class="hm-corner"></div>`;
+  for (let x = 0; x < 24; x++) h += `<div class="hm-hour">${x % 3 === 0 ? x : ""}</div>`;
+  for (let d = 0; d < 7; d++) {
+    h += `<div class="hm-day">${days[d]}</div>`;
+    for (let x = 0; x < 24; x++) {
+      const v = grid[d][x] || 0, it = mx ? v / mx : 0;
+      const lvl = v === 0 ? 0 : it > 0.66 ? 4 : it > 0.33 ? 3 : it > 0.12 ? 2 : 1;
+      h += `<div class="hm-cell lvl${lvl}" title="${days[d]} ${x}:00 · ${fmtInt(v)} token"></div>`;
+    }
+  }
+  body.innerHTML = h + `</div>`;
+}
+
 // ---------- per-model table ----------
 function renderModelTable(rep) {
   const bmf = (rep.by_model_full || []).filter(m => !String(m.model_id || "").startsWith("<")).slice(0, 10);
@@ -735,7 +755,7 @@ function initModularGrid() {
   const colW = c => { const m = (c.className.match(/col-(\d+)/) || [])[1]; return m ? +m : 4; };
   // varsayılan yükseklikler (satır = 76px); kullanıcı resize edip kaydedebilir
   const H = { hero: 5, "hero-aside": 5, kpi: 2, eff: 5, cache: 3, trend: 5, models: 5,
-              "active-model": 4, daily: 4, projects: 5, recent: 5, "model-table": 5, behavior: 3, tools: 3 };
+              "active-model": 4, daily: 4, projects: 5, recent: 5, heatmap: 3, "model-table": 5, behavior: 3, tools: 3 };
   const gs = document.createElement("div");
   gs.className = "grid-stack";
   cards.forEach(card => {

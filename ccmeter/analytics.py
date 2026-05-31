@@ -1670,6 +1670,22 @@ def cache_efficiency(by_model_full: list[dict]) -> dict:
     }
 
 
+def usage_heatmap(records: list[UsageRecord]) -> dict:
+    """7 (gün: Pzt=0..Paz=6) × 24 (saat) YEREL-zaman kullanım ısı haritası.
+
+    "Ne zaman aktifsin / reset'in ne zaman güvenli" sorusuna görsel cevap. Timestamp'ler
+    UTC; .astimezone() ile sunucunun (=kullanıcının) yerel saatine çevrilir. Yoğunluk = token.
+    """
+    grid = [[0] * 24 for _ in range(7)]
+    for r in records:
+        try:
+            lt = r.timestamp.astimezone()
+        except (ValueError, OSError, OverflowError):
+            continue
+        grid[lt.weekday()][lt.hour] += (r.input_tokens or 0) + (r.output_tokens or 0) + (r.cache_read_tokens or 0)
+    return {"grid": grid, "max": max((max(row) for row in grid), default=0)}
+
+
 def build_report(
     records: list[UsageRecord],
     plan: Optional[str] = None,
@@ -1828,6 +1844,7 @@ def build_report(
         "totals": totals_dict,
         "cache_efficiency": cache_efficiency(bmf),
         "daily": daily,
+        "usage_heatmap": usage_heatmap(records),
         "by_model": aggregate_by_model(records),
         "by_model_full": bmf,
         "by_project": aggregate_by_project(records),

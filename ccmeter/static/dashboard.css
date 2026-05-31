@@ -132,6 +132,16 @@ header {
 .alert-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
 .alert-toast.warn { border-color:#F5A623; color:#F5A623; }
 .alert-toast.crit { border-color:#F2555A; color:#F2555A; }
+/* ---------- aktivite ısı haritası ---------- */
+.hm-grid { display:grid; grid-template-columns:36px repeat(24, 1fr); gap:2px; align-items:center; }
+.hm-hour { font-size:8.5px; color:var(--text-4); text-align:center; }
+.hm-day { font-size:9.5px; color:var(--text-3); }
+.hm-cell { height:16px; border-radius:2px; background:var(--bg-inset); transition:transform .1s; }
+.hm-cell:hover { transform:scale(1.25); }
+.hm-cell.lvl1 { background:rgba(43,217,107,.20); }
+.hm-cell.lvl2 { background:rgba(43,217,107,.42); }
+.hm-cell.lvl3 { background:rgba(43,217,107,.68); }
+.hm-cell.lvl4 { background:rgba(43,217,107,.95); }
 
 /* ---------- kaliteli scrollbar (ince · yuvarlak · temalı) ---------- */
 * { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }

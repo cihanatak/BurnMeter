@@ -5,10 +5,10 @@
   <title>ccmeter — AI coding yakıt metresi</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack.min.css" />
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260531n" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260531o" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack-all.js" defer></script>
-  <script src="/static/dashboard.js?v=20260531n" defer></script>
+  <script src="/static/dashboard.js?v=20260531o" defer></script>
 </head>
 <body>
 
@@ -129,6 +129,12 @@
     <div class="scroll"><table class="tbl" id="projects-tbl">
       <thead><tr><th>proje</th><th class="num">token</th><th class="num">$ (tahmini)</th></tr></thead>
       <tbody></tbody></table></div>
+  </section>
+
+  <!-- usage HEATMAP — saat × gün aktivite (yerel saat) -->
+  <section class="card col-12" data-card="heatmap">
+    <div class="card-title">Aktivite ısı haritası <span class="sub">saat × gün · yerel saat · token yoğunluğu</span></div>
+    <div id="heatmap-body"></div>
   </section>
 
   <!-- per-model table (lifetime) + davranış + tool -->
