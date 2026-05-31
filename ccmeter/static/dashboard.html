@@ -5,10 +5,10 @@
   <title>ccmeter — AI coding yakıt metresi</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack.min.css" />
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260531f" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260531g" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack-all.js" defer></script>
-  <script src="/static/dashboard.js?v=20260531f" defer></script>
+  <script src="/static/dashboard.js?v=20260531g" defer></script>
 </head>
 <body>
 
@@ -20,6 +20,7 @@
     <span class="source-toggle" id="source-toggle">
       <button data-source="claude" class="active"><span class="dot"></span>Claude Code</button>
       <button data-source="codex"><span class="dot"></span>Codex</button>
+      <button data-source="both"><span class="dot"></span>İkisi</button>
     </span>
   </div>
   <div class="header-meta">
@@ -147,6 +148,12 @@
   </section>
 
 </main>
+
+<!-- COMBINED "her ikisi" — Claude | Codex yan yana, ortadan bölünmüş (JS display:flex) -->
+<section id="combined-view" class="combined-view">
+  <div class="cv-half" id="cv-claude"></div>
+  <div class="cv-half" id="cv-codex"></div>
+</section>
 
 <footer style="max-width:var(--maxw);margin:0 auto;padding:8px var(--page-pad) 32px;color:var(--text-4);font-size:11px;font-family:var(--font-mono);">
   <span id="footer-text">lokal · ~/.claude/projects + ~/.codex/sessions okur · $ tahmindir</span>

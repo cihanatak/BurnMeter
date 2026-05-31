@@ -60,20 +60,29 @@ const sevClass = (pct) => pct >= 90 ? "bad" : pct >= 70 ? "warn" : "good";
 window.__source = localStorage.getItem("ccmeter_source") || "claude";
 window.__charts = {};
 
-async function loadReport(force) {
+async function loadReportFor(src, force) {
   const p = new URLSearchParams();
   if (force) p.set("refresh", "1");
-  if (window.__source !== "claude") p.set("source", window.__source);
+  if (src !== "claude") p.set("source", src);
   const qs = p.toString();
   const r = await fetch("/api/report" + (qs ? "?" + qs : ""));
   if (!r.ok) throw new Error("fetch " + r.status);
   return r.json();
 }
+const loadReport = (force) => loadReportFor(window.__source, force);
 
 async function refresh(force = false) {
   if (window.__refreshInFlight && !force) return;
   window.__refreshInFlight = true;
   try {
+    if (window.__source === "both") {
+      const [cl, cx] = await Promise.all([loadReportFor("claude", force), loadReportFor("codex", force)]);
+      if (window.__source !== "both") return;               // switched away mid-fetch
+      window.__lastReport = { _combined: true, claude: cl, codex: cx };
+      renderCombined(cl, cx);
+      window.__lastRefreshMs = Date.now();
+      return;
+    }
     const rep = await loadReport(force);
     if ((rep._meta?.source || "claude") !== window.__source) return; // stale
     window.__lastReport = rep;
@@ -89,6 +98,8 @@ async function refresh(force = false) {
 
 // ---------- render orchestrator ----------
 function render(rep) {
+  { const cv = $("combined-view"); if (cv) cv.style.display = "none";
+    const mn = document.querySelector("main"); if (mn) mn.style.display = ""; }
   const src = rep._meta?.source || "claude";
   const isCodex = src === "codex";
   document.documentElement.style.setProperty("--brand", isCodex ? "var(--brand-codex)" : "var(--brand-claude)");
@@ -139,6 +150,67 @@ function renderActiveModel(rep) {
       <span class="am-seen dim">${seen}</span>
     </div>`;
   }).join("");
+}
+
+// ---------- COMBINED "her ikisi" görünümü (Claude | Codex yan yana) ----------
+function renderCombined(cl, cx) {
+  const cv = $("combined-view"), mn = document.querySelector("main");
+  if (mn) mn.style.display = "none";
+  if (cv) cv.style.display = "flex";
+  document.documentElement.style.setProperty("--brand", "var(--brand-claude)");
+  $("app-name").textContent = "ccmeter"; $("brand-logo").textContent = "◫";
+  document.title = "ccmeter — Claude + Codex";
+  $("version").textContent = "v" + (cl._meta?.version || cx._meta?.version || "?");
+  $("data-source").textContent = `Claude ${fmtInt(cl.record_count || 0)} · Codex ${fmtInt(cx.record_count || 0)} kayıt`;
+  $("last-updated").textContent = "şimdi";
+  const a = $("cv-claude"); if (a) a.innerHTML = combinedHalf(cl, false);
+  const b = $("cv-codex");  if (b) b.innerHTML = combinedHalf(cx, true);
+}
+
+function combinedHalf(rep, isCodex) {
+  const fc = rep.forecast || {};
+  const rate = (fc.burn_rates_by_hours || {})["2"] ?? fc.burn_rate_per_hour_recent ?? 0;
+  let bigVal, bigSub, zc, zt;
+  const rl = rep.codex_rate_limits || {}, dev = rl.mac || Object.values(rl)[0] || {};
+  const h5 = dev.primary || {}, wk = dev.secondary || {};
+  if (isCodex && (h5.used_percent != null || wk.used_percent != null)) {
+    const h5p = h5.used_percent || 0, wkp = wk.used_percent || 0, bw = wkp >= h5p;
+    const bp = bw ? wkp : h5p, bind = bw ? wk : h5;
+    bigVal = "%" + Math.round(bp);
+    bigSub = (bw ? "haftalık limit" : "5 saat limiti") + (bind.resets_at ? " · ↻ " + resetIn(bind.resets_at) : "");
+    zc = bp >= 90 ? "bad" : bp >= 50 ? "warn" : "good";
+    zt = bp >= 90 ? "🔴 duvara yakın" : bp >= 75 ? "🟠 yüksek kullanım" : bp >= 50 ? "🟡 yarıyı geçtin" : "🟢 bol alan var";
+  } else {
+    const z = rep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25 };
+    bigVal = fmtMoney(rate); bigSub = "/saat burn" + (isCodex ? " (notional)" : " (tahmini)");
+    zc = rate >= z.heavy ? "bad" : rate >= z.typical ? "warn" : "good";
+    zt = rate >= z.heavy ? "🔴 ağır bölge" : rate >= z.busy ? "🟠 yoğun" : rate >= z.typical ? "🟡 normal üstü" : "🟢 sakin";
+  }
+  const today = fc.today?.so_far ?? 0, cache = rep.cache_efficiency?.hit_rate, life = rep.totals?.cost_usd ?? 0;
+  const est = isCodex ? "notional" : "tahmini";
+  const lam = (rep.live_active_models_by_window || {})["15"] || {};
+  const models = (lam.models || []).filter(m => !String(m.model_id).startsWith("<"))
+    .sort((a, b) => (a.seconds_since_last ?? 9e9) - (b.seconds_since_last ?? 9e9)).slice(0, 3);
+  const am = models.length ? models.map(m => {
+    const s = m.seconds_since_last ?? 9e9, live = s < 120;
+    return `<div class="am-row"><span class="am-dot${live ? " live" : ""}"></span>
+      <span class="am-name ${modelToFamily(m.model_id)}">${esc(modelDisplay(m.model_id))}</span>
+      <span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/dk</span></span>
+      <span class="am-seen dim">${live ? "● şimdi" : Math.round(s / 60) + "dk"}</span></div>`;
+  }).join("") : `<div class="dim" style="padding:6px 0">son 15dk aktif model yok</div>`;
+  return `<div class="cv-head"><span class="cv-logo">${isCodex ? "⌬" : "◔"}</span>
+      <span class="cv-title">${isCodex ? "Codex" : "Claude Code"}</span>
+      <span class="cv-sub dim">${fmtInt(rep.record_count || 0)} kayıt</span></div>
+    <div class="cv-big ${zc}">${bigVal}</div>
+    <div class="cv-bigsub dim">${esc(bigSub)}</div>
+    <div class="cv-zone ${zc}">${zt}</div>
+    <div class="cv-stats">
+      <div><span class="dim">Bugün</span><b>${fmtMoney0(today)}</b></div>
+      <div><span class="dim">Burn</span><b>${fmtMoney(rate)}/sa</b></div>
+      <div><span class="dim">Cache</span><b>${cache != null ? "%" + (cache * 100).toFixed(0) : "—"}</b></div>
+      <div><span class="dim">Lifetime</span><b>${fmtMoney0(life)} <span class="dim" style="font-size:9px">${est}</span></b></div>
+    </div>
+    <div class="cv-am-title dim">Canlı aktif model</div>${am}`;
 }
 
 // ---------- hero SPEEDOMETER (araba göstergesi) ----------
