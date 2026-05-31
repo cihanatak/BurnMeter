@@ -22,14 +22,14 @@ from .codex_parser import CODEX_SESSIONS_DIR, load_codex_records
 from .analytics import build_report
 
 
-STATIC_DIR = Path(__file__).resolve().parent / "static"   # ccmeter/static (paket içi — pip-install'da da bulunur)
+STATIC_DIR = Path(__file__).resolve().parent / "static"   # burnmeter/static (paket içi — pip-install'da da bulunur)
 
 
 class _Cache:
     """Memoized report cache backed by a short-lived BUILD WORKER subprocess.
 
     RAM disiplini (commercial-grade): the heavy load+build (~half-a-million
-    records, ~800MB transient) runs in `python -m ccmeter._worker`, which prints
+    records, ~800MB transient) runs in `python -m burnmeter._worker`, which prints
     the report JSON and EXITS — so the OS reclaims that memory immediately. This
     long-running server only ever caches the small report JSON (~0.5MB). RSS
     stays tiny and bounded; no streaming-aggregate rewrite, zero logic change.
@@ -59,16 +59,16 @@ class _Cache:
         import subprocess
         try:
             proc = subprocess.run(
-                [sys.executable, "-m", "ccmeter._worker"],
+                [sys.executable, "-m", "burnmeter._worker"],
                 input=json.dumps(self.worker_config or {}),
                 capture_output=True, text=True, timeout=180,
             )
             if proc.returncode != 0:
-                sys.stderr.write(f"[ccmeter] worker rc={proc.returncode}: {proc.stderr[:300]}\n")
+                sys.stderr.write(f"[burnmeter] worker rc={proc.returncode}: {proc.stderr[:300]}\n")
                 return None
             return json.loads(proc.stdout)
         except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError) as e:
-            sys.stderr.write(f"[ccmeter] worker failed: {e}\n")
+            sys.stderr.write(f"[burnmeter] worker failed: {e}\n")
             return None
 
     def _do_build(self, build_fn, key):
@@ -94,7 +94,7 @@ class _Cache:
         try:
             self._do_build(build_fn, key)
         except Exception as e:                # never let a bg thread die silently
-            sys.stderr.write(f"[ccmeter] bg rebuild failed: {e}\n")
+            sys.stderr.write(f"[burnmeter] bg rebuild failed: {e}\n")
         finally:
             self._build_lock.release()
 
@@ -186,7 +186,7 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
     class Handler(BaseHTTPRequestHandler):
         # Quieter than the default verbose logger.
         def log_message(self, format, *args):
-            sys.stderr.write("[ccmeter] %s - %s\n" % (
+            sys.stderr.write("[burnmeter] %s - %s\n" % (
                 self.address_string(), format % args
             ))
 
@@ -220,8 +220,8 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
             # `statusLine.command` and shown live in the prompt. Returns
             # plain text by default, JSON if ?format=json.
             if path == "/api/statusline":
-                # Single source of truth: ccmeter/statusline.py (shared with the
-                # `ccmeter statusline` CLI subcommand, so HTTP pull + terminal never drift).
+                # Single source of truth: burnmeter/statusline.py (shared with the
+                # `burnmeter statusline` CLI subcommand, so HTTP pull + terminal never drift).
                 from .statusline import build_statusline, statusline_text
                 src = (qs.get("source", ["claude"])[0] or "claude").lower()
                 report = build_for(src, None)   # shared worker-backed cached report
@@ -257,7 +257,7 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 self.send_header("Content-Type", "text/csv; charset=utf-8")
                 self.send_header(
                     "Content-Disposition",
-                    "attachment; filename=ccmeter_records.csv",
+                    "attachment; filename=burnmeter_records.csv",
                 )
                 self.end_headers()
                 cols = [
@@ -327,18 +327,18 @@ def serve(host: str = "127.0.0.1", port: int = 8765,
 
     if not projects_dir.exists():
         sys.stderr.write(
-            f"[ccmeter] WARNING: {projects_dir} does not exist. "
+            f"[burnmeter] WARNING: {projects_dir} does not exist. "
             "The dashboard will load with empty data until Claude Code writes a session here.\n"
         )
 
     server = ThreadingHTTPServer((host, port), make_handler(cache, codex_cache))
-    sys.stderr.write(f"[ccmeter] v{__version__} → http://{host}:{port}\n")
-    sys.stderr.write(f"[ccmeter] reading (claude): {projects_dir}\n")
-    sys.stderr.write(f"[ccmeter] reading (codex):  {codex_root} (exists={codex_root.exists()})\n")
+    sys.stderr.write(f"[burnmeter] v{__version__} → http://{host}:{port}\n")
+    sys.stderr.write(f"[burnmeter] reading (claude): {projects_dir}\n")
+    sys.stderr.write(f"[burnmeter] reading (codex):  {codex_root} (exists={codex_root.exists()})\n")
     for er in (extra_roots or []):
-        sys.stderr.write(f"[ccmeter] + claude extra: {er} (exists={er.exists()})\n")
+        sys.stderr.write(f"[burnmeter] + claude extra: {er} (exists={er.exists()})\n")
     for er in (codex_extra_roots or []):
-        sys.stderr.write(f"[ccmeter] + codex extra:  {er} (exists={er.exists()})\n")
+        sys.stderr.write(f"[burnmeter] + codex extra:  {er} (exists={er.exists()})\n")
 
     # Startup warm: pre-build both caches off the request path so the first
     # source-switch after a (re)boot is instant instead of blocking ~30s on the
@@ -357,12 +357,12 @@ def serve(host: str = "127.0.0.1", port: int = 8765,
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        sys.stderr.write("\n[ccmeter] shutting down\n")
+        sys.stderr.write("\n[burnmeter] shutting down\n")
         server.server_close()
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="ccmeter-serve")
+    p = argparse.ArgumentParser(prog="burnmeter-serve")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--projects-dir", default=str(CLAUDE_PROJECTS_DIR))

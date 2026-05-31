@@ -1,11 +1,6 @@
-# ccmeter
+# Burnmeter
 
 **One dashboard for every AI coding agent — see exactly where your tokens go.**
-
-> 🚧 **Rebranding in progress.** This started as *ccmeter* (Claude Code meter) but
-> now tracks **Claude Code + OpenAI Codex** (more agents coming), so the name is
-> moving to something vendor-neutral. Candidates & decision in
-> [`NAMING.md`](./NAMING.md).
 
 A **local-first** dashboard that reads the session logs your AI coding agents
 already write to disk and turns them into a real-time view of token usage, cost,
@@ -23,7 +18,7 @@ the CLI's `/usage` command are point-in-time only — not historical, not
 programmatic. So if you're on a flat-fee subscription, **your local session logs
 are the only accurate source of truth** for what you're actually burning.
 
-ccmeter reads them — `~/.claude/projects/**/*.jsonl` and
+Burnmeter reads them — `~/.claude/projects/**/*.jsonl` and
 `~/.codex/sessions/**/*.jsonl` — and answers the one question that matters:
 **"Am I about to hit the wall?"**
 
@@ -37,7 +32,7 @@ ccmeter reads them — `~/.claude/projects/**/*.jsonl` and
 - **Real per-model pricing** — Opus / Sonnet / Haiku and GPT-5.5 / 5.4 / Codex /
   mini, each at its actual rate. Output costs 5–8× input — the model mix *is* the
   cost story.
-- **Cache-efficiency panel** — cache reads cost ~10% of fresh input. ccmeter
+- **Cache-efficiency panel** — cache reads cost ~10% of fresh input. burnmeter
   shows your hit rate and the **dollars cache saved you** vs. an un-cached run
   (often the "I'm getting $50k of value for $200" number).
 - **Per-project attribution** — which repo is eating your quota.
@@ -45,7 +40,7 @@ ccmeter reads them — `~/.claude/projects/**/*.jsonl` and
   "where did it go" picture, with sparklines and clean charts.
 - **Multi-device** — sync a second machine's logs in (e.g. via Syncthing) and see
   per-device breakdowns.
-- **Terminal statusline** — `ccmeter statusline` prints a one-liner for your shell
+- **Terminal statusline** — `burnmeter statusline` prints a one-liner for your shell
   prompt or Claude Code's status bar (verdict · model · $/h · block left · errors ·
   cache · today). Same numbers as the dashboard, no server needed.
 - **Tiny footprint** — the long-running server holds ~30 MB; heavy parsing runs
@@ -57,24 +52,24 @@ Python 3.10+, **zero third-party dependencies** (Chart.js / GridStack load from 
 the browser). Recommended: [pipx](https://pipx.pypa.io) for an isolated install.
 
 ```bash
-pipx install git+https://github.com/cihanatak/CCmeter   # PyPI release coming → `pipx install ccmeter`
-ccmeter serve --port 9876
+pipx install git+https://github.com/cihanatak/BurnMeter   # PyPI release coming → `pipx install burnmeter`
+burnmeter serve --port 9876
 # open http://127.0.0.1:9876
 ```
 
 Or with pip, or straight from a source checkout:
 
 ```bash
-pip install git+https://github.com/cihanatak/CCmeter && ccmeter serve
+pip install git+https://github.com/cihanatak/BurnMeter && burnmeter serve
 # — or —
-git clone https://github.com/cihanatak/CCmeter && cd CCmeter
-python3 -m ccmeter serve --port 9876
+git clone https://github.com/cihanatak/BurnMeter && cd BurnMeter
+python3 -m burnmeter serve --port 9876
 ```
 
 Multi-source (Claude + Codex) and a synced second machine:
 
 ```bash
-ccmeter serve --port 9876 \
+burnmeter serve --port 9876 \
   --extra-projects-dir ~/.claude/projects-pc \
   --codex-extra-dir   ~/.codex/sessions-pc
 ```
@@ -85,11 +80,11 @@ A one-line live readout for your prompt or Claude Code's status bar — verdict
 dot, active model, $/h burn, block time left, 24h errors, cache hit, today's spend:
 
 ```bash
-ccmeter statusline
+burnmeter statusline
 # 🟠 Sonnet 4.6 $48/h · blok 1h34m · 12err/24h · cache %97 · gün $42
 
-ccmeter statusline --source codex   # Codex instead of Claude
-ccmeter statusline --json           # machine-readable, same numbers
+burnmeter statusline --source codex   # Codex instead of Claude
+burnmeter statusline --json           # machine-readable, same numbers
 ```
 
 It computes standalone (no running server needed) and shares its logic with the
@@ -99,7 +94,7 @@ Wire it into **Claude Code** (`~/.claude/settings.json`) so it refreshes in your
 
 ```json
 {
-  "statusLine": { "type": "command", "command": "ccmeter statusline" }
+  "statusLine": { "type": "command", "command": "burnmeter statusline" }
 }
 ```
 
@@ -120,7 +115,7 @@ for billing, see your provider's console.
 
 ## Privacy / local-first
 
-Everything stays on your disk. ccmeter binds to `127.0.0.1` only. There is no
+Everything stays on your disk. Burnmeter binds to `127.0.0.1` only. There is no
 telemetry, no account, no upload. The optional Pro **sync** feature (see
 [`PRICING.md`](./PRICING.md)) is end-to-end encrypted and entirely opt-in.
 

@@ -325,7 +325,7 @@ def iter_jsonl_files(root: Path = CLAUDE_PROJECTS_DIR) -> Iterator[Path]:
 # Claude session JSONL'leri append-only; tamamlanmış dosyalar değişmez. Cache
 # (path,mtime,size) ile değişmemiş dosyalar yeniden OKUNMAZ → build ~25s'den
 # ~birkaç saniyeye iner (sadece aktif/yeni dosyalar parse edilir).
-_CLAUDE_CACHE_PATH = CLAUDE_PROJECTS_DIR.parent / ".ccmeter_claude_cache.json"
+_CLAUDE_CACHE_PATH = CLAUDE_PROJECTS_DIR.parent / ".burnmeter_claude_cache.json"
 _CLAUDE_CACHE_VERSION = 1
 
 

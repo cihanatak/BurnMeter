@@ -11,7 +11,7 @@ Each line: {timestamp, type, payload}. We care about:
     edebilir → ardışık birebir-aynı olanlar duplicate sayılıp atlanır)
   - event_msg.user_message → first one = the session "intent"
 
-Token mapping → ccmeter UsageRecord:
+Token mapping → burnmeter UsageRecord:
   fresh input = input_tokens - cached_input_tokens
   cache_read  = cached_input_tokens
   output      = output_tokens (reasoning dahil)

@@ -20,8 +20,8 @@ from pathlib import Path
 
 import pytest
 
-import ccmeter.codex_parser as cp
-from ccmeter.codex_parser import load_codex_records
+import burnmeter.codex_parser as cp
+from burnmeter.codex_parser import load_codex_records
 
 
 def write_rollout(path: Path, sid: str, turns, cwd: str = "/proj", model: str = "gpt-5.5") -> None:

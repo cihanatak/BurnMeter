@@ -4,7 +4,7 @@
 
 ### Added
 - **Multi-agent**: OpenAI Codex source alongside Claude Code, with a header
-  toggle (ccmeter ↔ codex_meter). Same dashboard, source-aware data + branding.
+  toggle (burnmeter ↔ codex_meter). Same dashboard, source-aware data + branding.
 - **Modern dashboard** (Linear-anchored dark design system): hero binding-
   constraint ring, KPI strip with sparklines, plan-limit meters, cache-efficiency
   panel, burn-rate trend area chart, model donut, daily bars, per-project /
@@ -26,5 +26,5 @@
   `UsageRecord` uses `__slots__`.
 
 ### Notes
-- Rebranding in progress (see NAMING.md) — "ccmeter" is a working title.
+- Rebranding in progress (see NAMING.md) — "burnmeter" is a working title.
 - Costs are client-side estimates; for billing see your provider's console.

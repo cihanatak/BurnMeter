@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from ccmeter.analytics import build_report
-from ccmeter.parser import UsageRecord
+from burnmeter.analytics import build_report
+from burnmeter.parser import UsageRecord
 
 
 def _rec(model: str, ts: datetime, tokens: int, tid: str, sid: str = "sess") -> UsageRecord:

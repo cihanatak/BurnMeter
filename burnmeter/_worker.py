@@ -10,7 +10,7 @@ This is a zero-logic-change RAM fix: the exact same load_records / build_report
 run, just in a process that dies after each build. No streaming-aggregate
 rewrite, no risk of subtly wrong numbers.
 
-Usage: `python3 -m ccmeter._worker` then write config JSON to stdin:
+Usage: `python3 -m burnmeter._worker` then write config JSON to stdin:
   {"source":"codex","projects_dir":"...","extra_roots":[...],
    "codex_dir":"...","codex_extra_roots":[...],"plan":null}
 Prints report JSON to stdout. Non-zero exit on error.

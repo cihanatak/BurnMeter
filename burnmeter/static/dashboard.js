@@ -1,6 +1,24 @@
 // Burnmeter — dashboard frontend (modern rebuild 2026-05-30)
 // Local /api/report (source=claude|codex). Numbers are the hero.
 
+// ---------- localStorage migration: ccmeter_* → burnmeter_* (eski ayarlar korunur, tek seferlik) ----------
+(function () { try {
+  if (localStorage.getItem("burnmeter_ls_migrated")) return;
+  // ÖNCE tüm eski anahtarları topla — taşıma sırasında setItem/removeItem localStorage'ı
+  // re-index ettiği için index-tabanlı okuma key atlar (bazı ayarlar kaybolurdu).
+  const old = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.indexOf("ccmeter_") === 0) old.push(k);
+  }
+  for (const k of old) {
+    const nk = "burnmeter_" + k.slice(8);
+    if (localStorage.getItem(nk) === null) localStorage.setItem(nk, localStorage.getItem(k));
+    localStorage.removeItem(k);
+  }
+  localStorage.setItem("burnmeter_ls_migrated", "1");
+} catch (e) {} })();
+
 // ---------- helpers ----------
 const $ = (id) => document.getElementById(id);
 const fmtMoney = (n) => "$" + (Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -57,7 +75,7 @@ function modelDisplay(m) {
 const sevClass = (pct) => pct >= 90 ? "bad" : pct >= 70 ? "warn" : "good";
 
 // ---------- data ----------
-window.__source = localStorage.getItem("ccmeter_source") || "claude";
+window.__source = localStorage.getItem("burnmeter_source") || "claude";
 window.__charts = {};
 
 async function loadReportFor(src, force) {
@@ -130,12 +148,12 @@ function render(rep) {
 }
 
 // ---------- live ACTIVE MODEL (canlı çalışan model · 15dk/1sa/5sa) ----------
-// Eski ccmeter'da çok sevilen kutu: o an hangi model(ler) çalışıyor, ne hızla.
+// Eski sürümde çok sevilen kutu: o an hangi model(ler) çalışıyor, ne hızla.
 // Veri rep.live_active_models_by_window[15|60|300|1440] — her model: tokens_per_min,
 // messages, cost_per_hour, seconds_since_last (canlı mı). En yakın = "şu an çalışan".
 function renderActiveModel(rep) {
   const body = $("active-model-body"); if (!body) return;
-  const w = localStorage.getItem("ccmeter_active_window") || "15";
+  const w = localStorage.getItem("burnmeter_active_window") || "15";
   const lam = (rep.live_active_models_by_window || {})[w] || {};
   let models = (lam.models || []).filter(m => !String(m.model_id).startsWith("<"));
   const wl = w === "60" ? "1 saatte" : w === "300" ? "5 saatte" : w === "1440" ? "1 günde" : w + "dk'da";
@@ -176,10 +194,10 @@ function renderCombined(cl, cx) {
 function paintCombinedSide(side, rep, isCodex) {
   const root = document.getElementById("cv-" + side); if (!root) return;
   const els = () => ({ svg: root.querySelector(".cv-speedo"), zone: root.querySelector(".cv-zone2"), breakdown: root.querySelector(".cv-breakdown"), title: root.querySelector(".cvb-trow .cvb-t") });
-  paintBurnGauge(els(), rep, isCodex, localStorage.getItem("ccmeter_burn_hours_" + side) || "2");
+  paintBurnGauge(els(), rep, isCodex, localStorage.getItem("burnmeter_burn_hours_" + side) || "2");
   root.querySelectorAll(".cv-picker button").forEach(b => {
     b.addEventListener("click", () => {
-      localStorage.setItem("ccmeter_burn_hours_" + side, b.dataset.h);
+      localStorage.setItem("burnmeter_burn_hours_" + side, b.dataset.h);
       root.querySelectorAll(".cv-picker button").forEach(x => x.classList.toggle("active", x.dataset.h === b.dataset.h));
       paintBurnGauge(els(), rep, isCodex, b.dataset.h);
     });
@@ -263,7 +281,7 @@ function paintBurnGauge(els, rep, isCodex, hoursStr) {
 
 // bir yarının iskeleti: head + GERÇEK speedometer (svg + window picker) + canlı model + son işler
 function halfStructure(rep, isCodex, side) {
-  const h = localStorage.getItem("ccmeter_burn_hours_" + side) || "2";
+  const h = localStorage.getItem("burnmeter_burn_hours_" + side) || "2";
   const picker = [["0.25", "15dk"], ["1", "1h"], ["2", "2h"], ["4", "4h"], ["6", "6h"]]
     .map(([v, l]) => `<button data-h="${v}"${v === h ? ' class="active"' : ""}>${l}</button>`).join("");
   const ago = (iso) => { const s = (Date.now() - new Date(iso).getTime()) / 1000; return s < 60 ? "şimdi" : s < 3600 ? Math.round(s / 60) + "dk" : s < 86400 ? Math.round(s / 3600) + "sa" : Math.round(s / 86400) + "g"; };
@@ -298,7 +316,7 @@ function arcPath(cx, cy, r, sv, ev, mv) {
 // "Bu araba çok mu yakıyor?" — burn rate $/sa, referans zone'lara (tipik/yoğun/
 // ağır) göre iğne + verdict. Window picker (15dk/1h/2h/4h/6h) ortalama penceresi.
 function renderSpeedometer(rep, isCodex) {
-  const hoursStr = localStorage.getItem("ccmeter_burn_hours_" + (isCodex ? "codex" : "claude")) || "2";
+  const hoursStr = localStorage.getItem("burnmeter_burn_hours_" + (isCodex ? "codex" : "claude")) || "2";
   // picker'ı aktif kaynağın penceresine senkronla (kaynak değişince doğru buton yansısın)
   document.querySelectorAll("#burn-window-picker button").forEach(x => x.classList.toggle("active", x.dataset.h === hoursStr));
   // TEK KAYNAK: computeGaugeSpec — İkisi paintBurnGauge ile AYNI → single tab ↔ İkisi asla ayrışmaz.
@@ -470,7 +488,7 @@ function renderCache(rep) {
 }
 
 // ---------- aylık BÜTÇE takibi (#7) ----------
-// Per-source aylık $ bütçe (localStorage ccmeter_budget_{source}). Bu ay harcanan vs
+// Per-source aylık $ bütçe (localStorage burnmeter_budget_{source}). Bu ay harcanan vs
 // bütçe + ay-sonu projeksiyonu (forecast.month). $ TAHMİNİDİR — başlıkta + notta etiketli.
 // Bütçe sadece bu tarayıcıda saklanır (sunucuya gitmez).
 const _budgetEditing = {};
@@ -482,7 +500,7 @@ function renderBudget(rep, isCodex) {
   const soFar = m.so_far || 0;
   const projEom = m.projected_eom || 0;
   const daysLeft = m.days_left ?? 0;
-  const budget = parseFloat(localStorage.getItem("ccmeter_budget_" + src) || "0") || 0;
+  const budget = parseFloat(localStorage.getItem("burnmeter_budget_" + src) || "0") || 0;
   const dailyRate = daysLeft > 0 ? Math.max(0, projEom - soFar) / daysLeft : 0;
 
   // bütçe yok VEYA düzenleniyor → input formu
@@ -506,7 +524,7 @@ function renderBudget(rep, isCodex) {
     const saveBtn = $("budget-save");
     if (saveBtn) saveBtn.addEventListener("click", () => {
       const v = parseFloat(inp.value);
-      if (v > 0) localStorage.setItem("ccmeter_budget_" + src, String(v));
+      if (v > 0) localStorage.setItem("burnmeter_budget_" + src, String(v));
       done();
     });
     if (inp) inp.addEventListener("keydown", e => {
@@ -514,7 +532,7 @@ function renderBudget(rep, isCodex) {
       else if (e.key === "Escape" && budget > 0) done();
     });
     const clearBtn = $("budget-clear");
-    if (clearBtn) clearBtn.addEventListener("click", () => { localStorage.removeItem("ccmeter_budget_" + src); done(); });
+    if (clearBtn) clearBtn.addEventListener("click", () => { localStorage.removeItem("burnmeter_budget_" + src); done(); });
     const cancelBtn = $("budget-cancel");
     if (cancelBtn) cancelBtn.addEventListener("click", done);
     if (inp) inp.focus();
@@ -569,8 +587,8 @@ function movingAverage(arr, n) {
 }
 // Trade-chart: $/saat bar + seçili hareketli ortalama (MA) çizgileri.
 function renderTrend(rep, isCodex) {
-  const tf = localStorage.getItem("ccmeter_trend_tf") || "24";
-  const maList = JSON.parse(localStorage.getItem("ccmeter_trend_ma") || "[7]");
+  const tf = localStorage.getItem("burnmeter_trend_tf") || "24";
+  const maList = JSON.parse(localStorage.getItem("burnmeter_trend_ma") || "[7]");
   $("trend-unit").textContent = "$/saat (tahmini) · " + (tf === "24" ? "1 gün" : tf + "h") + " pencere";
   const series = (rep.burn_rate_timeseries || {})[tf] || [];
   const shortWin = (tf === "1" || tf === "4" || tf === "6");
@@ -827,12 +845,12 @@ function initModularGrid() {
   }, gs);
   window.__grid = grid;
   try {
-    const saved = JSON.parse(localStorage.getItem("ccmeter_layout_v1") || "null");
+    const saved = JSON.parse(localStorage.getItem("burnmeter_layout_v1") || "null");
     // kaydet/yükle YALNIZCA tam grid'de (12 kolon). Dar ekranda GridStack otomatik reflow
     // yapar; o geçici dar düzeni kaydetmeyiz ki geniş ekran düzenini bozmasın.
     if (saved && saved.length && grid.getColumn() === 12) grid.load(saved, false);
   } catch (e) { /* bozuk kayıt → varsayılan */ }
-  const save = () => { try { if (grid.getColumn() === 12) localStorage.setItem("ccmeter_layout_v1", JSON.stringify(grid.save(false))); } catch (e) {} };
+  const save = () => { try { if (grid.getColumn() === 12) localStorage.setItem("burnmeter_layout_v1", JSON.stringify(grid.save(false))); } catch (e) {} };
   grid.on("change", save);
   // resize sonrası grafikleri yeni boyuta sığdır
   grid.on("resizestop", () => { Object.values(window.__charts || {}).forEach(ch => { try { ch.resize(); } catch (e) {} }); });
@@ -855,8 +873,8 @@ function alertLevelOf(rep, isCodex) {
   return { level: 0, msg: "" };
 }
 function checkAlerts(rep, isCodex) {
-  if (localStorage.getItem("ccmeter_alerts_on") !== "1") return;
-  const key = "ccmeter_alert_lvl_" + (isCodex ? "codex" : "claude");
+  if (localStorage.getItem("burnmeter_alerts_on") !== "1") return;
+  const key = "burnmeter_alert_lvl_" + (isCodex ? "codex" : "claude");
   const { level, msg } = alertLevelOf(rep, isCodex);
   const prev = parseInt(localStorage.getItem(key) || "0", 10);
   localStorage.setItem(key, String(level));
@@ -869,19 +887,19 @@ function fireAlert(msg, level) {
   t.textContent = msg;
   clearTimeout(window.__alertHide);
   window.__alertHide = setTimeout(() => t.classList.remove("show"), 12000);
-  try { if (window.Notification && Notification.permission === "granted") new Notification("ccmeter · limit uyarısı", { body: msg }); } catch (e) {}
+  try { if (window.Notification && Notification.permission === "granted") new Notification("Burnmeter · limit uyarısı", { body: msg }); } catch (e) {}
 }
 function wireAlerts() {
   const b = $("alert-toggle"); if (!b) return;
-  const sync = () => { const on = localStorage.getItem("ccmeter_alerts_on") === "1"; b.classList.toggle("on", on); b.title = on ? "limit uyarıları AÇIK" : "limit uyarıları kapalı (tıkla)"; };
+  const sync = () => { const on = localStorage.getItem("burnmeter_alerts_on") === "1"; b.classList.toggle("on", on); b.title = on ? "limit uyarıları AÇIK" : "limit uyarıları kapalı (tıkla)"; };
   sync();
   b.addEventListener("click", async () => {
-    const on = localStorage.getItem("ccmeter_alerts_on") === "1";
+    const on = localStorage.getItem("burnmeter_alerts_on") === "1";
     if (!on) {
-      localStorage.setItem("ccmeter_alerts_on", "1");
+      localStorage.setItem("burnmeter_alerts_on", "1");
       try { if (window.Notification && Notification.permission === "default") await Notification.requestPermission(); } catch (e) {}
       fireAlert("🔔 Limit uyarıları açıldı — duvara %85'te haber veririm.", 2);
-    } else { localStorage.setItem("ccmeter_alerts_on", "0"); }
+    } else { localStorage.setItem("burnmeter_alerts_on", "0"); }
     sync();
   });
 }
@@ -899,58 +917,58 @@ function start() {
     b.addEventListener("click", () => {
       const src = b.dataset.source;
       if (src === window.__source) return;
-      window.__source = src; localStorage.setItem("ccmeter_source", src);
+      window.__source = src; localStorage.setItem("burnmeter_source", src);
       document.querySelectorAll("#source-toggle button").forEach(x => x.classList.toggle("active", x.dataset.source === src));
       $("last-updated").textContent = "Burnmeter yükleniyor…";
       window.__refreshInFlight = false; refresh(false);
     });
   });
   // burn-window picker (speedometer ortalama penceresi: 15dk/1h/2h/4h/6h)
-  const bh0 = localStorage.getItem("ccmeter_burn_hours_" + window.__source) || "2";
+  const bh0 = localStorage.getItem("burnmeter_burn_hours_" + window.__source) || "2";
   document.querySelectorAll("#burn-window-picker button").forEach(b => {
     b.classList.toggle("active", b.dataset.h === bh0);
     b.addEventListener("click", () => {
-      localStorage.setItem("ccmeter_burn_hours_" + window.__source, b.dataset.h);
+      localStorage.setItem("burnmeter_burn_hours_" + window.__source, b.dataset.h);
       document.querySelectorAll("#burn-window-picker button").forEach(x => x.classList.toggle("active", x.dataset.h === b.dataset.h));
       if (window.__lastReport) renderSpeedometer(window.__lastReport, window.__source === "codex");
     });
   });
   // trend timeframe picker (1h/4h/6h/12h/1d)
-  const tf0 = localStorage.getItem("ccmeter_trend_tf") || "24";
+  const tf0 = localStorage.getItem("burnmeter_trend_tf") || "24";
   document.querySelectorAll("#trend-picker button").forEach(b => {
     b.classList.toggle("active", b.dataset.tf === tf0);
     b.addEventListener("click", () => {
-      localStorage.setItem("ccmeter_trend_tf", b.dataset.tf);
+      localStorage.setItem("burnmeter_trend_tf", b.dataset.tf);
       document.querySelectorAll("#trend-picker button").forEach(x => x.classList.toggle("active", x.dataset.tf === b.dataset.tf));
       if (window.__lastReport) renderTrend(window.__lastReport, window.__source === "codex");
     });
   });
   // active-model window picker (15dk/1sa/5sa)
-  const aw0 = localStorage.getItem("ccmeter_active_window") || "15";
+  const aw0 = localStorage.getItem("burnmeter_active_window") || "15";
   document.querySelectorAll("#active-window-picker button").forEach(b => {
     b.classList.toggle("active", b.dataset.w === aw0);
     b.addEventListener("click", () => {
-      localStorage.setItem("ccmeter_active_window", b.dataset.w);
+      localStorage.setItem("burnmeter_active_window", b.dataset.w);
       document.querySelectorAll("#active-window-picker button").forEach(x => x.classList.toggle("active", x.dataset.w === b.dataset.w));
       if (window.__lastReport) renderActiveModel(window.__lastReport);
     });
   });
   // trend MA toggle buttons (7/25/50/100, multi-select)
-  let maSel = JSON.parse(localStorage.getItem("ccmeter_trend_ma") || "[7]");
+  let maSel = JSON.parse(localStorage.getItem("burnmeter_trend_ma") || "[7]");
   document.querySelectorAll(".indicator-btn").forEach(b => {
     const n = parseInt(b.dataset.ma, 10);
     b.classList.toggle("active", maSel.includes(n));
     b.addEventListener("click", () => {
-      maSel = JSON.parse(localStorage.getItem("ccmeter_trend_ma") || "[7]");
+      maSel = JSON.parse(localStorage.getItem("burnmeter_trend_ma") || "[7]");
       if (maSel.includes(n)) maSel = maSel.filter(x => x !== n); else maSel.push(n);
-      localStorage.setItem("ccmeter_trend_ma", JSON.stringify(maSel));
+      localStorage.setItem("burnmeter_trend_ma", JSON.stringify(maSel));
       b.classList.toggle("active", maSel.includes(n));
       if (window.__lastReport) renderTrend(window.__lastReport, window.__source === "codex");
     });
   });
   initModularGrid();
   const rl = $("reset-layout");
-  if (rl) rl.addEventListener("click", () => { localStorage.removeItem("ccmeter_layout_v1"); location.reload(); });
+  if (rl) rl.addEventListener("click", () => { localStorage.removeItem("burnmeter_layout_v1"); location.reload(); });
   refresh(false);
   setInterval(() => refresh(false), 10000);
   setInterval(updateLiveStamp, 1000);

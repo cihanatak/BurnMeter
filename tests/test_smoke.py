@@ -18,10 +18,10 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from tests.generate_fixture import main as gen_main  # noqa: E402
-from ccmeter.parser import load_records  # noqa: E402
-from ccmeter.analytics import build_report  # noqa: E402
-from ccmeter.pricing import estimate_cost_usd  # noqa: E402
-from ccmeter import server as srv  # noqa: E402
+from burnmeter.parser import load_records  # noqa: E402
+from burnmeter.analytics import build_report  # noqa: E402
+from burnmeter.pricing import estimate_cost_usd  # noqa: E402
+from burnmeter import server as srv  # noqa: E402
 
 
 def assert_eq(a, b, msg=""):
@@ -35,7 +35,7 @@ def assert_true(cond, msg=""):
 
 
 def main():
-    tmp = Path(tempfile.mkdtemp(prefix="ccmeter-smoke-"))
+    tmp = Path(tempfile.mkdtemp(prefix="burnmeter-smoke-"))
     try:
         # 1. Generate synthetic data.
         gen_main(["--out", str(tmp), "--days", "14", "--seed", "7"])
@@ -111,7 +111,7 @@ def main():
             # static
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5) as r:
                 html = r.read().decode("utf-8")
-            assert_true("ccmeter" in html, "dashboard HTML missing")
+            assert_true("Burnmeter" in html, "dashboard HTML missing")
 
             print(f"[ok] server alive on :{port}, health, report, CSV, dashboard all served")
         finally:

@@ -106,7 +106,7 @@ def cmd_status(args):
     cw = report["current_window"]
     plan_inf = report["plan_inference"]
 
-    _print_header("ccmeter status")
+    _print_header("burnmeter status")
     print(f"  data: {_fmt_int(report['record_count'])} usage records "
           f"across {_fmt_int(stats['files_scanned'])} files")
 
@@ -253,7 +253,7 @@ def cmd_statusline(args):
     """One short line for a prompt / Claude Code statusLine.command.
 
     Computes standalone (no running server needed) so it works even before
-    `ccmeter serve` is up. Shares ccmeter/statusline.py with the HTTP endpoint,
+    `burnmeter serve` is up. Shares burnmeter/statusline.py with the HTTP endpoint,
     so the terminal line and the web pull are identical.
     """
     from .statusline import build_statusline, statusline_text
@@ -270,7 +270,7 @@ def cmd_statusline(args):
     # A statusLine command must ALWAYS print exactly one short line and exit 0,
     # otherwise Claude Code surfaces it as an error in the prompt.
     if not records:
-        print(f"○ ccmeter: {src} verisi yok")
+        print(f"○ burnmeter: {src} verisi yok")
         return 0
 
     report = build_report(records, plan=args.plan, user_intents=intents,
@@ -284,7 +284,7 @@ def cmd_statusline(args):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog="ccmeter")
+    parser = argparse.ArgumentParser(prog="burnmeter")
     parser.add_argument("--projects-dir", default=str(CLAUDE_PROJECTS_DIR))
     parser.add_argument("--plan", default=None,
                         choices=["pro", "max5", "max20"],

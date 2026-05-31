@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ccmeter"
+name = "burnmeter"
 version = "0.1.0"
 description = "Local-first dashboard for AI coding agent token usage & cost (Claude Code + OpenAI Codex)"
 readme = "README.md"
@@ -29,19 +29,19 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/cihanatak/CCmeter"
-Repository = "https://github.com/cihanatak/CCmeter"
-Issues = "https://github.com/cihanatak/CCmeter/issues"
+Homepage = "https://github.com/cihanatak/BurnMeter"
+Repository = "https://github.com/cihanatak/BurnMeter"
+Issues = "https://github.com/cihanatak/BurnMeter/issues"
 
 [project.scripts]
-ccmeter = "ccmeter.cli:main"
+burnmeter = "burnmeter.cli:main"
 
 [tool.setuptools]
-# Bundle the dashboard assets WITH the package so a pip-installed ccmeter serves the UI.
-packages = ["ccmeter"]
+# Bundle the dashboard assets WITH the package so a pip-installed burnmeter serves the UI.
+packages = ["burnmeter"]
 
 [tool.setuptools.package-data]
-ccmeter = ["static/*"]
+burnmeter = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -2,7 +2,7 @@
 
 **Status: open. Cihan decides.** This captures the research so the final pick is informed.
 
-## Why "ccmeter" should change
+## Why "burnmeter" should change
 - **Vendor-locked**: `cc` = Claude Code. We now track Codex too (and more coming).
 - **Saturated suffix**: the `-meter` space is crowded — *TokenMeter*, *AgentMeter*,
   *VibeMeter*, *Meterly* are all taken. The whole `cc*` namespace (ccusage, ccseva,

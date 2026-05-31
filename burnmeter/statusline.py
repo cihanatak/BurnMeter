@@ -2,7 +2,7 @@
 
 Single source of truth shared by:
   - the HTTP endpoint  GET /api/statusline   (server.py)
-  - the CLI subcommand `ccmeter statusline`   (cli.py)
+  - the CLI subcommand `burnmeter statusline`   (cli.py)
 
 Both feed it the SAME `build_report(...)` dict, so the live web dashboard, the
 HTTP pull, and the terminal line can never drift apart.
