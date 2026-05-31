@@ -550,7 +550,7 @@ function initModularGrid() {
   if (!cards.length) return;
   const colW = c => { const m = (c.className.match(/col-(\d+)/) || [])[1]; return m ? +m : 4; };
   // varsayılan yükseklikler (satır = 76px); kullanıcı resize edip kaydedebilir
-  const H = { hero: 5, "hero-aside": 5, kpi: 2, eff: 5, cache: 5, trend: 5, models: 5,
+  const H = { hero: 5, "hero-aside": 5, kpi: 2, eff: 5, cache: 3, trend: 5, models: 5,
               daily: 4, projects: 5, recent: 5, "model-table": 5, behavior: 3, tools: 3 };
   const gs = document.createElement("div");
   gs.className = "grid-stack";
