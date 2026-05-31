@@ -22,7 +22,7 @@ from .codex_parser import CODEX_SESSIONS_DIR, load_codex_records
 from .analytics import build_report
 
 
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+STATIC_DIR = Path(__file__).resolve().parent / "static"   # ccmeter/static (paket içi — pip-install'da da bulunur)
 
 
 class _Cache:

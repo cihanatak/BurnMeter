@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ccmeter"
+version = "0.1.0"
+description = "Local-first dashboard for AI coding agent token usage & cost (Claude Code + OpenAI Codex)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "Cihan Atak" }]
+keywords = ["claude-code", "codex", "tokens", "cost", "burn-rate", "dashboard", "ai-coding", "usage"]
+# Runtime is Python standard library ONLY — no third-party deps (Chart.js / GridStack are
+# CDN-loaded in the browser). Keeps install instant and supply-chain surface zero.
+dependencies = []
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Environment :: Web Environment",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development",
+  "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/cihanatak/CCmeter"
+Repository = "https://github.com/cihanatak/CCmeter"
+Issues = "https://github.com/cihanatak/CCmeter/issues"
+
+[project.scripts]
+ccmeter = "ccmeter.cli:main"
+
+[tool.setuptools]
+# Bundle the dashboard assets WITH the package so a pip-installed ccmeter serves the UI.
+packages = ["ccmeter"]
+
+[tool.setuptools.package-data]
+ccmeter = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
