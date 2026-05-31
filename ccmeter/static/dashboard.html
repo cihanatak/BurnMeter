@@ -5,10 +5,10 @@
   <title>ccmeter — AI coding yakıt metresi</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack.min.css" />
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260531p" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260531r" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack-all.js" defer></script>
-  <script src="/static/dashboard.js?v=20260531p" defer></script>
+  <script src="/static/dashboard.js?v=20260531r" defer></script>
 </head>
 <body>
 
@@ -79,6 +79,12 @@
     <div class="scroll"><table class="tbl" id="recent-tbl">
       <thead><tr><th>ne zaman</th><th>proje</th><th>model</th><th class="num">token</th><th class="num">$ (tahmin)</th><th class="num">cache</th></tr></thead>
       <tbody></tbody></table></div>
+  </section>
+
+  <!-- ROW — aylık BÜTÇE takibi (#7): bu ay harcanan vs senin belirlediğin $ limit -->
+  <section class="card col-12" data-card="budget">
+    <div class="card-title">Aylık bütçe <span class="sub">bu ay vs belirlediğin $ limit · ay sonu projeksiyonu · $ tahmindir</span></div>
+    <div id="budget-body"></div>
   </section>
 
   <!-- ROW 4 — verimlilik (sen vs tipik) + cache efficiency -->

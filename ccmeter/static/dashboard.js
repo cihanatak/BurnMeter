@@ -115,6 +115,7 @@ function render(rep) {
   renderKPIs(rep, isCodex);
   renderEfficiency(rep, isCodex);
   renderCache(rep);
+  renderBudget(rep, isCodex);
   renderTrend(rep, isCodex);
   renderModels(rep);
   renderDaily(rep);
@@ -518,6 +519,96 @@ function renderCache(rep) {
      <div class="dim" style="font-size:11px;margin-top:12px;line-height:1.5">Cache olmasaydı (aynı kullanımla) bu okumalar ~${fmtMoney0(ce.full_equiv_usd || 0)} ederdi — kaba bir üst sınır (~%${Math.round((ce.discount_pct || 0) * 100)} daha ucuz).</div>`;
 }
 
+// ---------- aylık BÜTÇE takibi (#7) ----------
+// Per-source aylık $ bütçe (localStorage ccmeter_budget_{source}). Bu ay harcanan vs
+// bütçe + ay-sonu projeksiyonu (forecast.month). $ TAHMİNİDİR — başlıkta + notta etiketli.
+// Bütçe sadece bu tarayıcıda saklanır (sunucuya gitmez).
+const _budgetEditing = {};
+function renderBudget(rep, isCodex) {
+  const body = $("budget-body");
+  if (!body) return;
+  const src = isCodex ? "codex" : "claude";
+  const m = (rep.forecast || {}).month || {};
+  const soFar = m.so_far || 0;
+  const projEom = m.projected_eom || 0;
+  const daysLeft = m.days_left ?? 0;
+  const budget = parseFloat(localStorage.getItem("ccmeter_budget_" + src) || "0") || 0;
+  const dailyRate = daysLeft > 0 ? Math.max(0, projEom - soFar) / daysLeft : 0;
+
+  // bütçe yok VEYA düzenleniyor → input formu
+  if (budget <= 0 || _budgetEditing[src]) {
+    body.innerHTML =
+      `<div class="budget-edit-wrap">
+         <div class="dim" style="font-size:12.5px;line-height:1.55;max-width:560px">
+           ${budget > 0 ? "Aylık bütçeyi güncelle." : "Aylık bir $ bütçe belirle — bu ay ne harcadığını ve ay-sonu tahminini bütçene karşı gör."}
+           <span style="color:var(--text-4)">Yalnızca bu tarayıcıda saklanır; rakamlar tahmindir.</span>
+         </div>
+         <div class="budget-set">
+           <span class="budget-cur">$</span>
+           <input id="budget-input" type="number" min="0" step="10" placeholder="200" value="${budget > 0 ? budget : ""}" inputmode="decimal" />
+           <button id="budget-save">kaydet</button>
+           ${budget > 0 ? `<button id="budget-cancel" class="budget-ghost">vazgeç</button><button id="budget-clear" class="budget-ghost">sil</button>` : ""}
+         </div>
+         <div class="dim" style="font-size:11px">${src} · bu ay şu ana dek: ~${fmtMoney0(soFar)}</div>
+       </div>`;
+    const done = () => { _budgetEditing[src] = false; if (window.__lastReport) renderBudget(window.__lastReport, isCodex); };
+    const inp = $("budget-input");
+    const saveBtn = $("budget-save");
+    if (saveBtn) saveBtn.addEventListener("click", () => {
+      const v = parseFloat(inp.value);
+      if (v > 0) localStorage.setItem("ccmeter_budget_" + src, String(v));
+      done();
+    });
+    if (inp) inp.addEventListener("keydown", e => {
+      if (e.key === "Enter") saveBtn.click();
+      else if (e.key === "Escape" && budget > 0) done();
+    });
+    const clearBtn = $("budget-clear");
+    if (clearBtn) clearBtn.addEventListener("click", () => { localStorage.removeItem("ccmeter_budget_" + src); done(); });
+    const cancelBtn = $("budget-cancel");
+    if (cancelBtn) cancelBtn.addEventListener("click", done);
+    if (inp) inp.focus();
+    return;
+  }
+
+  const pct = (soFar / budget) * 100;
+  const projPct = (projEom / budget) * 100;
+  const over = projEom - budget;
+  const cls = projEom > budget ? "bad" : pct > 90 ? "warn" : "good";
+  const verdict = projEom > budget
+    ? `<span style="color:var(--bad);font-weight:600">⚠ ~${fmtMoney0(over)} aşım öngörülüyor</span>`
+    : `<span style="color:var(--good);font-weight:600">✓ bütçe içinde — ~${fmtMoney0(budget - projEom)} pay kalır</span>`;
+  const projMark = (projPct > pct && projPct <= 100)
+    ? `<span class="budget-proj" style="left:${projPct.toFixed(1)}%" title="ay sonu tahmini ~${fmtMoney0(projEom)}"></span>` : "";
+
+  body.innerHTML =
+    `<div class="budget-grid">
+       <div class="budget-nums">
+         <div><span class="num" style="font-size:30px;font-weight:600;color:var(--text-1)">~${fmtMoney0(soFar)}</span>
+           <span class="dim" style="font-size:13px"> / ${fmtMoney0(budget)}</span></div>
+         <div class="dim" style="font-size:11px;margin-top:2px">bu ay harcanan · %${pct.toFixed(0)}</div>
+       </div>
+       <div class="budget-barwrap">
+         <div class="meter-track" style="height:12px;position:relative;overflow:visible">
+           <div class="meter-fill ${cls}" style="width:${Math.min(100, pct).toFixed(1)}%"></div>
+           ${projMark}
+         </div>
+         <div style="display:flex;justify-content:space-between;font-size:11px;margin-top:7px" class="dim">
+           <span>$0</span>
+           <span>ay sonu tahmini: ~${fmtMoney0(projEom)} (%${projPct.toFixed(0)})</span>
+           <span>${fmtMoney0(budget)}</span>
+         </div>
+       </div>
+       <div class="budget-verdict">
+         ${verdict}
+         <div class="dim" style="font-size:11px;margin-top:4px">kalan ${daysLeft}g · tipik ~${fmtMoney(dailyRate)}/gün · $ tahmindir</div>
+         <button id="budget-edit" class="budget-ghost" style="margin-top:9px">✎ bütçeyi düzenle</button>
+       </div>
+     </div>`;
+  const editBtn = $("budget-edit");
+  if (editBtn) editBtn.addEventListener("click", () => { _budgetEditing[src] = true; renderBudget(rep, isCodex); });
+}
+
 // ---------- trend chart ----------
 const MA_COLORS = { 7: "#8b97ff", 25: "#3fd9e8", 50: "#ffc05a", 100: "#ff8a8e" };
 function movingAverage(arr, n) {
@@ -757,7 +848,8 @@ function initModularGrid() {
   const colW = c => { const m = (c.className.match(/col-(\d+)/) || [])[1]; return m ? +m : 4; };
   // varsayılan yükseklikler (satır = 76px); kullanıcı resize edip kaydedebilir
   const H = { hero: 5, "hero-aside": 5, kpi: 2, eff: 5, cache: 3, trend: 5, models: 5,
-              "active-model": 4, daily: 4, projects: 5, recent: 5, heatmap: 3, "model-table": 5, behavior: 3, tools: 3 };
+              "active-model": 4, daily: 4, projects: 5, recent: 5, heatmap: 3, "model-table": 5, behavior: 3, tools: 3,
+              budget: 4 };
   const gs = document.createElement("div");
   gs.className = "grid-stack";
   cards.forEach(card => {

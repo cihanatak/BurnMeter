@@ -269,6 +269,28 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
 .meter-pct.good{color:var(--good)} .meter-pct.warn{color:var(--warn)} .meter-pct.bad{color:var(--bad)}
 .meter-reset { font:500 10px/1 var(--font-mono); color: var(--text-4); width:84px; flex-shrink:0; }
 
+/* ---------- aylık bütçe (#7) ---------- */
+.budget-grid { display:grid; grid-template-columns: minmax(110px,auto) 1fr minmax(170px,auto);
+  gap:24px; align-items:center; }
+.budget-barwrap { min-width:0; }
+.budget-proj { position:absolute; top:-4px; width:2px; height:20px; background:var(--text-1);
+  border-radius:1px; box-shadow:0 0 0 2px var(--bg-inset); }
+.budget-verdict { text-align:right; }
+.budget-edit-wrap { display:flex; flex-direction:column; gap:8px; }
+.budget-set { display:flex; align-items:center; gap:8px; }
+.budget-cur { font:600 16px var(--font-mono); color:var(--text-3); }
+.budget-set input { width:120px; padding:8px 10px; border-radius:var(--radius-sm);
+  border:1px solid var(--border-strong); background:var(--bg-inset); color:var(--text-1);
+  font:600 15px var(--font-mono); }
+.budget-set input:focus { outline:none; border-color:var(--brand); }
+#budget-save { padding:8px 15px; border-radius:var(--radius-sm); border:none; background:var(--brand);
+  color:#fff; font:600 13px var(--font-sans); cursor:pointer; }
+#budget-save:hover { filter:brightness(1.08); }
+.budget-ghost { padding:7px 12px; border-radius:var(--radius-sm); border:1px solid var(--border-strong);
+  background:transparent; color:var(--text-3); font:500 12px var(--font-sans); cursor:pointer; }
+.budget-ghost:hover { color:var(--text-1); border-color:var(--text-4); }
+@media (max-width:760px){ .budget-grid{ grid-template-columns:1fr; gap:16px } .budget-verdict{ text-align:left } }
+
 /* ── SPEEDOMETER (araba göstergesi) — burn rate car gauge ──────────── */
 .speedo-wrap { display:flex; align-items:center; gap:var(--s6); }
 @media (max-width:640px){ .speedo-wrap{ flex-direction:column; } }
