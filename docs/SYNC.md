@@ -90,3 +90,17 @@ tiny aggregates — raw `~/.claude` / `~/.codex` logs never leave the machine. P
 stub (self-host = all Pro); hosted billing is F3/F4.
 
 **Next: F2** — wire pulled device snapshots into the dashboard's per-device UI.
+
+## F2 — DONE (2026-06-01)
+
+Remote device snapshots wired into the dashboard. The local server pulls + decrypts
+(it holds the passphrase; serves only to 127.0.0.1) and a **"Cihazlar"** card lists each
+synced device with per-source month spend + record count + last-sync time + a "bu cihaz"
+badge. The relay still only ever sees ciphertext. `serve` also auto-pushes this device's
+snapshot every 5 min, reusing its cached reports (no re-parse).
+
+- Server: `GET /api/sync/devices` (pull+decrypt, 20s cache, graceful when sync off) + background auto-push thread.
+- Frontend: `data-card="sync-devices"` card + `renderSyncDevices()` (empty "enable Pro sync" state + populated device list).
+- Verified live (headless): empty state renders the invite; mocked populated state shows 2 devices with badges/sources; 0 console errors; pytest 13/13.
+
+**Next: F3** — account + billing (Lemon Squeezy webhook → plan); then F4 hosted relay.

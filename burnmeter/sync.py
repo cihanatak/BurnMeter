@@ -148,6 +148,30 @@ def push(cfg: dict, projects_dir: Path, codex_dir: Optional[Path]) -> dict:
             "device_id": cfg["device_id"], "sources": list(snap["sources"].keys())}
 
 
+def _assemble_snapshot(cfg: dict, sources: dict) -> dict:
+    return {
+        "v": SNAPSHOT_VERSION,
+        "device_id": cfg["device_id"],
+        "label": cfg.get("label") or socket.gethostname(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "sources": sources,
+    }
+
+
+def snapshot_from_reports(cfg: dict, reports: dict) -> dict:
+    """Build a snapshot from ALREADY-built report dicts (no re-parse). Used by the
+    server's auto-push so it reuses its cached reports instead of reloading logs."""
+    sources = {s: _summarize(r) for s, r in (reports or {}).items() if r and r.get("record_count")}
+    return _assemble_snapshot(cfg, sources)
+
+
+def push_snapshot(cfg: dict, snapshot: dict) -> dict:
+    blob = encrypt_snapshot(snapshot, cfg)
+    status, _ = _req(cfg, "PUT", "/v1/snap/" + cfg["device_id"], body=blob)
+    return {"ok": status in (200, 201), "status": status, "device_id": cfg["device_id"],
+            "sources": list(snapshot.get("sources", {}).keys())}
+
+
 def pull(cfg: dict) -> list[dict]:
     status, body = _req(cfg, "GET", "/v1/snaps")
     if status != 200:

@@ -134,6 +134,7 @@ function render(rep) {
   renderEfficiency(rep, isCodex);
   renderCache(rep);
   renderBudget(rep, isCodex);
+  renderSyncDevices();
   renderTrend(rep, isCodex);
   renderModels(rep);
   renderDaily(rep);
@@ -577,6 +578,55 @@ function renderBudget(rep, isCodex) {
   if (editBtn) editBtn.addEventListener("click", () => { _budgetEditing[src] = true; renderBudget(rep, isCodex); });
 }
 
+// ---------- Pro cross-device sync — senkron cihazların özetleri (E2E) ----------
+// Server /api/sync/devices'i (sunucu deşifre eder, lokal UI'a verir; relay yalnızca
+// ciphertext görür) çekip cihaz listesini çizer. Sync kapalıysa "aç" daveti gösterir.
+async function renderSyncDevices() {
+  const body = $("sync-devices-body");
+  if (!body) return;
+  let data;
+  try {
+    const r = await fetch("/api/sync/devices");
+    data = await r.json();
+  } catch (e) { return; }   // server eski olabilir → sessizce geç
+  if (!data.configured) {
+    body.innerHTML =
+      `<div class="dim" style="font-size:12.5px;line-height:1.55;max-width:620px">
+         <span style="color:var(--text-3)">Pro cross-device sync kapalı.</span> Başka makinelerinin
+         kullanımını burada gör — uçtan-uca şifreli, relay yalnızca ciphertext görür, ham log gitmez.
+         <div style="margin-top:9px;font:500 11px/1.5 var(--font-mono);color:var(--text-4)">burnmeter sync login --relay &lt;url&gt; --token &lt;token&gt;<br>burnmeter sync push</div>
+       </div>`;
+    return;
+  }
+  if (data.error) {
+    body.innerHTML = `<div class="dim" style="font-size:12px;color:var(--warn)">relay'e ulaşılamadı: ${esc(String(data.error))}</div>`;
+    return;
+  }
+  const devs = data.devices || [];
+  if (!devs.length) {
+    body.innerHTML = `<div class="dim" style="font-size:12.5px">henüz senkron cihaz yok — <span style="font-family:var(--font-mono)">burnmeter sync push</span> ile bu cihazı gönder.</div>`;
+    return;
+  }
+  const ago = (iso) => { if (!iso) return ""; const s = (Date.now() - new Date(iso).getTime()) / 1000; return s < 60 ? "şimdi" : s < 3600 ? Math.round(s / 60) + "dk" : s < 86400 ? Math.round(s / 3600) + "sa" : Math.round(s / 86400) + "g"; };
+  body.innerHTML = `<div class="sync-grid">` + devs.map(d => {
+    if (d._undecryptable) {
+      return `<div class="sync-dev"><div class="sync-dev-head"><span class="sync-dot bad"></span><b>${esc(d.device_id || "?")}</b></div>
+        <div class="dim" style="font-size:11px">çözülemedi · passphrase farklı olabilir</div></div>`;
+    }
+    const me = d.device_id === data.this_device;
+    const srcs = d.sources || {};
+    const rows = Object.keys(srcs).map(s => {
+      const v = srcs[s] || {};
+      return `<div class="sync-src"><span class="sync-srcname ${s === 'codex' ? 'fam-gpt' : 'fam-opus'}">${esc(s)}</span>
+        <span class="num">~${fmtMoney(v.month_so_far || 0)}</span><span class="dim">bu ay</span>
+        <span class="num">${fmtInt(v.record_count || 0)}</span><span class="dim">kayıt</span></div>`;
+    }).join("") || `<div class="dim" style="font-size:11px">veri yok</div>`;
+    return `<div class="sync-dev${me ? ' me' : ''}">
+      <div class="sync-dev-head"><span class="sync-dot live"></span><b>${esc(d.label || "?")}</b>${me ? '<span class="sync-badge">bu cihaz</span>' : ''}<span class="sync-ago dim">${ago(d._updated_at)}</span></div>
+      ${rows}</div>`;
+  }).join("") + `</div>`;
+}
+
 // ---------- trend chart ----------
 const MA_COLORS = { 7: "#8b97ff", 25: "#3fd9e8", 50: "#ffc05a", 100: "#ff8a8e" };
 function movingAverage(arr, n) {
@@ -817,7 +867,7 @@ function initModularGrid() {
   // varsayılan yükseklikler (satır = 76px); kullanıcı resize edip kaydedebilir
   const H = { hero: 5, "hero-aside": 5, kpi: 2, eff: 5, cache: 3, trend: 5, models: 5,
               "active-model": 4, daily: 4, projects: 5, recent: 5, heatmap: 3, "model-table": 5, behavior: 3, tools: 3,
-              budget: 4 };
+              budget: 4, "sync-devices": 3 };
   const gs = document.createElement("div");
   gs.className = "grid-stack";
   cards.forEach(card => {

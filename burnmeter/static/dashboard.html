@@ -5,10 +5,10 @@
   <title>Burnmeter — AI coding yakıt metresi</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack.min.css" />
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260531w" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260531x" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack-all.js" defer></script>
-  <script src="/static/dashboard.js?v=20260531w" defer></script>
+  <script src="/static/dashboard.js?v=20260531x" defer></script>
 </head>
 <body>
 
@@ -85,6 +85,12 @@
   <section class="card col-12" data-card="budget">
     <div class="card-title">Aylık bütçe <span class="sub">bu ay vs belirlediğin $ limit · ay sonu projeksiyonu · $ tahmindir</span></div>
     <div id="budget-body"></div>
+  </section>
+
+  <!-- ROW — Pro cross-device sync: senkron cihazların özetleri (E2E şifreli) -->
+  <section class="card col-12" data-card="sync-devices">
+    <div class="card-title">Cihazlar <span class="sub">Pro sync · E2E şifreli · relay yalnızca ciphertext görür</span></div>
+    <div id="sync-devices-body"></div>
   </section>
 
   <!-- ROW 4 — verimlilik (sen vs tipik) + cache efficiency -->

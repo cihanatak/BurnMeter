@@ -376,3 +376,22 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
 .bar-list-row .tr { flex:1; height:7px; background:var(--bg-inset); border-radius:4px; overflow:hidden; }
 .bar-list-row .tr > i { display:block; height:100%; background:var(--accent); border-radius:4px; }
 .bar-list-row .vl { font:500 11px/1 var(--font-mono); color:var(--text-2); width:auto; text-align:right; }
+
+/* ---------- Pro cross-device sync (cihazlar kartı) ---------- */
+.sync-grid { display:flex; flex-wrap:wrap; gap:12px; }
+.sync-dev { flex:1 1 240px; min-width:0; background:var(--bg-inset); border:1px solid var(--border-default);
+  border-radius:var(--radius-md); padding:12px 14px; }
+.sync-dev.me { border-color:var(--brand); }
+.sync-dev-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; font-size:13px; }
+.sync-dev-head b { color:var(--text-1); font-weight:600; }
+.sync-dot { width:8px; height:8px; border-radius:50%; background:var(--border-strong); flex-shrink:0; }
+.sync-dot.live { background:var(--good); }
+.sync-dot.bad { background:var(--bad); }
+.sync-badge { font:600 9px/1 var(--font-sans); text-transform:uppercase; letter-spacing:.04em;
+  color:var(--brand); border:1px solid var(--brand); border-radius:var(--radius-full); padding:3px 6px; }
+.sync-ago { margin-left:auto; font-size:11px; font-family:var(--font-mono); }
+.sync-src { display:flex; align-items:baseline; gap:7px; font-size:12px; margin:3px 0; }
+.sync-srcname { font:600 11px/1 var(--font-mono); text-transform:uppercase; min-width:48px; }
+.sync-srcname.fam-opus { color:var(--brand-claude); }
+.sync-srcname.fam-gpt { color:var(--brand-codex); }
+.sync-src .num { font-variant-numeric:tabular-nums; color:var(--text-1); }

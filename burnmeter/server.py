@@ -183,6 +183,32 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
             return rep
         return sel.get_report(_build, key=(source, plan), force=force)
 
+    # Pro sync: 20s cache for pulled remote devices (avoid hammering the relay).
+    sync_cache = {"data": None, "ts": 0.0}
+
+    # Pro sync: auto-push this device's snapshot every 5 min, REUSING the cached
+    # reports (no re-parse). No-op if sync isn't configured / cryptography absent.
+    def _sync_autopush():
+        from . import sync as _sync
+        while True:
+            time.sleep(300)
+            try:
+                cfg = _sync.load_config()
+                if not _sync.is_configured(cfg):
+                    continue
+                reports = {}
+                for s in ("claude", "codex"):
+                    if s == "codex" and codex_cache is None:
+                        continue
+                    try:
+                        reports[s] = build_for(s, None)
+                    except Exception:
+                        pass
+                _sync.push_snapshot(cfg, _sync.snapshot_from_reports(cfg, reports))
+            except Exception:
+                pass
+    threading.Thread(target=_sync_autopush, daemon=True).start()
+
     class Handler(BaseHTTPRequestHandler):
         # Quieter than the default verbose logger.
         def log_message(self, format, *args):
@@ -246,6 +272,29 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 report["_meta"]["version"] = __version__
                 report["_meta"]["served_at"] = time.time()
                 _json_response(self, 200, report)
+                return
+
+            if path == "/api/sync/devices":
+                # Pro: remote-device snapshots, decrypted server-side (server holds the
+                # passphrase) for the LOCAL 127.0.0.1 UI. The RELAY only ever sees
+                # ciphertext — E2E intact. 20s cache so we don't hammer the relay.
+                from . import sync as _sync
+                cfg = _sync.load_config()
+                if not _sync.is_configured(cfg):
+                    _json_response(self, 200, {"configured": False, "devices": []})
+                    return
+                now = time.time()
+                if sync_cache["data"] is not None and now - sync_cache["ts"] < 20:
+                    _json_response(self, 200, sync_cache["data"])
+                    return
+                try:
+                    data = {"configured": True, "this_device": cfg.get("device_id"),
+                            "devices": _sync.pull(cfg)}
+                except Exception as e:
+                    data = {"configured": True, "error": str(e), "devices": []}
+                sync_cache["data"] = data
+                sync_cache["ts"] = now
+                _json_response(self, 200, data)
                 return
 
             if path == "/api/records.csv":
