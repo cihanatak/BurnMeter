@@ -4,6 +4,18 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Burnmeter — one dashboard for every AI coding agent</title>
+<meta name="description" content="Burnmeter is a local-first dashboard for every AI coding agent. See cost, burn-rate, and how close you are to your plan's rate limit — no API keys, no cloud, your data never leaves your machine. Open source (AGPL-3.0)." />
+<meta name="theme-color" content="#08090A" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%2310A37F'/><stop offset='1' stop-color='%235E6AD2'/></linearGradient></defs><rect width='32' height='32' rx='8' fill='url(%23g)'/><circle cx='16' cy='16' r='8' fill='none' stroke='%23fff' stroke-width='2.5'/><path d='M16 16 L16 8 A8 8 0 0 1 24 16 Z' fill='%23fff'/></svg>" />
+<!-- Open Graph / Twitter — og.png is rendered from og.html (1200×630, no real data). Set an ABSOLUTE url after deploy. -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Burnmeter — one dashboard for every AI coding agent" />
+<meta property="og:description" content="See where your tokens go — cost, burn-rate, rate-limit. Local-first, no API keys, open source." />
+<meta property="og:image" content="og.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Burnmeter — one dashboard for every AI coding agent" />
+<meta name="twitter:description" content="See where your tokens go — cost, burn-rate, rate-limit. Local-first, no API keys, open source." />
+<meta name="twitter:image" content="og.png" />
 <!-- Burnmeter landing -->
 <style>
 :root{
@@ -20,7 +32,7 @@ body{background:var(--bg);color:var(--t2);font-family:var(--sans);line-height:1.
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
 a{color:var(--accent);text-decoration:none} a:hover{color:#6E79E0}
 .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
-.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 20px;border-radius:9px;font-weight:600;font-size:14px;cursor:pointer;transition:.15s}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:10px;font-weight:600;font-size:15px;cursor:pointer;transition:.15s}
 .btn-primary{background:var(--accent);color:#fff;border:1px solid var(--accent)} .btn-primary:hover{background:#6E79E0}
 .btn-ghost{background:transparent;color:var(--t1);border:1px solid var(--b2)} .btn-ghost:hover{border-color:var(--b3);background:var(--raised)}
 
@@ -43,12 +55,26 @@ nav .wrap{display:flex;align-items:center;justify-content:space-between;height:7
 h1{font-size:52px;line-height:1.08;letter-spacing:-.025em;color:var(--t1);font-weight:700;max-width:760px;margin:0 auto 20px}
 @media(max-width:640px){h1{font-size:34px}}
 .sub{font-size:19px;color:var(--t3);max-width:620px;margin:0 auto 32px}
-.cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
-.cta code{font-family:var(--mono);font-size:13px;background:var(--inset);border:1px solid var(--b1);padding:11px 16px;border-radius:9px;color:var(--t2)}
+.cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:18px}
+
+/* install command box (hero) */
+.install{display:flex;align-items:stretch;max-width:430px;margin:0 auto;background:var(--inset);border:1px solid var(--b2);border-radius:11px;overflow:hidden}
+.install code{flex:1;padding:13px 16px;font-family:var(--mono);font-size:13.5px;color:var(--t2);text-align:left;white-space:nowrap;overflow:auto}
+.install .cp{border:0;border-left:1px solid var(--b1);background:var(--raised);color:var(--t3);padding:0 16px;cursor:pointer;font-family:var(--sans);font-size:12px;font-weight:600;letter-spacing:.02em;transition:.15s}
+.install .cp:hover{color:var(--t1);background:var(--surface)}
+.install .cp.ok{color:var(--good)}
+.cta-note{font-size:12.5px;color:var(--t4);margin-top:14px}
+.cta-note code{font-family:var(--mono);color:var(--t3)}
+
+/* trust pills */
+.trust{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:34px}
+.trust span{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--t3);background:var(--surface);border:1px solid var(--b1);padding:6px 13px;border-radius:999px}
+.trust b{color:var(--t2);font-weight:600}
 
 /* dashboard mockup */
-.mock{margin:56px auto 0;max-width:960px;background:var(--surface);border:1px solid var(--b1);border-radius:16px;padding:22px;box-shadow:0 40px 120px -40px rgba(94,106,210,.25);position:relative}
+.mock{margin:52px auto 0;max-width:960px;background:var(--surface);border:1px solid var(--b1);border-radius:16px;padding:22px;box-shadow:0 40px 120px -40px rgba(94,106,210,.25);position:relative}
 .mock::before{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 1px 0 rgba(255,255,255,.05);pointer-events:none}
+.mock-cap{font-size:11px;color:var(--t4);text-transform:uppercase;letter-spacing:.07em;margin-bottom:14px;text-align:left}
 .mock-grid{display:grid;grid-template-columns:1.4fr 1fr;gap:14px}
 @media(max-width:640px){.mock-grid{grid-template-columns:1fr}}
 .mcard{background:var(--surface);border:1px solid var(--b1);border-radius:12px;padding:18px}
@@ -79,6 +105,15 @@ section{padding:64px 0;border-top:1px solid var(--b1)}
 .fcard .ico{width:30px;height:30px;border-radius:8px;background:var(--accent-muted,rgba(94,106,210,.14));display:grid;place-items:center;font-size:15px}
 .fcard p{font-size:14px;color:var(--t3)}
 
+/* how it works */
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+@media(max-width:760px){.steps{grid-template-columns:1fr}}
+.step{background:var(--surface);border:1px solid var(--b1);border-radius:12px;padding:24px}
+.step .n{width:32px;height:32px;border-radius:9px;background:var(--raised);border:1px solid var(--b2);display:grid;place-items:center;font-weight:700;font-size:14px;color:var(--accent);margin-bottom:15px;font-family:var(--mono)}
+.step h3{font-size:15px;color:var(--t1);margin-bottom:7px}
+.step p{font-size:13.5px;color:var(--t3)}
+.step code{font-family:var(--mono);font-size:12.5px;color:var(--t2);background:var(--inset);border:1px solid var(--b1);padding:2px 7px;border-radius:6px}
+
 /* why */
 .why{background:var(--surface);border:1px solid var(--b1);border-radius:14px;padding:36px;text-align:center;max-width:760px;margin:0 auto}
 .why p{font-size:18px;color:var(--t2);line-height:1.7}
@@ -97,7 +132,29 @@ section{padding:64px 0;border-top:1px solid var(--b1)}
 .tier li::before{content:"✓";color:var(--good);font-weight:700;flex-shrink:0}
 .badge-soon{display:inline-block;font-size:10px;background:var(--raised);border:1px solid var(--b1);color:var(--t3);padding:2px 7px;border-radius:5px;margin-left:8px;vertical-align:middle}
 
-footer{padding:40px 0;border-top:1px solid var(--b1);text-align:center;color:var(--t4);font-size:13px}
+/* faq */
+.faq{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+.faq details{background:var(--surface);border:1px solid var(--b1);border-radius:11px;padding:0 20px;transition:border-color .15s}
+.faq details[open]{border-color:var(--b2)}
+.faq summary{cursor:pointer;padding:17px 0;font-size:15px;font-weight:600;color:var(--t1);list-style:none;display:flex;justify-content:space-between;align-items:center;gap:16px}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:"+";color:var(--t3);font-weight:400;font-size:21px;line-height:1}
+.faq details[open] summary::after{content:"\2212"}
+.faq details p{font-size:14px;color:var(--t3);padding:0 0 18px;line-height:1.65}
+.faq details p code{font-family:var(--mono);font-size:12.5px;color:var(--t2)}
+
+/* footer */
+footer{border-top:1px solid var(--b1);padding:48px 0 40px}
+.foot-grid{display:flex;justify-content:space-between;gap:40px;flex-wrap:wrap;align-items:flex-start}
+.foot-brand{display:flex;align-items:center;gap:11px;font-weight:700;font-size:17px;color:var(--t1)}
+.foot-brand .mark{width:30px;height:30px;border-radius:9px;background:linear-gradient(140deg,var(--codex),var(--accent) 82%);display:grid;place-items:center;color:#fff;font-size:17px}
+.foot-tag{font-size:13px;color:var(--t4);margin-top:13px;max-width:290px}
+.foot-links{display:flex;gap:42px;flex-wrap:wrap}
+.foot-col{display:flex;flex-direction:column;gap:10px}
+.foot-col h5{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--t4);margin:0 0 3px;font-weight:600}
+.foot-col a{font-size:13.5px;color:var(--t3)}
+.foot-col a:hover{color:var(--t1)}
+.foot-bottom{margin-top:36px;padding-top:22px;border-top:1px solid var(--b1);font-size:12.5px;color:var(--t4);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
 </style>
 </head>
 <body>
@@ -105,7 +162,7 @@ footer{padding:40px 0;border-top:1px solid var(--b1);text-align:center;color:var
 <nav><div class="wrap">
   <a class="logo" href="/" id="brand-home" title="Ana sayfa"><span class="mark">◔</span> Burnmeter</a>
   <div class="nav-links">
-    <a href="#features">Features</a><a href="#why">Why</a><a href="#pricing">Pricing</a>
+    <a href="#features">Features</a><a href="#how">How</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a>
     <a id="nav-dashboard" href="/" style="display:none">Dashboard</a>
     <a href="https://github.com/cihanatak/BurnMeter" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:10px 18px;font-size:15px">GitHub</a>
   </div>
@@ -118,11 +175,26 @@ footer{padding:40px 0;border-top:1px solid var(--b1);text-align:center;color:var
     are to your plan's rate limit. No API keys. No cloud. Your data never leaves your machine.</p>
   <div class="cta">
     <a href="https://github.com/cihanatak/BurnMeter" target="_blank" rel="noopener" class="btn btn-primary">★ Star on GitHub</a>
-    <code>python3 -m burnmeter serve</code>
+    <a href="#how" class="btn btn-ghost">How it works</a>
+  </div>
+  <div class="install">
+    <code id="install-cmd">pip install burnmeter &amp;&amp; burnmeter serve</code>
+    <button class="cp" id="install-copy" type="button" aria-label="copy install command">Copy</button>
+  </div>
+  <div class="cta-note">Python 3.10+ · opens at <code>localhost:9876</code> · no sign-up, no API key</div>
+
+  <div class="trust">
+    <span><b>AGPL-3.0</b> open source</span>
+    <span><b>Local-first</b> · no cloud</span>
+    <span>No <b>API keys</b></span>
+    <span><b>Claude Code</b> + <b>Codex</b></span>
+    <span>Python <b>3.10+</b></span>
   </div>
 
-  <!-- live-looking dashboard mockup -->
-  <div class="mock"><div class="mock-grid">
+  <!-- representative dashboard preview (illustrative numbers — not real usage) -->
+  <div class="mock">
+    <div class="mock-cap">Dashboard preview</div>
+    <div class="mock-grid">
     <div class="mcard hero-c">
       <div class="mrow">
         <div class="ring"><div class="rv">%97</div><div class="rl">weekly limit</div></div>
@@ -156,6 +228,19 @@ footer{padding:40px 0;border-top:1px solid var(--b1);text-align:center;color:var
   truth</strong> for what you're actually burning. Burnmeter reads them and answers
   the one question that matters: <strong>"Am I about to hit the wall?"</strong></p>
 </div></div></section>
+
+<section id="how"><div class="wrap">
+  <div class="sec-head"><h2>Up and running in 30 seconds</h2>
+    <p>No account, no API key, no config. It reads the logs your agents already write.</p></div>
+  <div class="steps">
+    <div class="step"><div class="n">1</div><h3>Install</h3>
+      <p><code>pip install burnmeter</code> — pure-Python, stdlib-only core. No Docker, no database.</p></div>
+    <div class="step"><div class="n">2</div><h3>Run</h3>
+      <p><code>burnmeter serve</code> — finds <code>~/.claude</code> &amp; <code>~/.codex</code> automatically and starts the local dashboard.</p></div>
+    <div class="step"><div class="n">3</div><h3>Open</h3>
+      <p>Visit <code>localhost:9876</code> — live burn-rate, rate-limit and cost. Everything stays on your machine.</p></div>
+  </div>
+</div></section>
 
 <section id="features"><div class="wrap">
   <div class="sec-head"><h2>Built for the question you actually have</h2>
@@ -202,20 +287,66 @@ footer{padding:40px 0;border-top:1px solid var(--b1);text-align:center;color:var
   </div>
 </div></section>
 
+<section id="faq"><div class="wrap">
+  <div class="sec-head"><h2>Questions</h2></div>
+  <div class="faq">
+    <details><summary>Does my data leave my machine?</summary>
+      <p>No. Burnmeter reads the session logs your agents already write locally (<code>~/.claude</code>, <code>~/.codex</code>) and serves a dashboard on localhost. Nothing is uploaded. The optional Pro cross-device sync is opt-in and end-to-end encrypted — the relay only ever sees ciphertext.</p></details>
+    <details><summary>Do I need an API key?</summary>
+      <p>No. There is no API call to Anthropic or OpenAI. That's the whole point — for flat-fee Pro / Max plans there is no real-time usage API, so your local logs are the only accurate source of truth.</p></details>
+    <details><summary>Which agents are supported?</summary>
+      <p>Claude Code and Codex today — separately or combined in one view. The parser is pluggable, so more agents are on the roadmap.</p></details>
+    <details><summary>Are the dollar figures exact?</summary>
+      <p>They're best-effort estimates at published per-model pricing (Opus/Sonnet/Haiku, GPT-5.5/Codex/mini). On a flat-fee plan the real constraint is the rate limit — which Burnmeter tracks directly — so the $ is for relative insight: what's expensive, and how much cache saved you.</p></details>
+    <details><summary>Is it really free?</summary>
+      <p>The entire local dashboard is open source (AGPL-3.0) and free forever — every agent, every panel, never gated. Pro (~$7/mo) only adds services a single machine can't do alone: encrypted multi-device sync, unlimited history, and smart alerts.</p></details>
+  </div>
+</div></section>
+
 <footer><div class="wrap">
-  Burnmeter · local-first AI coding usage meter · AGPL-3.0 · costs are estimates
+  <div class="foot-grid">
+    <div>
+      <div class="foot-brand"><span class="mark">◔</span> Burnmeter</div>
+      <p class="foot-tag">A local-first fuel gauge for every AI coding agent. Your data never leaves your machine.</p>
+    </div>
+    <div class="foot-links">
+      <div class="foot-col"><h5>Product</h5>
+        <a href="#features">Features</a><a href="#how">How it works</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a></div>
+      <div class="foot-col"><h5>Project</h5>
+        <a href="https://github.com/cihanatak/BurnMeter" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/cihanatak/BurnMeter#readme" target="_blank" rel="noopener">Docs</a>
+        <a href="https://github.com/cihanatak/BurnMeter/blob/main/LICENSE" target="_blank" rel="noopener">License</a></div>
+      <div class="foot-col"><h5>Get started</h5>
+        <a href="#how">Install</a><a id="foot-dashboard" href="/" style="display:none">Dashboard</a></div>
+    </div>
+  </div>
+  <div class="foot-bottom">
+    <span>© 2026 Burnmeter · AGPL-3.0</span>
+    <span>Local-first · no API keys · costs are estimates</span>
+  </div>
 </div></footer>
 
 <script>
-  // Local-only: landing dashboard tarafından (port 9876 / localhost) servis edildiğinde
-  // uygulama-içi "Dashboard" linkini göster + logo → /landing (lokal homepage).
-  // Public web deploy'da: Dashboard linki gizli, logo → "/" (site kökü = homepage).
+  // Local-only behaviour: when the landing is served by the running dashboard (port 9876 / localhost),
+  // reveal the in-app "Dashboard" links and point the logo at /landing (the local homepage).
+  // On a public web deploy these stay hidden and the logo points at "/" (site root = homepage).
   (function () {
     var local = location.port === '9876' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
     if (local) {
-      var d = document.getElementById('nav-dashboard'); if (d) d.style.display = '';
+      ['nav-dashboard', 'foot-dashboard'].forEach(function (id) {
+        var el = document.getElementById(id); if (el) el.style.display = '';
+      });
       var h = document.getElementById('brand-home'); if (h) h.setAttribute('href', '/landing');
     }
+    // copy the install command
+    var btn = document.getElementById('install-copy');
+    if (btn) btn.addEventListener('click', function () {
+      var cmd = (document.getElementById('install-cmd') || {}).textContent || '';
+      if (navigator.clipboard) navigator.clipboard.writeText(cmd).then(function () {
+        btn.textContent = 'Copied'; btn.classList.add('ok');
+        setTimeout(function () { btn.textContent = 'Copy'; btn.classList.remove('ok'); }, 1600);
+      });
+    });
   })();
 </script>
 </body>
