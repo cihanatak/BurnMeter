@@ -100,7 +100,7 @@ footer{padding:40px 0;border-top:1px solid var(--b1);text-align:center;color:var
 <body>
 
 <nav><div class="wrap">
-  <div class="logo"><span class="mark">◔</span> Burnmeter</div>
+  <a class="logo" href="/" id="brand-home" title="Ana sayfa"><span class="mark">◔</span> Burnmeter</a>
   <div class="nav-links">
     <a href="#features">Features</a><a href="#why">Why</a><a href="#pricing">Pricing</a>
     <a id="nav-dashboard" href="/" style="display:none">Dashboard</a>
@@ -205,10 +205,14 @@ footer{padding:40px 0;border-top:1px solid var(--b1);text-align:center;color:var
 
 <script>
   // Local-only: landing dashboard tarafından (port 9876 / localhost) servis edildiğinde
-  // uygulama-içi "Dashboard" linkini göster. Public web deploy'da gizli kalır.
+  // uygulama-içi "Dashboard" linkini göster + logo → /landing (lokal homepage).
+  // Public web deploy'da: Dashboard linki gizli, logo → "/" (site kökü = homepage).
   (function () {
     var local = location.port === '9876' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-    if (local) { var d = document.getElementById('nav-dashboard'); if (d) d.style.display = ''; }
+    if (local) {
+      var d = document.getElementById('nav-dashboard'); if (d) d.style.display = '';
+      var h = document.getElementById('brand-home'); if (h) h.setAttribute('href', '/landing');
+    }
   })();
 </script>
 </body>
