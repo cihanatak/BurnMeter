@@ -895,12 +895,12 @@ function initModularGrid() {
   }, gs);
   window.__grid = grid;
   try {
-    const saved = JSON.parse(localStorage.getItem("burnmeter_layout_v1") || "null");
+    const saved = JSON.parse(localStorage.getItem("burnmeter_layout_v2") || "null");
     // kaydet/yükle YALNIZCA tam grid'de (12 kolon). Dar ekranda GridStack otomatik reflow
     // yapar; o geçici dar düzeni kaydetmeyiz ki geniş ekran düzenini bozmasın.
     if (saved && saved.length && grid.getColumn() === 12) grid.load(saved, false);
   } catch (e) { /* bozuk kayıt → varsayılan */ }
-  const save = () => { try { if (grid.getColumn() === 12) localStorage.setItem("burnmeter_layout_v1", JSON.stringify(grid.save(false))); } catch (e) {} };
+  const save = () => { try { if (grid.getColumn() === 12) localStorage.setItem("burnmeter_layout_v2", JSON.stringify(grid.save(false))); } catch (e) {} };
   grid.on("change", save);
   // resize sonrası grafikleri yeni boyuta sığdır
   grid.on("resizestop", () => { Object.values(window.__charts || {}).forEach(ch => { try { ch.resize(); } catch (e) {} }); });
@@ -1018,7 +1018,7 @@ function start() {
   });
   initModularGrid();
   const rl = $("reset-layout");
-  if (rl) rl.addEventListener("click", () => { localStorage.removeItem("burnmeter_layout_v1"); location.reload(); });
+  if (rl) rl.addEventListener("click", () => { localStorage.removeItem("burnmeter_layout_v2"); location.reload(); });
   refresh(false);
   setInterval(() => refresh(false), 10000);
   setInterval(updateLiveStamp, 1000);

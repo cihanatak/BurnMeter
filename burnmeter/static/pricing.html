@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <title>Burnmeter Pro — fiyatlar</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260531z" />
+  <style>
+    body { padding:0; }
+    .pr-wrap { max-width:1080px; margin:0 auto; padding:28px var(--page-pad, 24px) 64px; }
+    .pr-top { display:flex; align-items:center; gap:14px; margin-bottom:8px; }
+    .pr-logo { width:38px; height:38px; border-radius:10px; background:linear-gradient(135deg,var(--brand-claude),var(--brand-codex));
+      display:flex; align-items:center; justify-content:center; font-size:20px; color:#fff; }
+    .pr-name { font:700 22px var(--font-sans); color:var(--text-1); letter-spacing:-0.02em; }
+    .pr-back { margin-left:auto; font:500 13px var(--font-sans); color:var(--text-3); text-decoration:none;
+      border:1px solid var(--border-strong); border-radius:var(--radius-full); padding:7px 14px; }
+    .pr-back:hover { color:var(--text-1); border-color:var(--text-4); }
+    .pr-hero { margin:22px 0 30px; }
+    .pr-hero h1 { font:700 34px/1.15 var(--font-sans); color:var(--text-1); letter-spacing:-0.03em; margin:0 0 10px; }
+    .pr-hero p { font:400 15px/1.6 var(--font-sans); color:var(--text-3); max-width:680px; margin:0; }
+    .pr-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+    @media (max-width:820px){ .pr-grid { grid-template-columns:1fr; } }
+    .tier { background:var(--bg-card,var(--bg-inset)); border:1px solid var(--border-default); border-radius:var(--radius-lg);
+      padding:24px; display:flex; flex-direction:column; }
+    .tier.pro { border-color:var(--brand); box-shadow:0 0 0 1px var(--brand) inset; position:relative; }
+    .tier-badge { position:absolute; top:-11px; left:24px; background:var(--brand); color:#fff;
+      font:700 10px/1 var(--font-sans); text-transform:uppercase; letter-spacing:.06em; padding:5px 10px; border-radius:var(--radius-full); }
+    .tier-name { font:700 15px var(--font-sans); color:var(--text-1); text-transform:uppercase; letter-spacing:.04em; }
+    .tier-price { font:700 30px var(--font-sans); color:var(--text-1); margin:10px 0 2px; }
+    .tier-price span { font:500 13px var(--font-sans); color:var(--text-4); }
+    .tier-sub { font:400 12.5px var(--font-sans); color:var(--text-4); min-height:34px; }
+    .tier ul { list-style:none; padding:0; margin:16px 0 0; }
+    .tier li { font:400 13px/1.5 var(--font-sans); color:var(--text-2); padding:6px 0 6px 22px; position:relative; }
+    .tier li::before { content:"✓"; position:absolute; left:0; color:var(--good); font-weight:700; }
+    .tier li.muted { color:var(--text-4); }
+    .tier li.muted::before { content:"·"; color:var(--text-4); }
+    .pr-note { margin-top:28px; font:400 12.5px/1.6 var(--font-sans); color:var(--text-4); max-width:760px; }
+    .pr-note code, .pr-cmd { font-family:var(--font-mono); color:var(--text-2); background:var(--bg-inset);
+      border:1px solid var(--border-default); border-radius:6px; padding:2px 6px; font-size:11.5px; }
+    .pr-cmd-block { margin-top:10px; padding:12px 14px; background:var(--bg-inset); border:1px solid var(--border-default);
+      border-radius:var(--radius-md); font:500 12px/1.7 var(--font-mono); color:var(--text-2); white-space:pre-wrap; }
+    .pr-h2 { font:700 16px var(--font-sans); color:var(--text-1); margin:36px 0 10px; }
+  </style>
+</head>
+<body>
+  <div class="pr-wrap">
+    <div class="pr-top">
+      <div class="pr-logo">◔</div>
+      <span class="pr-name">Burnmeter</span>
+      <a class="pr-back" href="/">← Dashboard'a dön</a>
+    </div>
+
+    <div class="pr-hero">
+      <h1>Local dashboard sonsuza dek ücretsiz.<br>Pro, makineler arasını birbirine bağlar.</h1>
+      <p>Open-core (AGPL-3.0). <strong>Yeteneği paywall'lamıyoruz</strong> — local dashboard + tüm
+        agent'lar (Claude Code, Codex, gelecekte daha fazlası) hep bedava. Sadece tek makinenin
+        sağlayamayacağı <strong>servisleri</strong> (cihazlar arası sync, akıllı uyarılar, ekip görünümü) ücretlendiriyoruz.
+        Veri her zaman senin diskinde; Pro sync uçtan-uca şifreli, relay yalnızca ciphertext görür.</p>
+    </div>
+
+    <div class="pr-grid">
+      <div class="tier">
+        <div class="tier-name">Free</div>
+        <div class="tier-price">$0 <span>· sonsuza dek</span></div>
+        <div class="tier-sub">OSS çekirdek — dağıtım + güven motoru.</div>
+        <ul>
+          <li>Canlı local web dashboard (tüm paneller)</li>
+          <li><strong>Her</strong> agent — Claude Code, Codex, gelecek (hiç gate'lenmez)</li>
+          <li>Session / gün / proje / model kırılımları</li>
+          <li>Rate-limit hero (5sa + haftalık), burn-rate, projeksiyon</li>
+          <li>Cache verimliliği + aylık bütçe + aktivite ısı haritası</li>
+          <li>CSV/JSON export · son 30 gün geçmiş · statusline CLI</li>
+          <li>Config-dosyası uyarı kuralları (self-host)</li>
+        </ul>
+      </div>
+
+      <div class="tier pro">
+        <span class="tier-badge">En popüler</span>
+        <div class="tier-name">Pro</div>
+        <div class="tier-price">~$7 <span>/ay · $60/yıl</span></div>
+        <div class="tier-sub">Birden çok makinede çalışan power-user için. Launch: $99 lifetime.</div>
+        <ul>
+          <li><strong>Sync</strong> — cihazlar arası E2E-şifreli kullanım geçmişi</li>
+          <li><strong>Sınırsız geçmiş</strong> — 30 günlük local pencerenin ötesi</li>
+          <li><strong>Akıllı uyarılar</strong> — Slack / e-posta / webhook, özel eşik</li>
+          <li>Otomatik proje atıfı (git repo/branch → harcama)</li>
+          <li>Bütçe zarfları (proje / agent başına aylık cap)</li>
+          <li>Öncelikli destek + erken erişim</li>
+        </ul>
+      </div>
+
+      <div class="tier">
+        <div class="tier-name">Team</div>
+        <div class="tier-price">~$12 <span>/koltuk · min 3</span></div>
+        <div class="tier-sub">$200 Max/Pro koltuk harcayan + denetim isteyen eng. yöneticisi için.</div>
+        <ul>
+          <li>Pro'daki her şey</li>
+          <li><strong>Ekip dashboard'u</strong> — toplu maliyet (yalnız metrik, kod/içerik asla)</li>
+          <li>Maliyet-atıf raporları — dev/proje/sprint, CSV</li>
+          <li>Admin — ekip bütçe cap'leri, uyarı yönlendirme</li>
+          <li>SSO / SAML (~10+ koltuk), fatura</li>
+          <li class="muted">Anthropic Enterprise Analytics yalnız Enterprise'a — küçük ekipler boşlukta. Burası biz.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="pr-h2">Pro sync'i şimdi dene (self-host)</div>
+    <div class="pr-note">
+      Billing henüz canlı değil; ama sync mekanizması <strong>çalışıyor ve self-host edilebilir</strong> — kendi relay'ini çalıştır:
+      <div class="pr-cmd-block">pip install "burnmeter[sync]"            # E2E için cryptography
+burnmeter sync-relay --port 8899          # relay (VPS / Tailscale node) — yalnızca ciphertext saklar
+# her makinede (AYNI passphrase):
+burnmeter sync login --relay http://&lt;relay&gt;:8899 --token &lt;ortak-token&gt;
+burnmeter sync push                       # bu cihazın özetini şifreleyip gönder</div>
+      Sonra dashboard'daki <strong>Cihazlar</strong> kartında tüm makinelerini görürsün. Detay
+      <code>docs/SYNC.md</code> + <code>PRICING.md</code>.
+    </div>
+  </div>
+</body>
+</html>

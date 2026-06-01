@@ -395,3 +395,9 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
 .sync-srcname.fam-opus { color:var(--brand-claude); }
 .sync-srcname.fam-gpt { color:var(--brand-codex); }
 .sync-src .num { font-variant-numeric:tabular-nums; color:var(--text-1); }
+
+/* ---------- header Pro / pricing linki (upsell CTA) ---------- */
+#pro-link { font:700 11px/1 var(--font-sans); text-decoration:none; color:var(--brand);
+  border:1px solid var(--brand); border-radius:var(--radius-full); padding:6px 11px;
+  letter-spacing:.02em; transition:all .15s; white-space:nowrap; }
+#pro-link:hover { background:var(--brand); color:#fff; }

@@ -233,6 +233,10 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 _file_response(self, STATIC_DIR / "dashboard.css", "text/css; charset=utf-8")
                 return
 
+            if path in ("/pricing", "/pricing.html", "/static/pricing.html"):
+                _file_response(self, STATIC_DIR / "pricing.html", "text/html; charset=utf-8")
+                return
+
             if path == "/api/health":
                 _json_response(self, 200, {
                     "ok": True,
