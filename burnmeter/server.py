@@ -23,6 +23,7 @@ from .analytics import build_report
 
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"   # burnmeter/static (paket içi — pip-install'da da bulunur)
+LANDING_FILE = STATIC_DIR.parent.parent / "docs" / "index.html"   # repo_root/docs/index.html — web-deploy ile TEK kaynak (drift yok); pip-install'da yoksa graceful 404
 
 
 class _Cache:
@@ -235,6 +236,12 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
 
             if path in ("/pricing", "/pricing.html", "/static/pricing.html"):
                 _file_response(self, STATIC_DIR / "pricing.html", "text/html; charset=utf-8")
+                return
+
+            # Public landing/marketing sayfası — docs/index.html'i (web-deploy kaynağı) aynen serve eder.
+            # Source checkout'ta çalışır; pip-install'da docs/ yoksa _file_response temiz 404 döner.
+            if path in ("/landing", "/landing.html", "/home"):
+                _file_response(self, LANDING_FILE, "text/html; charset=utf-8")
                 return
 
             if path == "/api/health":
