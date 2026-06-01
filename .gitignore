@@ -7,9 +7,8 @@ venv/
 build/
 dist/
 
-# ccmeter / codex_meter runtime caches (parsed-record caches, never commit)
-.codex/.codex_meter_cache.json
-*.codex_meter_cache.json
+# Burnmeter runtime caches (parsed-record caches, never commit)
+*burnmeter*cache.json
 
 # OS
 .DS_Store

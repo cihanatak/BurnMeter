@@ -359,7 +359,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765,
         },
     )
 
-    # codex_meter — second source. Codex sessions are huge (16GB+); the build
+    # burnmeter — second source. Codex sessions are huge (16GB+); the build
     # worker isolates that memory in a short-lived process. Longer TTL too.
     codex_root = Path(codex_dir) if codex_dir else CODEX_SESSIONS_DIR
     codex_cache = _Cache(

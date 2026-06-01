@@ -54,8 +54,10 @@ def write_rollout(path: Path, sid: str, turns, cwd: str = "/proj", model: str = 
 
 @pytest.fixture(autouse=True)
 def _isolate_cache(tmp_path, monkeypatch):
-    """Never read/write the real ~/.codex/.codex_meter_cache.json during tests."""
+    """Never read/write the real ~/.codex/.burnmeter_codex_cache.json during tests
+    (patch BOTH the current path AND the pre-rename path the migration shim looks at)."""
     monkeypatch.setattr(cp, "_CACHE_PATH", tmp_path / "_cache.json")
+    monkeypatch.setattr(cp, "_OLD_CACHE_PATH", tmp_path / "_old_cache.json")
 
 
 def test_replay_dedup_across_rollout_files(tmp_path):

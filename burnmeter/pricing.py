@@ -60,7 +60,7 @@ PRICES: dict[str, ModelPrice] = {
         cache_write_1h_per_mtok=2.00,
     ),
     # --- OpenAI / Codex --------------------------------------------------------
-    # codex_meter (2026-05-29): gerçek OpenAI API public pricing (WebSearch ile
+    # burnmeter (2026-05-29): gerçek OpenAI API public pricing (WebSearch ile
     # doğrulandı, May 2026). Cached input = input'un %10'u (90% off), Claude gibi.
     # OpenAI'da explicit cache WRITE ücreti YOK (otomatik prompt cache, sadece
     # read indirimli) → cache_write_* = input rate (no-op çünkü Codex cc=0).

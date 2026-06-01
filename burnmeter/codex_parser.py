@@ -1,4 +1,4 @@
-"""Codex (OpenAI gpt-5.x) session parser for codex_meter.
+"""Codex (OpenAI gpt-5.x) session parser for Burnmeter.
 
 Codex CLI writes session rollouts to:
     ~/.codex/sessions/YYYY/MM/DD/rollout-<ISO>-<uuid>.jsonl
@@ -33,7 +33,8 @@ from typing import Iterator, Optional
 from .parser import UsageRecord, _parse_timestamp
 
 CODEX_SESSIONS_DIR = Path.home() / ".codex" / "sessions"
-_CACHE_PATH = Path.home() / ".codex" / ".codex_meter_cache.json"
+_CACHE_PATH = Path.home() / ".codex" / ".burnmeter_codex_cache.json"
+_OLD_CACHE_PATH = Path.home() / ".codex" / ".codex_meter_cache.json"   # pre-rename → auto-migrated
 # parse mantığı değişince bump et → farklı "v" taşıyan eski cache entry'leri yok
 # sayılır (mtime/size aynı olsa bile yeniden parse edilir, stale turn dönmez).
 # v2: ardışık birebir-aynı token_count delta'ları atlanır (anti-şişme).
@@ -179,6 +180,11 @@ def parse_codex_file(path: Path, start_offset: int = 0, resume: Optional[dict] =
 
 
 def _load_cache() -> dict:
+    if not _CACHE_PATH.exists() and _OLD_CACHE_PATH.exists():
+        try:
+            _OLD_CACHE_PATH.rename(_CACHE_PATH)   # migrate pre-rename cache → no re-parse
+        except OSError:
+            pass
     if _CACHE_PATH.exists():
         try:
             return json.loads(_CACHE_PATH.read_text())
