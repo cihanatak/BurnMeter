@@ -222,7 +222,7 @@ function computeGaugeSpec(rep, isCodex, hoursStr) {
       ? [{ v: 0, l: "$0" }, { v: z.typical, l: "tipik (varsayılan)" }, { v: z.busy, l: "yoğun (varsayılan)" }, { v: z.heavy, l: "ağır" }]
       : [{ v: 0, l: "$0" }, { v: z.typical, l: "senin tipik" }, { v: z.busy, l: "senin yoğun (P90)" }, { v: z.heavy, l: "çok yoğun" }],
     valueText: fmtMoney(rate),
-    unitText: `/saat · son ${hoursStr === "0.25" ? "15dk" : hoursStr + "h"} ort.${isCodex ? " (notional)" : " (tahmini $)"}`,
+    unitText: `/saat · son ${hoursStr === "0.0833" ? "5dk" : hoursStr === "0.25" ? "15dk" : hoursStr + "h"} ort.${isCodex ? " (notional)" : " (tahmini $)"}`,
     zone: rate >= z.heavy ? ["bad", "🔴 ağır bölge · çok yoğun yakıyorsun"]
         : rate >= z.busy ? ["warn", "🟠 yoğun bölge"]
         : rate >= z.typical ? ["warn", "🟡 normal üstü"]
@@ -283,7 +283,7 @@ function paintBurnGauge(els, rep, isCodex, hoursStr) {
 // bir yarının iskeleti: head + GERÇEK speedometer (svg + window picker) + canlı model + son işler
 function halfStructure(rep, isCodex, side) {
   const h = localStorage.getItem("burnmeter_burn_hours_" + side) || "2";
-  const picker = [["0.25", "15dk"], ["1", "1h"], ["2", "2h"], ["4", "4h"], ["6", "6h"]]
+  const picker = [["0.0833", "5dk"], ["0.25", "15dk"], ["1", "1h"], ["2", "2h"], ["4", "4h"], ["6", "6h"]]
     .map(([v, l]) => `<button data-h="${v}"${v === h ? ' class="active"' : ""}>${l}</button>`).join("");
   const ago = (iso) => { const s = (Date.now() - new Date(iso).getTime()) / 1000; return s < 60 ? "şimdi" : s < 3600 ? Math.round(s / 60) + "dk" : s < 86400 ? Math.round(s / 3600) + "sa" : Math.round(s / 86400) + "g"; };
   const lam = (rep.live_active_models_by_window || {})["15"] || {};

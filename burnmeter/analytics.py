@@ -1486,7 +1486,7 @@ def forecast(records: list[UsageRecord], daily: list[dict]) -> dict:
     # which model is eating most of the dollars-per-hour.
     burn_rates_by_hours = {}
     burn_rates_by_hours_by_model: dict[str, list[dict]] = {}
-    for hours in (0.25, 1, 2, 4, 6):
+    for hours in (0.0833, 0.25, 1, 2, 4, 6):   # 0.0833h ≈ 5dk (anlık)
         c = now - timedelta(hours=hours)
         cost = 0.0
         per_model: dict[str, float] = defaultdict(float)
@@ -1791,7 +1791,7 @@ def build_report(
     # bu key'leri okuyor. Karma int+float liste tut, str(int(h)) if h.is_integer.
     def _hk(h):
         return str(int(h)) if float(h).is_integer() else str(h)
-    burn_hours_tuple = (0.25, 1, 2, 4, 6)
+    burn_hours_tuple = (0.0833, 0.25, 1, 2, 4, 6)   # 0.0833h ≈ 5dk (anlık)
     burn_cutoffs = {_hk(h): (now_utc - timedelta(hours=h), float(h)) for h in burn_hours_tuple}
     by_device_totals: dict[str, dict] = {}
     for dev in ("mac", "pc"):
