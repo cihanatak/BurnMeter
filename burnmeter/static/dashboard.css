@@ -401,3 +401,7 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
   border:1px solid var(--brand); border-radius:var(--radius-full); padding:6px 11px;
   letter-spacing:.02em; transition:all .15s; white-space:nowrap; }
 #pro-link:hover { background:var(--brand); color:#fff; }
+#home-link { font:600 11px/1 var(--font-sans); text-decoration:none; color:var(--text-3);
+  border:1px solid var(--border-default); border-radius:var(--radius-full); padding:6px 11px;
+  letter-spacing:.02em; transition:all .15s; white-space:nowrap; }
+#home-link:hover { color:var(--text-1); border-color:var(--text-4); background:var(--bg-raised); }
