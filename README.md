@@ -74,6 +74,31 @@ burnmeter serve --port 9876 \
   --codex-extra-dir   ~/.codex/sessions-pc
 ```
 
+## Running on another machine
+
+The whole app is in this repo — clone and run. Everything else is **machine-local by
+design** (not committed):
+
+```bash
+git clone https://github.com/cihanatak/BurnMeter && cd BurnMeter
+python -m pip install -e .          # free core, zero third-party deps
+# Pro cross-device sync (optional): adds `cryptography`
+python -m pip install -e ".[sync]"
+python -m burnmeter serve --port 9876
+```
+
+- **It reads *that* machine's own logs** — `~/.claude/projects` and `~/.codex/sessions`
+  (via `Path.home()`, so it works on macOS, Linux, and Windows: `C:\Users\<you>\.claude`).
+  No data is copied between machines.
+- **Auto-start is OS-specific and not in the repo.** macOS uses a launchd LaunchAgent;
+  on Windows use Task Scheduler or just run `python -m burnmeter serve`. (Caches under
+  `~/.claude` / `~/.codex` regenerate on first run.)
+- **Pro sync to link two machines:** install the `[sync]` extra on both, run a relay
+  somewhere (`burnmeter sync-relay`), then on each machine
+  `burnmeter sync login --relay <url> --token <same-token>` with the **same passphrase**,
+  and `burnmeter sync push`. Each shows up in the other's **Cihazlar** card. The relay
+  only ever stores ciphertext; the passphrase never leaves your machines.
+
 ## Terminal statusline
 
 A one-line live readout for your prompt or Claude Code's status bar — verdict
