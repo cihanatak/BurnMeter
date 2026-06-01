@@ -283,6 +283,83 @@ def cmd_statusline(args):
     return 0
 
 
+def cmd_sync_relay(args):
+    """Pro: self-host edilebilir zero-knowledge sync relay sunucusu."""
+    from .sync_relay import run_relay
+    storage = Path(args.storage).expanduser() if args.storage else None
+    run_relay(host=args.host, port=args.port, storage=storage)
+    return 0
+
+
+def cmd_sync(args):
+    """Pro: cihazlar arası E2E-şifreli sync (login/push/pull/status)."""
+    from . import sync as syncmod
+    act = args.action
+    cfg = syncmod.load_config()
+
+    if act == "login":
+        if args.relay:
+            cfg["relay_url"] = args.relay
+        if args.token:
+            cfg["account_token"] = args.token
+        if args.label:
+            cfg["label"] = args.label
+        pw = args.passphrase
+        if not pw:
+            import getpass
+            pw = getpass.getpass("E2E passphrase (tüm cihazlarında aynı olmalı): ")
+        if pw:
+            cfg["passphrase"] = pw
+        syncmod.ensure_device_id(cfg)
+        if not syncmod.is_configured(cfg):
+            print(red("eksik: --relay, --token ve bir passphrase gerekli")); return 1
+        syncmod.save_config(cfg)
+        print(green(f"✓ sync kuruldu · cihaz {cfg['device_id']} ({cfg['label']}) · relay {cfg['relay_url']}"))
+        print(dim("  E2E: relay yalnızca ciphertext görür; passphrase makineni terk etmez."))
+        return 0
+
+    if not syncmod.is_configured(cfg):
+        print(red("önce kur: burnmeter sync login --relay <url> --token <token>")); return 1
+
+    if act == "push":
+        from .codex_parser import CODEX_SESSIONS_DIR
+        codex = Path(args.codex_dir).expanduser() if args.codex_dir else CODEX_SESSIONS_DIR
+        try:
+            res = syncmod.push(cfg, Path(args.projects_dir), codex)
+        except Exception as e:
+            print(red(f"push hata: {e}")); return 1
+        print(green(f"✓ push OK · cihaz {res['device_id']} · kaynaklar: {', '.join(res['sources']) or '(veri yok)'}"))
+        return 0
+
+    if act == "pull":
+        try:
+            devs = syncmod.pull(cfg)
+        except Exception as e:
+            print(red(f"pull hata: {e}")); return 1
+        if not devs:
+            print(dim("henüz senkron cihaz yok")); return 0
+        _print_header(f"bağlı cihazlar ({len(devs)})")
+        for d in devs:
+            if d.get("_undecryptable"):
+                print(yellow(f"  {d.get('device_id','?')} · çözülemedi (passphrase farklı?)")); continue
+            bits = [f"{s}: ay ~{_fmt_money(v.get('month_so_far', 0))} · {_fmt_int(v.get('record_count', 0))} kayıt"
+                    for s, v in (d.get("sources") or {}).items()]
+            print(f"  {bold(d.get('label', '?'))} ({d.get('device_id')}) · {' · '.join(bits) or 'veri yok'}")
+        return 0
+
+    if act == "status":
+        _print_header("sync durumu")
+        print(f"  relay:  {cfg.get('relay_url')}")
+        print(f"  cihaz:  {cfg.get('device_id')} ({cfg.get('label')})")
+        try:
+            acc = syncmod.account(cfg)
+            print(f"  plan:   {bold(acc.get('plan', '?'))} · cihaz {acc.get('device_count')}/{acc.get('device_limit')}")
+        except Exception as e:
+            print(yellow(f"  relay'e ulaşılamadı: {e}"))
+        return 0
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="burnmeter")
     parser.add_argument("--projects-dir", default=str(CLAUDE_PROJECTS_DIR))
@@ -322,6 +399,19 @@ def main(argv=None):
     p_sl.add_argument("--codex-dir", default=None,
                       help="Codex sessions kökü (default ~/.codex/sessions)")
 
+    p_sync = sub.add_parser("sync", help="Pro: cihazlar arası sync (E2E şifreli)")
+    p_sync.add_argument("action", choices=["login", "push", "pull", "status"])
+    p_sync.add_argument("--relay", help="relay URL (login)")
+    p_sync.add_argument("--token", help="hesap token'ı (login)")
+    p_sync.add_argument("--passphrase", help="E2E passphrase (login; verilmezse sorulur)")
+    p_sync.add_argument("--label", help="bu cihazın etiketi (login; default hostname)")
+    p_sync.add_argument("--codex-dir", default=None, help="Codex sessions kökü (push)")
+
+    p_relay = sub.add_parser("sync-relay", help="Pro: self-host edilebilir sync relay sunucusu")
+    p_relay.add_argument("--host", default="127.0.0.1")
+    p_relay.add_argument("--port", type=int, default=8899)
+    p_relay.add_argument("--storage", default=None, help="ciphertext blob deposu (default ~/.burnmeter-relay)")
+
     args = parser.parse_args(argv)
 
     handlers = {
@@ -331,6 +421,8 @@ def main(argv=None):
         "sessions": cmd_sessions,
         "serve": cmd_serve,
         "statusline": cmd_statusline,
+        "sync": cmd_sync,
+        "sync-relay": cmd_sync_relay,
     }
     return handlers[args.cmd](args)
 

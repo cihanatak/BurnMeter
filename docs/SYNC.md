@@ -65,3 +65,28 @@ Yeni CLI: `burnmeter sync`
 1. **Relay hosting:** (a) önce self-host edilebilir relay (sen/kullanıcı çalıştırır) → sonra hosted [ÖNERİLEN], yoksa (b) doğrudan hosted'a git (daha çok ön-iş).
 2. **Şifreleme bağımlılığı:** Pro modülünde `cryptography` (E2E için) — free çekirdek sıfır-dep kalır, `burnmeter[sync]` extra'sı [ÖNERİLEN]. Onaylıyor musun?
 3. **Billing sağlayıcı:** Lemon Squeezy [ÖNERİLEN indie] / Gumroad / Stripe / şimdilik stub-sadece. (F3'e kadar gerekmez.)
+
+---
+
+## F1 — DONE (2026-06-01)
+
+Self-host relay + E2E-encrypted client sync shipped & tested (5 E2E tests + live CLI demo;
+relay verified zero-knowledge — ciphertext only on disk).
+
+**Quick start (self-host):**
+```bash
+pip install burnmeter[sync]                      # adds cryptography (the only optional dep)
+# on your relay box (VPS / Tailscale node):
+burnmeter sync-relay --port 8899                 # zero-knowledge ciphertext store
+# on each device (SAME passphrase!):
+burnmeter sync login --relay http://<relay>:8899 --token <shared-account-token>
+burnmeter sync push                              # encrypt + upload this device's summary
+burnmeter sync pull                              # see your other devices' usage
+burnmeter sync status                            # plan + device count
+```
+
+Relay stores only ciphertext; the passphrase never leaves your machines. Snapshots are
+tiny aggregates — raw `~/.claude` / `~/.codex` logs never leave the machine. Pro-gate is a
+stub (self-host = all Pro); hosted billing is F3/F4.
+
+**Next: F2** — wire pulled device snapshots into the dashboard's per-device UI.

@@ -28,6 +28,11 @@ classifiers = [
   "Topic :: Utilities",
 ]
 
+# Pro cross-device sync (E2E encryption) is the ONLY optional dependency, opt-in via
+# `pip install burnmeter[sync]`. The free local core stays dependency-free.
+[project.optional-dependencies]
+sync = ["cryptography>=42"]
+
 [project.urls]
 Homepage = "https://github.com/cihanatak/BurnMeter"
 Repository = "https://github.com/cihanatak/BurnMeter"
