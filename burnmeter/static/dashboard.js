@@ -77,6 +77,15 @@ const sevClass = (pct) => pct >= 90 ? "bad" : pct >= 70 ? "warn" : "good";
 // ---------- data ----------
 window.__source = localStorage.getItem("burnmeter_source") || "claude";
 window.__charts = {};
+window.__reportCache = {};   // per-source client cache → INSTANT tab switches (SWR)
+window.__renderSig = null;   // signature of what's painted now → skip redundant re-renders
+// Cheap content signature: changes only when new records get parsed (NOT on every
+// stale re-serve), so an unchanged report never triggers a needless full repaint.
+function repSig(rep){
+  if (!rep) return "";
+  if (rep._combined) return "both:" + repSig(rep.claude) + "|" + repSig(rep.codex);
+  return (rep.record_count||0) + ":" + ((rep._meta && rep._meta.files_scanned) || 0) + ":" + ((rep._meta && rep._meta.source) || "");
+}
 
 async function loadReportFor(src, force) {
   const p = new URLSearchParams();
@@ -96,15 +105,19 @@ async function refresh(force = false) {
     if (window.__source === "both") {
       const [cl, cx] = await Promise.all([loadReportFor("claude", force), loadReportFor("codex", force)]);
       if (window.__source !== "both") return;               // switched away mid-fetch
+      window.__reportCache.claude = cl; window.__reportCache.codex = cx;
       window.__lastReport = { _combined: true, claude: cl, codex: cx };
-      renderCombined(cl, cx);
+      const sig = repSig(window.__lastReport);
+      if (sig !== window.__renderSig) { renderCombined(cl, cx); window.__renderSig = sig; }
       window.__lastRefreshMs = Date.now();
       return;
     }
     const rep = await loadReport(force);
     if ((rep._meta?.source || "claude") !== window.__source) return; // stale
+    window.__reportCache[rep._meta?.source || "claude"] = rep;
     window.__lastReport = rep;
-    render(rep);
+    const sig = repSig(rep);
+    if (sig !== window.__renderSig) { render(rep); window.__renderSig = sig; }
     window.__lastRefreshMs = Date.now();
   } catch (e) {
     console.error(e);
@@ -112,6 +125,28 @@ async function refresh(force = false) {
   } finally {
     window.__refreshInFlight = false;
   }
+}
+
+// Paint a source from the client cache INSTANTLY (no network) so tab switches are
+// immediate; refresh() then silently revalidates in the background (SWR pattern).
+function renderFromCache(src) {
+  const C = window.__reportCache || {};
+  if (src === "both") {
+    if (C.claude && C.codex) {
+      window.__lastReport = { _combined: true, claude: C.claude, codex: C.codex };
+      renderCombined(C.claude, C.codex);
+      window.__renderSig = repSig(window.__lastReport);
+      return true;
+    }
+    return false;
+  }
+  if (C[src]) {
+    window.__lastReport = C[src];
+    render(C[src]);
+    window.__renderSig = repSig(C[src]);
+    return true;
+  }
+  return false;
 }
 
 // ---------- render orchestrator ----------
@@ -969,8 +1004,9 @@ function start() {
       if (src === window.__source) return;
       window.__source = src; localStorage.setItem("burnmeter_source", src);
       document.querySelectorAll("#source-toggle button").forEach(x => x.classList.toggle("active", x.dataset.source === src));
-      $("last-updated").textContent = "Burnmeter yükleniyor…";
-      window.__refreshInFlight = false; refresh(false);
+      const instant = renderFromCache(src);                 // INSTANT switch if this source is already cached
+      if (!instant) $("last-updated").textContent = "Burnmeter yükleniyor…";
+      window.__refreshInFlight = false; refresh(false);     // silent background revalidate (SWR)
     });
   });
   // burn-window picker (speedometer ortalama penceresi: 15dk/1h/2h/4h/6h)
