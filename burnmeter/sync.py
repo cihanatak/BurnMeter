@@ -23,7 +23,9 @@ from pathlib import Path
 from typing import Optional
 
 CONFIG_PATH = Path.home() / ".config" / "burnmeter" / "sync.json"
-SNAPSHOT_VERSION = 1
+SNAPSHOT_VERSION = 2   # v2: + bounded recent-turns tail (metadata only) so cross-device
+                       # "recent activity" works WITHOUT mirroring raw logs.
+SNAPSHOT_RECENT_MAX = 25   # last N turns per source carried in the snapshot (a few KB)
 
 
 # ---------- config ----------
@@ -83,6 +85,19 @@ def _summarize(report: dict) -> dict:
     fc = report.get("forecast") or {}
     cw = report.get("current_window") or {}
     totals = report.get("totals") or {}
+    # Bounded recent-turns tail — metadata ONLY (no message content, no tool output).
+    # This is what lets another device show this machine's recent activity without
+    # ever shipping the raw ~/.codex / ~/.claude logs. Capped + tiny (a few KB).
+    recent = [
+        {
+            "ts": t.get("timestamp"),
+            "project": t.get("project_label"),
+            "model": t.get("model"),
+            "tokens": t.get("total_tokens", 0) or 0,
+            "cost": round(t.get("cost_usd", 0) or 0, 4),
+        }
+        for t in (report.get("recent_turns") or [])[:SNAPSHOT_RECENT_MAX]
+    ]
     return {
         "record_count": report.get("record_count", 0),
         "burn_rate_per_hour": (fc.get("burn_rate_per_hour_recent") or 0),
@@ -93,6 +108,7 @@ def _summarize(report: dict) -> dict:
         "lifetime_tokens": totals.get("total_tokens", 0),
         "cache_hit_rate": round(totals.get("cache_hit_rate", 0) or 0, 4),
         "rate_limit_pct": (cw.get("block_pct_used") if cw else None),
+        "recent": recent,
     }
 
 

@@ -107,3 +107,26 @@ def test_device_snapshot_shape_no_logs():
         assert snap["device_id"] == "devAAA"
         assert "sources" in snap and isinstance(snap["sources"], dict)
         assert snap["v"] == sync.SNAPSHOT_VERSION
+
+
+def test_snapshot_recent_tail_bounded_and_metadata_only():
+    # A report with MANY recent turns + heavy fields → the snapshot must carry only a
+    # BOUNDED, METADATA-ONLY tail (no message bodies / tool output). This is what makes
+    # cross-device recent activity possible WITHOUT mirroring raw logs (the 34GB problem).
+    report = {
+        "record_count": 5000,
+        "recent_turns": [
+            {"timestamp": f"2026-06-01T00:{i // 60:02d}:{i % 60:02d}Z",
+             "project_label": "G:\\Tomo", "model": "gpt-5.5",
+             "total_tokens": 1234, "cost_usd": 0.5,
+             "raw": "X" * 5000, "content": "secret message body"}   # must NOT leak
+            for i in range(60)
+        ],
+    }
+    s = sync._summarize(report)
+    assert isinstance(s.get("recent"), list)
+    assert len(s["recent"]) == sync.SNAPSHOT_RECENT_MAX == 25                 # bounded
+    assert set(s["recent"][0]) == {"ts", "project", "model", "tokens", "cost"}  # metadata only
+    dump = repr(s["recent"])
+    assert "secret message body" not in dump and "XXXX" not in dump          # no raw content
+    assert len(repr(s)) < 8000                                               # whole summary stays tiny

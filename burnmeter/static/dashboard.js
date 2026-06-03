@@ -656,9 +656,19 @@ async function renderSyncDevices() {
         <span class="num">~${fmtMoney(v.month_so_far || 0)}</span><span class="dim">bu ay</span>
         <span class="num">${fmtInt(v.record_count || 0)}</span><span class="dim">kayıt</span></div>`;
     }).join("") || `<div class="dim" style="font-size:11px">veri yok</div>`;
+    // cross-device recent activity — straight from each device's snapshot tail (metadata only, no raw logs)
+    const recent = Object.keys(srcs)
+      .flatMap(s => (srcs[s].recent || []).map(t => ({ ...t, _src: s })))
+      .sort((a, b) => new Date(b.ts || 0) - new Date(a.ts || 0)).slice(0, 6);
+    const recentHtml = recent.length ? `<div class="sync-recent">` + recent.map(t =>
+      `<div class="sync-rrow"><span class="sync-rago dim">${ago(t.ts)}</span>` +
+      `<span class="sync-rproj">${esc(t.project || "?")}</span>` +
+      `<span class="sync-rmodel ${t._src === 'codex' ? 'fam-gpt' : 'fam-opus'}">${esc(modelDisplay(t.model))}</span>` +
+      `<span class="sync-rtok num">${fmtInt(t.tokens || 0)}</span></div>`
+    ).join("") + `</div>` : "";
     return `<div class="sync-dev${me ? ' me' : ''}">
       <div class="sync-dev-head"><span class="sync-dot live"></span><b>${esc(d.label || "?")}</b>${me ? '<span class="sync-badge">bu cihaz</span>' : ''}<span class="sync-ago dim">${ago(d._updated_at)}</span></div>
-      ${rows}</div>`;
+      ${rows}${recentHtml}</div>`;
   }).join("") + `</div>`;
 }
 

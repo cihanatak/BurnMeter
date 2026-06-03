@@ -397,6 +397,13 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
 .sync-srcname.fam-opus { color:var(--brand-claude); }
 .sync-srcname.fam-gpt { color:var(--brand-codex); }
 .sync-src .num { font-variant-numeric:tabular-nums; color:var(--text-1); }
+.sync-recent { margin-top:9px; padding-top:8px; border-top:1px solid var(--border-subtle); display:flex; flex-direction:column; gap:4px; }
+.sync-rrow { display:grid; grid-template-columns:34px minmax(0,1fr) auto auto; gap:8px; align-items:center; font-size:10.5px; }
+.sync-rago { font-variant-numeric:tabular-nums; }
+.sync-rproj { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-2); }
+.sync-rmodel { font:600 9.5px/1 var(--font-mono); text-transform:uppercase; white-space:nowrap; }
+.sync-rmodel.fam-opus { color:var(--brand-claude); } .sync-rmodel.fam-gpt { color:var(--brand-codex); }
+.sync-rtok { font-variant-numeric:tabular-nums; color:var(--text-3); }
 
 /* ---------- header Pro / pricing linki (upsell CTA) ---------- */
 #pro-link { font:700 11px/1 var(--font-sans); text-decoration:none; color:var(--brand);
