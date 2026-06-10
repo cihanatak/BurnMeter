@@ -189,7 +189,7 @@ function render(rep) {
 // messages, cost_per_hour, seconds_since_last (canlı mı). En yakın = "şu an çalışan".
 function renderActiveModel(rep) {
   const body = $("active-model-body"); if (!body) return;
-  const w = localStorage.getItem("burnmeter_active_window") || "15";
+  let w = localStorage.getItem("burnmeter_active_window2") || "5"; if (!["1", "5", "15"].includes(w)) w = "5";
   const lam = (rep.live_active_models_by_window || {})[w] || {};
   let models = (lam.models || []).filter(m => !String(m.model_id).startsWith("<"));
   const wl = w === "60" ? "1 saatte" : w === "300" ? "5 saatte" : w === "1440" ? "1 günde" : w + "dk'da";
@@ -321,13 +321,14 @@ function halfStructure(rep, isCodex, side) {
   const picker = [["0.0833", "5dk"], ["0.25", "15dk"], ["1", "1h"], ["2", "2h"], ["4", "4h"], ["6", "6h"]]
     .map(([v, l]) => `<button data-h="${v}"${v === h ? ' class="active"' : ""}>${l}</button>`).join("");
   const ago = (iso) => { const s = (Date.now() - new Date(iso).getTime()) / 1000; return s < 60 ? "şimdi" : s < 3600 ? Math.round(s / 60) + "dk" : s < 86400 ? Math.round(s / 3600) + "sa" : Math.round(s / 86400) + "g"; };
-  const lam = (rep.live_active_models_by_window || {})["15"] || {};
+  const lam = (rep.live_active_models_by_window || {})["5"] || {};
   const models = (lam.models || []).filter(m => !String(m.model_id).startsWith("<"))
     .sort((a, b) => (a.seconds_since_last ?? 9e9) - (b.seconds_since_last ?? 9e9)).slice(0, 4);
   const amRows = models.length ? models.map(m => {
     const s = m.seconds_since_last ?? 9e9, live = s < 120;
-    return `<div class="am-row"><span class="am-dot${live ? " live" : ""}"></span><span class="am-name ${modelToFamily(m.model_id)}">${esc(modelDisplay(m.model_id))}</span><span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/dk</span></span><span class="am-seen dim">${live ? "● şimdi" : Math.round(s / 60) + "dk"}</span></div>`;
-  }).join("") : `<div class="dim" style="padding:6px 0">son 15dk aktif model yok</div>`;
+    const dev = m.device || "mac";
+    return `<div class="am-row"><span class="am-dot${live ? " live" : ""}"></span><span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span><span class="badge ${dev}">${dev}</span></span><span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/dk</span></span><span class="am-seen dim">${live ? "● şimdi" : Math.round(s / 60) + "dk"}</span></div>`;
+  }).join("") : `<div class="dim" style="padding:6px 0">son 5dk aktif model yok</div>`;
   const recent = (rep.recent_turns || []).filter(t => !String(t.model || "").startsWith("<")).slice(0, 6);
   const recRows = recent.length ? recent.map(t => `<div class="cvr-row"><span class="cvr-when dim">${ago(t.timestamp)}</span><span class="cvr-proj"><span class="cvr-projname">${esc(t.project_label || "?")}</span><span class="badge ${t.device || "mac"}">${t.device || "mac"}</span></span><span class="cvr-model ${modelToFamily(t.model)}">${esc(modelDisplay(t.model))}</span><span class="cvr-tok num">${fmtInt(t.total_tokens || 0)}</span></div>`).join("") : `<div class="dim" style="padding:6px 0">aktivite yok</div>`;
   return `<div class="cv-head"><span class="cv-logo">${isCodex ? "⌬" : "◔"}</span><span class="cv-title">${isCodex ? "Codex" : "Claude Code"}</span><span class="cv-sub dim">${fmtInt(rep.record_count || 0)} kayıt</span></div>
@@ -1040,11 +1041,11 @@ function start() {
     });
   });
   // active-model window picker (15dk/1sa/5sa)
-  const aw0 = localStorage.getItem("burnmeter_active_window") || "15";
+  let aw0 = localStorage.getItem("burnmeter_active_window2") || "5"; if (!["1", "5", "15"].includes(aw0)) aw0 = "5";
   document.querySelectorAll("#active-window-picker button").forEach(b => {
     b.classList.toggle("active", b.dataset.w === aw0);
     b.addEventListener("click", () => {
-      localStorage.setItem("burnmeter_active_window", b.dataset.w);
+      localStorage.setItem("burnmeter_active_window2", b.dataset.w);
       document.querySelectorAll("#active-window-picker button").forEach(x => x.classList.toggle("active", x.dataset.w === b.dataset.w));
       if (window.__lastReport) renderActiveModel(window.__lastReport);
     });

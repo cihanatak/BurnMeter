@@ -1879,6 +1879,8 @@ def build_report(
         "forecast": forecast(records, daily),
         "burn_rate_zones": burn_rate_zones(window_baseline(windows)),
         "live_active_models_by_window": {
+            "1":    live_active_models(records, lookback_min=1),
+            "5":    live_active_models(records, lookback_min=5),
             "15":   live_active_models(records, lookback_min=15),
             "60":   live_active_models(records, lookback_min=60),
             "300":  live_active_models(records, lookback_min=300),
