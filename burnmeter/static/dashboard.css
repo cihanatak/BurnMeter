@@ -180,7 +180,9 @@ main.gs-active { display:block; }
 .am-dot { width:8px; height:8px; border-radius:50%; background:var(--border-strong); }
 .am-dot.live { background:#2BD96B; box-shadow:0 0 8px rgba(43,217,107,.7); animation:am-pulse 1.6s ease-in-out infinite; }
 @keyframes am-pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
-.am-name { font-weight:600; overflow:hidden; text-overflow:ellipsis; color:var(--text-2); }
+.am-name { font-weight:600; display:flex; align-items:center; gap:7px; min-width:0; color:var(--text-2); }
+.am-name .am-modelname { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.am-row .badge { height:16px; padding:0 6px; font-size:9.5px; flex-shrink:0; }
 .am-top .am-name { color:var(--text-1); }
 .am-tpm, .am-rate { font-variant-numeric:tabular-nums; color:var(--text-2); }
 .am-msg { font-size:11px; }

@@ -200,7 +200,7 @@ function renderActiveModel(rep) {
     const seen = live ? "● şimdi" : s < 3600 ? `${Math.round(s / 60)}dk önce` : `${(s / 3600).toFixed(1)}sa önce`;
     return `<div class="am-row${i === 0 ? " am-top" : ""}">
       <span class="am-dot${live ? " live" : ""}"></span>
-      <span class="am-name ${modelToFamily(m.model_id)}">${esc(modelDisplay(m.model_id))}</span>
+      <span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span><span class="badge ${m.device || "mac"}">${m.device || "mac"}</span></span>
       <span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/dk</span></span>
       <span class="am-msg dim">${m.messages || 0} msg</span>
       <span class="am-rate num">${fmtMoney(m.cost_per_hour || 0)}<span class="dim">/sa</span></span>

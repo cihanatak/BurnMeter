@@ -1363,7 +1363,7 @@ def live_active_models(records: list[UsageRecord], lookback_min: int = 15) -> di
     cutoff = now - timedelta(minutes=lookback_min)
     elapsed_min = lookback_min  # assume full window when computing rate
 
-    by_model: dict[str, dict] = defaultdict(lambda: {
+    by_model: dict[tuple, dict] = defaultdict(lambda: {
         "billable_tokens": 0,
         "total_tokens": 0,
         "cost": 0.0,
@@ -1374,7 +1374,9 @@ def live_active_models(records: list[UsageRecord], lookback_min: int = 15) -> di
     for r in records:
         if r.timestamp < cutoff:
             continue
-        key = r.model or "unknown"
+        # Key by (model, device) so the same model running on mac AND pc shows as
+        # two separate live rows; the dashboard tags each with its device badge.
+        key = (r.model or "unknown", getattr(r, "device", "mac"))
         m = by_model[key]
         m["billable_tokens"] += r.input_tokens + r.output_tokens + r.cache_creation_tokens
         m["total_tokens"]    += (r.input_tokens + r.output_tokens
@@ -1392,10 +1394,11 @@ def live_active_models(records: list[UsageRecord], lookback_min: int = 15) -> di
 
     out = []
     elapsed_hours = elapsed_min / 60.0
-    for model_id, stats in by_model.items():
+    for (model_id, device), stats in by_model.items():
         last = stats["last_seen"]
         out.append({
             "model_id": model_id,
+            "device": device,
             "billable_tokens_recent": stats["billable_tokens"],
             "tokens_per_min": round(stats["billable_tokens"] / elapsed_min, 0) if elapsed_min else 0,
             "messages": stats["messages"],
