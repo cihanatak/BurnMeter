@@ -56,6 +56,7 @@ function modelToFamily(m) {
   if (m.includes("opus")) return "opus";
   if (m.includes("sonnet")) return "sonnet";
   if (m.includes("haiku")) return "haiku";
+  if (m.includes("fable") || m.includes("mythos")) return "fable";
   if (m.includes("codex")) return "gpt-codex";
   if (m.includes("mini")) return "gpt-mini";
   if (m.includes("gpt-5.5") || m.includes("gpt5.5")) return "gpt-55";
@@ -68,6 +69,8 @@ function modelDisplay(m) {
   const raw = String(m); if (raw.startsWith("<")) return raw.replace(/[<>]/g, "");
   const cl = raw.toLowerCase().match(/(opus|sonnet|haiku)-(\d+)-(\d+)/);
   if (cl) return cl[1][0].toUpperCase() + cl[1].slice(1) + " " + cl[2] + "." + cl[3];
+  const fb = raw.toLowerCase().match(/(fable|mythos)-?(\d+)/);
+  if (fb) return fb[1][0].toUpperCase() + fb[1].slice(1) + " " + fb[2];
   const g = raw.toLowerCase().match(/gpt-?(\d+(?:\.\d+)?)(-?(codex|mini))?/);
   if (g) return "GPT-" + g[1] + (g[3] === "codex" ? " Codex" : g[3] === "mini" ? " mini" : "");
   return raw;

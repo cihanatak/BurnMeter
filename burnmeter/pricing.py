@@ -35,6 +35,16 @@ class ModelPrice:
 
 # Per-million-token prices in USD.
 PRICES: dict[str, ModelPrice] = {
+    # Fable 5 / Mythos 5 — Mythos-class flagship (June 2026). Verified against the official
+    # Anthropic pricing page: $10 in / $50 out, standard cache multipliers (1.25x / 2x / 0.1x).
+    "fable-5": ModelPrice(
+        family="fable-5",
+        input_per_mtok=10.00,
+        output_per_mtok=50.00,
+        cache_read_per_mtok=1.00,           # 90% off input
+        cache_write_5m_per_mtok=12.50,      # 1.25x input
+        cache_write_1h_per_mtok=20.00,      # 2.00x input
+    ),
     "opus": ModelPrice(
         family="opus",
         input_per_mtok=5.00,
@@ -115,6 +125,8 @@ def family_from_model(model: Optional[str]) -> str:
         return "sonnet"
     if "haiku" in m:
         return "haiku"
+    if "fable" in m or "mythos" in m:
+        return "fable-5"
     # OpenAI / Codex aileleri
     if "codex" in m:
         return "gpt-5-codex"
