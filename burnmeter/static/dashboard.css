@@ -376,6 +376,8 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
   border-radius:5px; padding:2px 7px; font:500 10px/1 var(--font-mono); cursor:pointer; transition:all .12s; }
 .picker button:hover{ color:var(--text-1); }
 .picker button.active{ background:var(--accent); color:#fff; border-color:var(--accent); }
+/* "Canlı" penceresi seçiliyken yeşil — canlılık anlamı tek bakışta */
+.picker button[data-w="live"].active{ background:rgba(43,217,107,.16); color:#2BD96B; border-color:rgba(43,217,107,.45); }
 
 /* ---------- Empty / dim ---------- */
 .dim { color: var(--text-4); }
