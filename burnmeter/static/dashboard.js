@@ -112,6 +112,7 @@ async function refresh(force = false) {
       window.__lastReport = { _combined: true, claude: cl, codex: cx };
       const sig = repSig(window.__lastReport);
       if (sig !== window.__renderSig) { renderCombined(cl, cx); window.__renderSig = sig; }
+      else { paintCombinedActive("claude", cl); paintCombinedActive("codex", cx); }  // canlı kart HER refresh'te tazelenir
       window.__lastRefreshMs = Date.now();
       return;
     }
@@ -121,6 +122,7 @@ async function refresh(force = false) {
     window.__lastReport = rep;
     const sig = repSig(rep);
     if (sig !== window.__renderSig) { render(rep); window.__renderSig = sig; }
+    else { renderActiveModel(rep); }                       // canlı kart HER refresh'te tazelenir
     window.__lastRefreshMs = Date.now();
   } catch (e) {
     console.error(e);
@@ -190,6 +192,24 @@ function render(rep) {
 // Eski sürümde çok sevilen kutu: o an hangi model(ler) çalışıyor, ne hızla.
 // Veri rep.live_active_models_by_window[15|60|300|1440] — her model: tokens_per_min,
 // messages, cost_per_hour, seconds_since_last (canlı mı). En yakın = "şu an çalışan".
+// "ne zaman görüldü" etiketi — canlıysa yeşil nabız + şimdi (tickLive saniyede bir günceller)
+function seenLabel(s) {
+  return s < 120 ? `<span class="lp"></span>şimdi`
+    : s < 3600 ? `${Math.round(s / 60)}dk önce` : `${(s / 3600).toFixed(1)}sa önce`;
+}
+// SANİYELİK canlılık tiki: tüm am-row'lardaki (tek + İkisi) "şimdi"/dot durumunu
+// last_seen'den client-side yeniden hesaplar — backend refresh'ini beklemez.
+function tickLive() {
+  const now = Date.now();
+  document.querySelectorAll(".am-row[data-ls]").forEach(row => {
+    const ls = row.getAttribute("data-ls"); if (!ls) return;
+    const s = (now - new Date(ls).getTime()) / 1000; if (!isFinite(s)) return;
+    const live = s < 120;
+    const dot = row.querySelector(".am-dot"); if (dot) dot.classList.toggle("live", live);
+    const seen = row.querySelector(".am-seen");
+    if (seen) { seen.classList.toggle("live", live); seen.innerHTML = seenLabel(Math.max(0, s)); }
+  });
+}
 function renderActiveModel(rep) {
   const body = $("active-model-body"); if (!body) return;
   let w = localStorage.getItem("burnmeter_active_window2") || "5"; if (!["1", "5", "15"].includes(w)) w = "5";
@@ -200,14 +220,13 @@ function renderActiveModel(rep) {
   models = models.slice().sort((a, b) => (a.seconds_since_last ?? 9e9) - (b.seconds_since_last ?? 9e9));
   body.innerHTML = models.map((m, i) => {
     const s = m.seconds_since_last ?? 9e9, live = s < 120;
-    const seen = live ? "● şimdi" : s < 3600 ? `${Math.round(s / 60)}dk önce` : `${(s / 3600).toFixed(1)}sa önce`;
-    return `<div class="am-row${i === 0 ? " am-top" : ""}">
+    return `<div class="am-row${i === 0 ? " am-top" : ""}" data-ls="${m.last_seen || ""}">
       <span class="am-dot${live ? " live" : ""}"></span>
       <span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span><span class="badge ${m.device || "mac"}">${m.device || "mac"}</span></span>
       <span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/dk</span></span>
       <span class="am-msg dim">${m.messages || 0} msg</span>
       <span class="am-rate num">${fmtMoney(m.cost_per_hour || 0)}<span class="dim">/sa</span></span>
-      <span class="am-seen dim">${seen}</span>
+      <span class="am-seen${live ? " live" : ""} dim">${seenLabel(s)}</span>
     </div>`;
   }).join("");
 }
@@ -241,6 +260,30 @@ function paintCombinedSide(side, rep, isCodex) {
       paintBurnGauge(els(), rep, isCodex, b.dataset.h);
     });
   });
+  // canlı aktif model: rows + 1dk/5dk/15dk picker (tek görünümdekiyle aynı pencereler)
+  paintCombinedActive(side, rep);
+  root.querySelectorAll(".cv-am-picker button").forEach(b => {
+    b.addEventListener("click", () => {
+      localStorage.setItem("burnmeter_active_window2_" + side, b.dataset.w);
+      root.querySelectorAll(".cv-am-picker button").forEach(x => x.classList.toggle("active", x.dataset.w === b.dataset.w));
+      paintCombinedActive(side, rep);
+    });
+  });
+}
+
+// İkisi yarısının "Canlı aktif model" satırları — seçili pencereye göre; tickLive saniyede bir canlılığı günceller.
+function paintCombinedActive(side, rep) {
+  const root = document.getElementById("cv-" + side); if (!root) return;
+  const box = root.querySelector(".cv-am-rows"); if (!box) return;
+  let w = localStorage.getItem("burnmeter_active_window2_" + side) || "5"; if (!["1", "5", "15"].includes(w)) w = "5";
+  const lam = (rep.live_active_models_by_window || {})[w] || {};
+  const models = (lam.models || []).filter(m => !String(m.model_id).startsWith("<"))
+    .sort((a, b) => (a.seconds_since_last ?? 9e9) - (b.seconds_since_last ?? 9e9)).slice(0, 4);
+  box.innerHTML = models.length ? models.map(m => {
+    const s = m.seconds_since_last ?? 9e9, live = s < 120;
+    const dev = m.device || "mac";
+    return `<div class="am-row" data-ls="${m.last_seen || ""}"><span class="am-dot${live ? " live" : ""}"></span><span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span><span class="badge ${dev}">${dev}</span></span><span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/dk</span></span><span class="am-seen${live ? " live" : ""} dim">${seenLabel(s)}</span></div>`;
+  }).join("") : `<div class="dim" style="padding:6px 0">son ${w}dk aktif model yok</div>`;
 }
 
 // ===== gauge TEK KAYNAK (single tab renderSpeedometer + İkisi paintBurnGauge ortak) =====
@@ -324,14 +367,9 @@ function halfStructure(rep, isCodex, side) {
   const picker = [["0.0833", "5dk"], ["0.25", "15dk"], ["1", "1h"], ["2", "2h"], ["4", "4h"], ["6", "6h"]]
     .map(([v, l]) => `<button data-h="${v}"${v === h ? ' class="active"' : ""}>${l}</button>`).join("");
   const ago = (iso) => { const s = (Date.now() - new Date(iso).getTime()) / 1000; return s < 60 ? "şimdi" : s < 3600 ? Math.round(s / 60) + "dk" : s < 86400 ? Math.round(s / 3600) + "sa" : Math.round(s / 86400) + "g"; };
-  const lam = (rep.live_active_models_by_window || {})["5"] || {};
-  const models = (lam.models || []).filter(m => !String(m.model_id).startsWith("<"))
-    .sort((a, b) => (a.seconds_since_last ?? 9e9) - (b.seconds_since_last ?? 9e9)).slice(0, 4);
-  const amRows = models.length ? models.map(m => {
-    const s = m.seconds_since_last ?? 9e9, live = s < 120;
-    const dev = m.device || "mac";
-    return `<div class="am-row"><span class="am-dot${live ? " live" : ""}"></span><span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span><span class="badge ${dev}">${dev}</span></span><span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/dk</span></span><span class="am-seen dim">${live ? "● şimdi" : Math.round(s / 60) + "dk"}</span></div>`;
-  }).join("") : `<div class="dim" style="padding:6px 0">son 5dk aktif model yok</div>`;
+  let aw = localStorage.getItem("burnmeter_active_window2_" + side) || "5"; if (!["1", "5", "15"].includes(aw)) aw = "5";
+  const amPicker = [["1", "1dk"], ["5", "5dk"], ["15", "15dk"]]
+    .map(([v, l]) => `<button data-w="${v}"${v === aw ? ' class="active"' : ""}>${l}</button>`).join("");
   const recent = (rep.recent_turns || []).filter(t => !String(t.model || "").startsWith("<")).slice(0, 6);
   const recRows = recent.length ? recent.map(t => `<div class="cvr-row"><span class="cvr-when dim">${ago(t.timestamp)}</span><span class="cvr-proj"><span class="cvr-projname">${esc(t.project_label || "?")}</span><span class="badge ${t.device || "mac"}">${t.device || "mac"}</span></span><span class="cvr-model ${modelToFamily(t.model)}">${esc(modelDisplay(t.model))}</span><span class="cvr-tok num">${fmtInt(t.total_tokens || 0)}</span></div>`).join("") : `<div class="dim" style="padding:6px 0">aktivite yok</div>`;
   return `<div class="cv-head"><span class="cv-logo">${isCodex ? "⌬" : "◔"}</span><span class="cv-title">${isCodex ? "Codex" : "Claude Code"}</span><span class="cv-sub dim">${fmtInt(rep.record_count || 0)} kayıt</span></div>
@@ -341,7 +379,7 @@ function halfStructure(rep, isCodex, side) {
       <div class="cv-zone2"></div>
       <div class="cv-breakdown speedo-breakdown"></div>
     </div>
-    <div class="cvb"><div class="cvb-t dim">Canlı aktif model</div>${amRows}</div>
+    <div class="cvb"><div class="cvb-trow"><span class="cvb-t dim">Canlı aktif model</span><span class="picker cv-am-picker">${amPicker}</span></div><div class="cv-am-rows"></div></div>
     <div class="cvb"><div class="cvb-t dim">Son işler</div>${recRows}</div>`;
 }
 
@@ -1072,5 +1110,6 @@ function start() {
   refresh(false);
   setInterval(() => refresh(false), 10000);
   setInterval(updateLiveStamp, 1000);
+  setInterval(tickLive, 1000);   // canlı aktif model: saniyelik nabız/şimdi güncellemesi
 }
 document.addEventListener("DOMContentLoaded", start);

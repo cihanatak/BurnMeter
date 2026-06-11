@@ -180,6 +180,11 @@ main.gs-active { display:block; }
 .am-dot { width:8px; height:8px; border-radius:50%; background:var(--border-strong); }
 .am-dot.live { background:#2BD96B; box-shadow:0 0 8px rgba(43,217,107,.7); animation:am-pulse 1.6s ease-in-out infinite; }
 @keyframes am-pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+/* "şimdi" canlılık nabzı: yeşil yanıp sönen dot + yeşil etiket (tickLive saniyede bir besler) */
+.lp { display:inline-block; width:7px; height:7px; border-radius:50%; background:#2BD96B;
+  margin-right:5px; vertical-align:0; box-shadow:0 0 7px rgba(43,217,107,.85);
+  animation:am-pulse 1.2s ease-in-out infinite; }
+.am-seen.live { color:#2BD96B !important; font-weight:600; }
 .am-name { font-weight:600; display:flex; align-items:center; gap:7px; min-width:0; color:var(--text-2); }
 .am-name .am-modelname { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .am-row .badge { height:16px; padding:0 6px; font-size:9.5px; flex-shrink:0; }
