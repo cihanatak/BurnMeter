@@ -13,19 +13,21 @@ free tier is table stakes, and the paid tier must earn its price on services.
 - Per-session / daily / per-project / per-model breakdowns
 - Rate-limit hero (5h + weekly), burn-rate, cost projection
 - Cache-efficiency panel
+- **Git/branch attribution** — map spend to commits/branches (local compute, free)
+- **Monthly budget tracking** — this month vs your $ cap + month-end projection
 - Last 30 days of local history (on disk, user-controlled)
 - CSV/JSON export
 - Config-file alert rules (self-hosted)
 
 ## Pro — ~$7/mo or $60/yr (launch: $99 one-time "lifetime/supporter")
 *For the individual power user across multiple machines.*
-- **Sync** — E2E-encrypted usage history across all your machines (the Obsidian
-  Sync analog; we already prototype this with Syncthing — Pro productizes it)
-- **Unlimited history** — beyond the 30-day local window (provider logs get pruned)
-- **Smart alerts** — Slack / email / webhook push at custom thresholds
-  ("90% of weekly cap", "this block exhausts in 20 min")
-- **Auto project attribution** — map spend to git repos/branches
-- **Budget envelopes** — per-project / per-agent monthly caps
+- **Hosted sync** — E2E-encrypted usage history across all your machines; we run the
+  relay so you don't have to. The relay is open-source and **self-hostable for $0** —
+  Pro is the convenience of a managed relay, not a capability lock.
+- **Durable cross-device history** — survives provider log pruning (a consequence of sync)
+- **Smart alerts** *(roadmap — not yet shipped)* — Slack / email / webhook push at
+  custom thresholds ("90% of weekly cap", "this block exhausts in 20 min"), reaching
+  you even when the dashboard tab is closed
 - Priority support + early access
 
 *Anchoring: Obsidian Sync $4, Raycast Pro $8 → $7 sits right between.*
