@@ -360,7 +360,79 @@ def cmd_sync(args):
     return 0
 
 
+def cmd_alerts(args):
+    """Local pre-limit alerts — configure destinations in
+    ~/.config/burnmeter/alerts.json, then `alerts test` to verify or `alerts check`
+    to evaluate now. They also fire automatically from `burnmeter serve` (a local
+    background thread, every ~60s). Everything stays on your machine — no phone-home."""
+    from . import alerts as al
+    act = args.action
+    cfg = al.load_config()
+
+    if act == "status":
+        _print_header("alert durumu")
+        dests = cfg.get("destinations") or {}
+        configured = [k for k in ("webhook_url", "slack_webhook_url", "email") if dests.get(k)]
+        print(f"  config:    {al.CONFIG_PATH}")
+        print(f"  enabled:   {bold('AÇIK' if al.is_enabled(cfg) else 'kapalı')}")
+        print(f"  hedefler:  {', '.join(configured) or dim('yok — alerts.json ekle')}")
+        print(f"  kaynaklar: {', '.join(cfg.get('sources') or ['claude', 'codex'])}")
+        print(dim("  eşik: Codex %85 uyarı / %95 kritik · Claude burn-rate heavy×1.6"))
+        return 0
+
+    if act in ("on", "off"):
+        cfg["enabled"] = (act == "on")
+        if not cfg.get("destinations"):
+            print(yellow("not: henüz hedef yok — alerts.json'a webhook/slack/email ekle"))
+        al.save_config(cfg)
+        print(green(f"✓ alerts {'AÇIK' if act == 'on' else 'kapalı'}"))
+        return 0
+
+    if act == "test":
+        if not (cfg.get("destinations") or {}):
+            print(red(f"hedef yok. Önce {al.CONFIG_PATH} içine webhook/slack/email ekle.")); return 1
+        results = al.send_test(cfg)
+        for r in results:
+            print((green("  ✓ ") if ":ok" in r else red("  ✗ ")) + r)
+        return 0 if results and all(":ok" in r for r in results) else 1
+
+    if act == "check":
+        src = (getattr(args, "source", "claude") or "claude").lower()
+        if src == "codex":
+            from .codex_parser import CODEX_SESSIONS_DIR, load_codex_records
+            root = (Path(args.codex_dir).expanduser()
+                    if getattr(args, "codex_dir", None) else CODEX_SESSIONS_DIR)
+            records, stats, intents = load_codex_records(root)
+            errors: list = []
+        else:
+            records, stats, intents, errors = load_records(Path(args.projects_dir))
+        if not records:
+            print(dim(f"{src}: veri yok")); return 0
+        report = build_report(records, plan=args.plan, user_intents=intents,
+                              error_events=errors, source=src)
+        if src == "codex" and stats.get("rate_limits"):
+            report["codex_rate_limits"] = stats["rate_limits"]
+        level, msg = al.evaluate(report, src)
+        name = al.LEVEL_NAMES.get(level, str(level))
+        color = green if level == 0 else (yellow if level == 2 else red)
+        print(f"  {src}: {color(name.upper())}  {msg or dim('eşik altında, sorun yok')}")
+        if getattr(args, "fire", False) and level >= 2:
+            for r in al.dispatch(cfg, level, msg, src):
+                print("  → " + r)
+        return 0
+    return 0
+
+
 def main(argv=None):
+    # Windows: the console's locale codepage (e.g. cp1254 on Turkish) can't encode
+    # the box-drawing / emoji / Turkish output below and raises UnicodeEncodeError,
+    # crashing every CLI command. Force UTF-8 on the text streams so output is
+    # locale-independent (sibling to the git-log decode fix in analytics.py).
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
     parser = argparse.ArgumentParser(prog="burnmeter")
     parser.add_argument("--projects-dir", default=str(CLAUDE_PROJECTS_DIR))
     parser.add_argument("--plan", default=None,
@@ -412,6 +484,14 @@ def main(argv=None):
     p_relay.add_argument("--port", type=int, default=8899)
     p_relay.add_argument("--storage", default=None, help="ciphertext blob deposu (default ~/.burnmeter-relay)")
 
+    p_alerts = sub.add_parser("alerts", help="local pre-limit uyarıları (webhook/Slack/e-posta)")
+    p_alerts.add_argument("action", choices=["status", "test", "check", "on", "off"])
+    p_alerts.add_argument("--source", default="claude", choices=["claude", "codex"],
+                          help="check için kaynak (default claude)")
+    p_alerts.add_argument("--codex-dir", default=None, help="Codex sessions kökü (check --source codex)")
+    p_alerts.add_argument("--fire", action="store_true",
+                          help="check sırasında eşik aşılırsa gerçekten gönder")
+
     args = parser.parse_args(argv)
 
     handlers = {
@@ -423,6 +503,7 @@ def main(argv=None):
         "statusline": cmd_statusline,
         "sync": cmd_sync,
         "sync-relay": cmd_sync_relay,
+        "alerts": cmd_alerts,
     }
     return handlers[args.cmd](args)
 

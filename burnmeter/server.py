@@ -210,6 +210,32 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 pass
     threading.Thread(target=_sync_autopush, daemon=True).start()
 
+    # Local pre-limit ALERTS: every ~60s evaluate the cached reports and push to
+    # the user's OWN webhook/Slack/email on an upward threshold crossing. Runs
+    # entirely locally (no phone-home) and reuses the cached reports (no re-parse).
+    # No-op unless ~/.config/burnmeter/alerts.json is configured + enabled.
+    def _alert_watch():
+        from . import alerts as _alerts
+        state: dict = {}
+        while True:
+            time.sleep(60)
+            try:
+                cfg = _alerts.load_config()
+                if not _alerts.is_enabled(cfg):
+                    continue
+                reports = {}
+                for s in (cfg.get("sources") or ["claude", "codex"]):
+                    if s == "codex" and codex_cache is None:
+                        continue
+                    try:
+                        reports[s] = build_for(s, None)
+                    except Exception:
+                        pass
+                state = _alerts.check_and_fire(reports, cfg, state)
+            except Exception:
+                pass
+    threading.Thread(target=_alert_watch, daemon=True).start()
+
     class Handler(BaseHTTPRequestHandler):
         # Quieter than the default verbose logger.
         def log_message(self, format, *args):
