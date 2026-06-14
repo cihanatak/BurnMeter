@@ -752,13 +752,17 @@ def _git_log(repo_path: Path, since_days: int) -> list[dict]:
                 "--all",
             ],
             capture_output=True, text=True, timeout=5,
+            # git emits UTF-8; force it instead of the OS locale (cp1254 on Windows-TR
+            # chokes on →/emoji/Turkish bytes in commit subjects). errors="replace"
+            # guarantees a decode can never crash this worker.
+            encoding="utf-8", errors="replace",
         )
-    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+    except (subprocess.SubprocessError, FileNotFoundError, OSError, UnicodeError):
         return []
     if result.returncode != 0:
         return []
     commits = []
-    for line in result.stdout.splitlines():
+    for line in (result.stdout or "").splitlines():
         if not line:
             continue
         parts = line.split("\t")
