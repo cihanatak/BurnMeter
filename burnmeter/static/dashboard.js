@@ -618,7 +618,11 @@ function renderBudget(rep, isCodex) {
     if (clearBtn) clearBtn.addEventListener("click", () => { localStorage.removeItem("burnmeter_budget_" + src); done(); });
     const cancelBtn = $("budget-cancel");
     if (cancelBtn) cancelBtn.addEventListener("click", done);
-    if (inp) inp.focus();
+    // Focus only when the user actively opened the editor (clicked "düzenle").
+    // Focusing on a passive re-render — e.g. an unset budget after a tab switch —
+    // makes the browser scroll the input into view, yanking the page down to the
+    // budget card. Gate on _budgetEditing so tab switches no longer jump-scroll.
+    if (inp && _budgetEditing[src]) inp.focus();
     return;
   }
 
