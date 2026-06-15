@@ -90,7 +90,8 @@ The whole app is in this repo — clone and run. Everything else is **machine-lo
 design** (not committed):
 
 ```bash
-git clone https://github.com/cihanatak/BurnMeter && cd BurnMeter
+git clone https://github.com/cihanatak/BurnMeter
+cd BurnMeter
 python -m pip install -e .          # free core, zero third-party deps
 # Pro cross-device sync (optional): adds `cryptography`
 python -m pip install -e ".[sync]"
