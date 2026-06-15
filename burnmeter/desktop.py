@@ -10,13 +10,48 @@ The shortcut runs `<this-python> -m burnmeter serve`, which auto-opens the brows
 """
 from __future__ import annotations
 
+import functools
 import subprocess
 import sys
 from pathlib import Path
 
 
+@functools.lru_cache(maxsize=1)
+def _win_real_desktop():
+    """Resolve the REAL Windows desktop via the Known Folder API. Honors OneDrive
+    redirection AND localized folder names (Turkish 'Masaüstü', French 'Bureau', …),
+    which `~/Desktop` misses — there the shortcut would land in an invisible legacy
+    folder. Pure ctypes: Unicode result, no subprocess, no codepage/cp1254 issues.
+    Returns a Path or None on any failure."""
+    try:
+        import ctypes
+        from ctypes import wintypes, byref, c_wchar_p
+
+        class _GUID(ctypes.Structure):
+            _fields_ = [("Data1", wintypes.DWORD), ("Data2", wintypes.WORD),
+                        ("Data3", wintypes.WORD), ("Data4", wintypes.BYTE * 8)]
+
+        # FOLDERID_Desktop = {B4BFCC3A-DB2C-424C-B029-7FE99A87C641}
+        fid = _GUID(0xB4BFCC3A, 0xDB2C, 0x424C,
+                    (wintypes.BYTE * 8)(0xB0, 0x29, 0x7F, 0xE9, 0x9A, 0x87, 0xC6, 0x41))
+        ptr = c_wchar_p()
+        if ctypes.windll.shell32.SHGetKnownFolderPath(byref(fid), 0, None, byref(ptr)) == 0:
+            path = ptr.value
+            ctypes.windll.ole32.CoTaskMemFree(ptr)
+            return Path(path) if path else None
+    except Exception:
+        pass
+    return None
+
+
 def _desktop_dir(override=None) -> Path:
-    return Path(override) if override else (Path.home() / "Desktop")
+    if override:
+        return Path(override)
+    if sys.platform == "win32":
+        real = _win_real_desktop()
+        if real and real.exists():
+            return real
+    return Path.home() / "Desktop"
 
 
 def create_shortcut(port: int = 8765, desktop_dir=None) -> Path:
