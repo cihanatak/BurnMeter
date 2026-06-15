@@ -237,17 +237,28 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
     threading.Thread(target=_alert_watch, daemon=True).start()
 
     class Handler(BaseHTTPRequestHandler):
-        # Keep the terminal clean for end users: the dashboard polls /api/report
-        # every 10s, so logging every 2xx would be an endless stream that scrolls
-        # the "Burnmeter is running: <link>" banner out of view. Log only real
-        # problems (>=400); routine successful requests stay silent.
+        # Keep the terminal clean for end users. The dashboard polls /api/report
+        # every 10s; and if another service on the machine expects this port, its
+        # pollers (/health, /favicon.ico, foreign API paths) hammer us with 404s.
+        # Logging all of that drowns the "Burnmeter is running: <link>" banner.
+        # Log ONLY genuine server errors (>=500); 2xx and 4xx (incl. foreign 404s)
+        # stay silent.
         def log_request(self, code="-", size="-"):
             try:
                 c = int(code)
             except (TypeError, ValueError):
                 c = 0
-            if c >= 400:
+            if c >= 500:
                 self.log_message('"%s" %s', self.requestline, str(code))
+
+        def log_error(self, format, *args):
+            # send_error() also logs (e.g. "code 404, message Not found"). Suppress
+            # client errors (4xx) — foreign pollers / favicon shouldn't flood the
+            # terminal — but keep genuine server errors (5xx) and uncoded errors.
+            code = args[0] if args else None
+            if isinstance(code, int) and code < 500:
+                return
+            self.log_message(format, *args)
 
         def log_message(self, format, *args):
             sys.stderr.write("[burnmeter] %s - %s\n" % (
