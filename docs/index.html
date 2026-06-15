@@ -186,7 +186,7 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
     <code id="install-cmd">pip install git+https://github.com/cihanatak/BurnMeter</code>
     <button class="cp" id="install-copy" type="button" aria-label="copy install command">Copy</button>
   </div>
-  <div class="cta-note">Python 3.10+ · then run <code>burnmeter serve</code> → opens at <code>localhost:8765</code> · no sign-up, no API key</div>
+  <div class="cta-note">Python 3.10+ · run <code>burnmeter serve</code> and the dashboard opens in your browser automatically · no sign-up, no API key, nothing leaves your machine</div>
 
   <div class="trust">
     <span><b>AGPL-3.0</b> open source</span>
@@ -242,9 +242,9 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
     <div class="step"><div class="n">1</div><h3>Install</h3>
       <p><code>pip install git+https://github.com/cihanatak/BurnMeter</code> — pure-Python, stdlib-only core. No Docker, no database.</p></div>
     <div class="step"><div class="n">2</div><h3>Run</h3>
-      <p><code>burnmeter serve</code> — finds <code>~/.claude</code> &amp; <code>~/.codex</code> automatically and starts the local dashboard.</p></div>
+      <p><code>burnmeter serve</code> — auto-detects <code>~/.claude</code> &amp; <code>~/.codex</code>, drops a <b>Burnmeter</b> shortcut on your desktop, and opens the dashboard in your browser.</p></div>
     <div class="step"><div class="n">3</div><h3>Open</h3>
-      <p>Visit <code>localhost:8765</code> — live burn-rate, rate-limit and cost. Everything stays on your machine.</p></div>
+      <p>It opens at <code>localhost:8765</code> on its own. If your browser doesn't pop up, click the link Burnmeter prints in the terminal — and if <code>8765</code> is already taken, it picks the next free port automatically. After that, just double-click the desktop icon.</p></div>
   </div>
 </div></section>
 
