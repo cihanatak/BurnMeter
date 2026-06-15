@@ -8,6 +8,16 @@ burn-rate, and — where the agent actually logs it (e.g. Codex) — **how close
 are to your plan's rate limit**. No API keys. No cloud account. No phone-home.
 Your data never leaves your machine.
 
+![The Burnmeter dashboard — burn-rate gauge, rate-limit hero, cache savings, per-project & per-model breakdowns, activity heatmap](docs/dashboard.png)
+
+<p align="center">
+  <b><a href="https://burnmeter.dev">burnmeter.dev</a></b> ·
+  <code>pipx install git+https://github.com/cihanatak/BurnMeter</code> ·
+  Claude Code + OpenAI Codex · AGPL-3.0
+</p>
+
+> ℹ️ Screenshot uses synthetic demo data (`tests/generate_fixture.py`) — your real numbers never leave your machine.
+
 ---
 
 ## Why this exists
