@@ -237,7 +237,18 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
     threading.Thread(target=_alert_watch, daemon=True).start()
 
     class Handler(BaseHTTPRequestHandler):
-        # Quieter than the default verbose logger.
+        # Keep the terminal clean for end users: the dashboard polls /api/report
+        # every 10s, so logging every 2xx would be an endless stream that scrolls
+        # the "Burnmeter is running: <link>" banner out of view. Log only real
+        # problems (>=400); routine successful requests stay silent.
+        def log_request(self, code="-", size="-"):
+            try:
+                c = int(code)
+            except (TypeError, ValueError):
+                c = 0
+            if c >= 400:
+                self.log_message('"%s" %s', self.requestline, str(code))
+
         def log_message(self, format, *args):
             sys.stderr.write("[burnmeter] %s - %s\n" % (
                 self.address_string(), format % args
