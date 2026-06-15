@@ -245,7 +245,20 @@ def cmd_serve(args):
           projects_dir=Path(args.projects_dir), ttl_seconds=args.ttl,
           extra_roots=extras,
           codex_dir=codex_dir,
-          codex_extra_roots=codex_extras)
+          codex_extra_roots=codex_extras,
+          open_browser=not getattr(args, "no_browser", False))
+    return 0
+
+
+def cmd_desktop(args):
+    """Create a 'Burnmeter' desktop shortcut (double-click → dashboard opens)."""
+    from . import desktop
+    try:
+        path = desktop.create_shortcut(port=args.port)
+    except Exception as e:
+        print(red(f"kısayol oluşturulamadı: {e}")); return 1
+    print(green(f"✓ Masaüstü kısayolu hazır: {path}"))
+    print(dim("  Çift tıkla → burnmeter serve çalışır, dashboard tarayıcıda açılır."))
     return 0
 
 
@@ -454,6 +467,8 @@ def main(argv=None):
     p_serve.add_argument("--host", default="127.0.0.1")
     p_serve.add_argument("--port", type=int, default=8765)
     p_serve.add_argument("--ttl", type=int, default=15)
+    p_serve.add_argument("--no-browser", action="store_true",
+                         help="dashboard'ı tarayıcıda otomatik açma")
     p_serve.add_argument("--extra-projects-dir", action="append", default=[],
                          help="ek Claude JSONL dizinleri (PC Syncthing mirror'ı vb.). "
                               "Birden çok için flag'i tekrarla.")
@@ -478,6 +493,9 @@ def main(argv=None):
     p_sync.add_argument("--passphrase", help="E2E passphrase (login; verilmezse sorulur)")
     p_sync.add_argument("--label", help="bu cihazın etiketi (login; default hostname)")
     p_sync.add_argument("--codex-dir", default=None, help="Codex sessions kökü (push)")
+
+    p_desktop = sub.add_parser("desktop", help="masaüstüne 'Burnmeter' kısayolu ekle")
+    p_desktop.add_argument("--port", type=int, default=8765)
 
     p_relay = sub.add_parser("sync-relay", help="Pro: self-host edilebilir sync relay sunucusu")
     p_relay.add_argument("--host", default="127.0.0.1")
@@ -504,6 +522,7 @@ def main(argv=None):
         "sync": cmd_sync,
         "sync-relay": cmd_sync_relay,
         "alerts": cmd_alerts,
+        "desktop": cmd_desktop,
     }
     return handlers[args.cmd](args)
 

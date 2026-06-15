@@ -63,8 +63,8 @@ the browser). Recommended: [pipx](https://pipx.pypa.io) for an isolated install.
 
 ```bash
 pipx install git+https://github.com/cihanatak/BurnMeter   # PyPI release coming → `pipx install burnmeter`
-burnmeter serve --port 9876
-# open http://127.0.0.1:9876
+burnmeter serve            # starts the dashboard and opens it in your browser
+burnmeter desktop          # optional: adds a double-click "Burnmeter" desktop shortcut
 ```
 
 Or with pip, or straight from a source checkout:

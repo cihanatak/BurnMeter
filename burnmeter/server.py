@@ -381,7 +381,8 @@ def serve(host: str = "127.0.0.1", port: int = 8765,
           ttl_seconds: int = 15,
           extra_roots: Optional[list[Path]] = None,
           codex_dir: Optional[Path] = None,
-          codex_extra_roots: Optional[list[Path]] = None) -> None:
+          codex_extra_roots: Optional[list[Path]] = None,
+          open_browser: bool = False) -> None:
     projects_dir = Path(projects_dir) if projects_dir else CLAUDE_PROJECTS_DIR
     # Claude now has a per-file cache (parser.py) → builds are fast (~5-8s warm,
     # only changed files re-read). A 30s floor keeps data fresh while staying
@@ -439,6 +440,18 @@ def serve(host: str = "127.0.0.1", port: int = 8765,
             except Exception:
                 pass
     threading.Thread(target=_warm, daemon=True).start()
+
+    # CLI UX: open the dashboard in the user's browser once the listener is up.
+    if open_browser:
+        view_host = "127.0.0.1" if host in ("0.0.0.0", "") else host
+        def _open_browser():
+            import webbrowser
+            time.sleep(1.2)
+            try:
+                webbrowser.open(f"http://{view_host}:{port}")
+            except Exception:
+                pass
+        threading.Thread(target=_open_browser, daemon=True).start()
 
     try:
         server.serve_forever()
