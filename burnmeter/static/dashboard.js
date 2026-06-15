@@ -155,9 +155,19 @@ function renderFromCache(src) {
 }
 
 // ---------- render orchestrator ----------
+// Device badge — only meaningful when the user has 2+ machines (mirror/sync). For the
+// single-machine majority it's redundant noise that mislabeled their own data (e.g. a
+// laptop's local data tagged "MAC"), so hide it. window.__multiDevice is set per render.
+function deviceBadge(dev) {
+  if (!window.__multiDevice || !dev) return "";
+  const d = String(dev).replace(/[^a-z0-9_-]/gi, "");
+  return d ? `<span class="badge ${d}">${esc(d)}</span>` : "";
+}
+
 function render(rep) {
   { const cv = $("combined-view"); if (cv) cv.style.display = "none";
     const mn = document.querySelector("main"); if (mn) mn.style.display = ""; }
+  window.__multiDevice = Object.keys(rep.by_device || {}).length > 1;
   const src = rep._meta?.source || "claude";
   const isCodex = src === "codex";
   document.documentElement.style.setProperty("--brand", isCodex ? "var(--brand-codex)" : "var(--brand-claude)");
@@ -226,7 +236,7 @@ function renderActiveModel(rep) {
     const s = m.seconds_since_last ?? 9e9, live = s < 120;
     return `<div class="am-row${i === 0 ? " am-top" : ""}" data-ls="${m.last_seen || ""}">
       <span class="am-dot${live ? " live" : ""}"></span>
-      <span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span><span class="badge ${m.device || "mac"}">${m.device || "mac"}</span></span>
+      <span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span>${deviceBadge(m.device)}</span>
       <span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/dk</span></span>
       <span class="am-msg dim">${m.messages || 0} msg</span>
       <span class="am-rate num">${fmtMoney(m.cost_per_hour || 0)}<span class="dim">/sa</span></span>
@@ -244,6 +254,7 @@ function renderCombined(cl, cx) {
   $("app-name").textContent = "Burnmeter"; $("brand-logo").textContent = "◫";
   document.title = "Burnmeter — Claude + Codex";
   $("version").textContent = "v" + (cl._meta?.version || cx._meta?.version || "?");
+  window.__multiDevice = new Set([...Object.keys(cl.by_device || {}), ...Object.keys(cx.by_device || {})]).size > 1;
   $("data-source").textContent = `Claude ${fmtInt(cl.record_count || 0)} · Codex ${fmtInt(cx.record_count || 0)} kayıt`;
   $("last-updated").textContent = "şimdi";
   const a = $("cv-claude"); if (a) a.innerHTML = halfStructure(cl, false, "claude");
@@ -286,8 +297,7 @@ function paintCombinedActive(side, rep) {
   if (w === "live") models = models.filter(m => (m.seconds_since_last ?? 9e9) < 120);
   box.innerHTML = models.length ? models.map(m => {
     const s = m.seconds_since_last ?? 9e9, live = s < 120;
-    const dev = m.device || "mac";
-    return `<div class="am-row" data-ls="${m.last_seen || ""}"><span class="am-dot${live ? " live" : ""}"></span><span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span><span class="badge ${dev}">${dev}</span></span><span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/dk</span></span><span class="am-seen${live ? " live" : ""} dim">${seenLabel(s)}</span></div>`;
+    return `<div class="am-row" data-ls="${m.last_seen || ""}"><span class="am-dot${live ? " live" : ""}"></span><span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span>${deviceBadge(m.device)}</span><span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/dk</span></span><span class="am-seen${live ? " live" : ""} dim">${seenLabel(s)}</span></div>`;
   }).join("") : `<div class="dim" style="padding:6px 0">${w === "live" ? "şu an çalışan model yok" : `son ${w}dk'da aktif model yok`}</div>`;
 }
 
@@ -835,10 +845,9 @@ function renderRecent(rep) {
   if (!turns.length) { tb.innerHTML = `<tr><td colspan="6" class="empty">Henüz aktivite yok</td></tr>`; return; }
   tb.innerHTML = turns.map(t => {
     const fam = modelToFamily(t.model);
-    const dev = t.device || "mac";
     return `<tr>
       <td>${relTime(t.timestamp)}</td>
-      <td><div>${esc(t.project_label)} <span class="badge ${dev}">${dev}</span></div></td>
+      <td><div>${esc(t.project_label)} ${deviceBadge(t.device)}</div></td>
       <td><span class="pill ${fam}">${modelDisplay(t.model)}</span></td>
       <td class="num">${fmtInt(t.effective_tokens)}</td>
       <td class="num">${fmtMoney(t.cost_usd)}</td>

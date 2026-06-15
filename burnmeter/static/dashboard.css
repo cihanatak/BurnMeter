@@ -360,6 +360,7 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
 .badge { display:inline-flex; align-items:center; gap:5px; height:20px; padding:0 8px; border-radius:var(--radius-full);
   font:600 10px/1 var(--font-sans); text-transform:uppercase; letter-spacing:.04em; }
 .badge.mac{color:#7bcbff;background:rgba(120,200,255,.16)} .badge.pc{color:#ffb464;background:rgba(255,180,100,.18)}
+.badge.linux{color:#9be29b;background:rgba(120,220,120,.16)}
 .badge.good{color:var(--good);background:var(--good-bg)} .badge.warn{color:var(--warn);background:var(--warn-bg)} .badge.bad{color:var(--bad);background:var(--bad-bg)}
 
 /* ---------- Chart wrap ---------- */

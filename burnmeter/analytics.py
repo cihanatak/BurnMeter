@@ -1800,19 +1800,21 @@ def build_report(
         return str(int(h)) if float(h).is_integer() else str(h)
     burn_hours_tuple = (0.0833, 0.25, 1, 2, 4, 6)   # 0.0833h ≈ 5dk (anlık)
     burn_cutoffs = {_hk(h): (now_utc - timedelta(hours=h), float(h)) for h in burn_hours_tuple}
+    # Build per-device totals DYNAMICALLY from the devices that actually appear in
+    # the records — NOT a hardcoded ("mac","pc"). Pre-seeding both meant a
+    # single-machine user always had two device keys (so the UI thought it was
+    # multi-device and showed a redundant badge), and any "linux" record was dropped.
     by_device_totals: dict[str, dict] = {}
-    for dev in ("mac", "pc"):
-        by_device_totals[dev] = {
-            "lifetime": Totals(),
-            "today":    Totals(),
-            "h1":       Totals(),
-            "burn_cost": {k: 0.0 for k in burn_cutoffs},
-        }
     for r in records:
-        dev = getattr(r, "device", "mac")
-        if dev not in by_device_totals:
-            continue
-        slot = by_device_totals[dev]
+        dev = getattr(r, "device", None) or "pc"
+        slot = by_device_totals.get(dev)
+        if slot is None:
+            slot = by_device_totals[dev] = {
+                "lifetime": Totals(),
+                "today":    Totals(),
+                "h1":       Totals(),
+                "burn_cost": {k: 0.0 for k in burn_cutoffs},
+            }
         slot["lifetime"].add(r)
         if r.timestamp >= today_start:
             slot["today"].add(r)
@@ -1831,8 +1833,7 @@ def build_report(
                     )
                 slot["burn_cost"][k] += cost
     # Finalize
-    for dev in ("mac", "pc"):
-        slot = by_device_totals[dev]
+    for dev, slot in list(by_device_totals.items()):
         h1_d = slot["h1"]
         burn_buckets = {k: round(slot["burn_cost"][k] / burn_cutoffs[k][1], 2)
                         for k in burn_cutoffs}

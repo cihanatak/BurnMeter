@@ -30,7 +30,7 @@ import os
 from pathlib import Path
 from typing import Iterator, Optional
 
-from .parser import UsageRecord, _parse_timestamp
+from .parser import UsageRecord, _parse_timestamp, _local_device
 
 CODEX_SESSIONS_DIR = Path.home() / ".codex" / "sessions"
 _CACHE_PATH = Path.home() / ".codex" / ".burnmeter_codex_cache.json"
@@ -254,7 +254,7 @@ def load_codex_records(
     reparsed = 0
     latest_rl_by_dev: dict[str, dict] = {}   # device → most-recent rate_limits
 
-    roots = [(root, "mac")]
+    roots = [(root, _local_device())]
     for er in (extra_roots or []):
         roots.append((er, "pc"))
 

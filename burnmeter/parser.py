@@ -27,6 +27,15 @@ from typing import Iterator, Optional
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
 
+def _local_device() -> str:
+    """Short origin label for THIS machine, used to tag usage records by device.
+    Derived from the OS so a Windows/Linux box is never mislabeled 'mac' (the old
+    hardcoded default). The dashboard only surfaces this as a badge when a user
+    actually has 2+ devices (mirror/sync)."""
+    import platform
+    return {"Darwin": "mac", "Windows": "pc", "Linux": "linux"}.get(platform.system(), "pc")
+
+
 @dataclass(slots=True)
 class UsageRecord:
     """A single normalized usage event.
@@ -500,7 +509,7 @@ def load_records(
         # device label — main root → "mac", extra_roots → "pc" (varsayım:
         # Cihan'ın senaryosu tek ek cihaz). İleride çoklu cihaz için
         # path-tail'inden infer edilebilir (örn. projects-pc → pc).
-        scan_device = "mac" if scan_root == root else "pc"
+        scan_device = _local_device() if scan_root == root else "pc"
         for path in iter_jsonl_files(scan_root):
             files += 1
             try:
