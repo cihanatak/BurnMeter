@@ -251,7 +251,9 @@ def cmd_serve(args):
                 print(green(f"✓ Added a '{path.name}' shortcut to your Desktop — double-click it any time."))
         except Exception:
             pass
-    print(f"Burnmeter → http://127.0.0.1:{args.port}  (opening in your browser…)")
+    # serve() prints the clear, clickable link with the REAL bound port (it may
+    # fall back from 8765 if that port is busy), so we only show a starting note here.
+    print("Starting Burnmeter…")
     serve(host=args.host, port=args.port,
           projects_dir=Path(args.projects_dir), ttl_seconds=args.ttl,
           extra_roots=extras,

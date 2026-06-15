@@ -418,7 +418,33 @@ def serve(host: str = "127.0.0.1", port: int = 8765,
             "The dashboard will load with empty data until Claude Code writes a session here.\n"
         )
 
-    server = ThreadingHTTPServer((host, port), make_handler(cache, codex_cache))
+    # Bind the requested port, falling back to the next free one — then an
+    # ephemeral port — if it's already taken, so a busy 8765 never crashes the
+    # user's first run. make_handler() is called once (it starts daemon threads);
+    # only the bind is retried.
+    class _Server(ThreadingHTTPServer):
+        # On Windows SO_REUSEADDR lets a second bind silently SUCCEED on a port
+        # another server already holds (port hijack) — which would make the
+        # collision fallback below never trigger and run two servers on one port.
+        # Disable address reuse on Windows so a busy port raises and we fall back;
+        # keep it on POSIX where reuse is the restart-friendly default.
+        allow_reuse_address = not sys.platform.startswith("win")
+
+    handler = make_handler(cache, codex_cache)
+    server = None
+    for cand in [port, *range(port + 1, port + 11), 0]:
+        try:
+            server = _Server((host, cand), handler)
+            break
+        except OSError:
+            continue
+    if server is None:
+        sys.stderr.write(f"[burnmeter] ERROR: could not bind any free port near {port}\n")
+        return
+    bound = server.server_address[1]
+    if bound != port:
+        sys.stderr.write(f"[burnmeter] port {port} was busy → using {bound} instead\n")
+    port = bound
     sys.stderr.write(f"[burnmeter] v{__version__} → http://{host}:{port}\n")
     sys.stderr.write(f"[burnmeter] reading (claude): {projects_dir}\n")
     sys.stderr.write(f"[burnmeter] reading (codex):  {codex_root} (exists={codex_root.exists()})\n")
@@ -442,16 +468,25 @@ def serve(host: str = "127.0.0.1", port: int = 8765,
     threading.Thread(target=_warm, daemon=True).start()
 
     # CLI UX: open the dashboard in the user's browser once the listener is up.
+    view_host = "127.0.0.1" if host in ("0.0.0.0", "") else host
+    url = f"http://{view_host}:{port}"
     if open_browser:
-        view_host = "127.0.0.1" if host in ("0.0.0.0", "") else host
         def _open_browser():
             import webbrowser
             time.sleep(1.2)
             try:
-                webbrowser.open(f"http://{view_host}:{port}")
+                webbrowser.open(url)
             except Exception:
                 pass
         threading.Thread(target=_open_browser, daemon=True).start()
+
+    # A clear, clickable link in the terminal — most terminals linkify http://… .
+    # Printed to stdout (not the [burnmeter] stderr log) so it stands out, and it
+    # always shows the REAL bound port even when 8765 was busy and we fell back.
+    opening = "  (opening in your browser…)" if open_browser else ""
+    sys.stdout.write(f"\n  ➜  Burnmeter is running:  {url}{opening}\n")
+    sys.stdout.write("     Leave this window open. Press Ctrl+C to stop.\n\n")
+    sys.stdout.flush()
 
     try:
         server.serve_forever()

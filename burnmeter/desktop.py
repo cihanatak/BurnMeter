@@ -64,7 +64,7 @@ def _win(desktop: Path, py: str, port: int) -> Path:
     ps = (
         f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{q(lnk)}');"
         f"$s.TargetPath='{q(py)}';"
-        f"$s.Arguments='-m burnmeter serve --port {port}';"
+        f"$s.Arguments='-m burnmeter serve';"
         f"$s.WorkingDirectory='{q(Path.home())}';"
         f"$s.Description='Burnmeter - AI coding usage dashboard';"
         f"$s.Save()"
@@ -79,14 +79,14 @@ def _win(desktop: Path, py: str, port: int) -> Path:
     except Exception:
         # Fallback: a .cmd batch (always works; shows a console window).
         cmd = desktop / "Burnmeter.cmd"
-        cmd.write_text(f'@echo off\r\n"{py}" -m burnmeter serve --port {port}\r\n',
+        cmd.write_text(f'@echo off\r\n"{py}" -m burnmeter serve\r\n',
                        encoding="utf-8")
         return cmd
 
 
 def _mac(desktop: Path, py: str, port: int) -> Path:
     f = desktop / "Burnmeter.command"
-    f.write_text(f'#!/bin/bash\nexec "{py}" -m burnmeter serve --port {port}\n',
+    f.write_text(f'#!/bin/bash\nexec "{py}" -m burnmeter serve\n',
                  encoding="utf-8")
     f.chmod(0o755)
     return f
@@ -99,7 +99,7 @@ def _linux(desktop: Path, py: str, port: int) -> Path:
         "Type=Application\n"
         "Name=Burnmeter\n"
         "Comment=AI coding usage dashboard\n"
-        f"Exec={py} -m burnmeter serve --port {port}\n"
+        f"Exec={py} -m burnmeter serve\n"
         "Terminal=true\n"
         "Categories=Development;Utility;\n",
         encoding="utf-8",
