@@ -37,6 +37,9 @@ a{color:var(--accent);text-decoration:none} a:hover{color:#6E79E0}
 .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:10px;font-weight:600;font-size:15px;cursor:pointer;transition:.15s}
 .btn-primary{background:var(--accent);color:#fff;border:1px solid var(--accent)} .btn-primary:hover{background:#6E79E0}
 .btn-ghost{background:transparent;color:var(--t1);border:1px solid var(--b2)} .btn-ghost:hover{border-color:var(--b3);background:var(--raised)}
+.btn.is-soon{opacity:.5;cursor:not-allowed;pointer-events:none}
+.install.is-soon{opacity:.65}
+.foot-soon{color:var(--t4);cursor:not-allowed;display:inline-flex;align-items:center;gap:6px}
 
 /* nav */
 nav{position:sticky;top:0;z-index:10;background:rgba(8,9,10,.85);backdrop-filter:blur(14px);border-bottom:1px solid var(--b1)}
@@ -166,7 +169,7 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
   <div class="nav-links">
     <a href="#features">Features</a><a href="#how">How</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a>
     <a id="nav-dashboard" href="/" style="display:none">Dashboard</a>
-    <a href="https://github.com/cihanatak/BurnMeter" target="_blank" rel="noopener" class="btn btn-ghost" style="padding:10px 18px;font-size:15px">GitHub</a>
+    <span class="btn btn-ghost is-soon" style="padding:10px 18px;font-size:15px" title="Open-sourcing soon" aria-disabled="true">GitHub <span class="badge-soon">soon</span></span>
   </div>
 </div></nav>
 
@@ -176,14 +179,14 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
   <p class="sub">See exactly where your tokens go — cost, burn-rate, and how close you
     are to your plan's rate limit. No API keys. No cloud. Your data never leaves your machine.</p>
   <div class="cta">
-    <a href="https://github.com/cihanatak/BurnMeter" target="_blank" rel="noopener" class="btn btn-primary">★ Star on GitHub</a>
-    <a href="#how" class="btn btn-ghost">How it works</a>
+    <a href="#how" class="btn btn-primary">How it works</a>
+    <span class="btn btn-ghost is-soon" title="Open-sourcing soon" aria-disabled="true">★ Star on GitHub <span class="badge-soon">soon</span></span>
   </div>
-  <div class="install">
+  <div class="install is-soon" title="Public release coming soon">
     <code id="install-cmd">pip install burnmeter &amp;&amp; burnmeter serve</code>
-    <button class="cp" id="install-copy" type="button" aria-label="copy install command">Copy</button>
+    <span class="cp" aria-disabled="true">soon</span>
   </div>
-  <div class="cta-note">Python 3.10+ · opens at <code>localhost:9876</code> · no sign-up, no API key</div>
+  <div class="cta-note">Public release coming soon · Python 3.10+ · opens at <code>localhost:9876</code> · no sign-up, no API key</div>
 
   <div class="trust">
     <span><b>AGPL-3.0</b> open source</span>
@@ -314,9 +317,9 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
       <div class="foot-col"><h5>Product</h5>
         <a href="#features">Features</a><a href="#how">How it works</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a></div>
       <div class="foot-col"><h5>Project</h5>
-        <a href="https://github.com/cihanatak/BurnMeter" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://github.com/cihanatak/BurnMeter#readme" target="_blank" rel="noopener">Docs</a>
-        <a href="https://github.com/cihanatak/BurnMeter/blob/main/LICENSE" target="_blank" rel="noopener">License</a></div>
+        <span class="foot-soon">GitHub <span class="badge-soon">soon</span></span>
+        <span class="foot-soon">Docs <span class="badge-soon">soon</span></span>
+        <span class="foot-soon">License · AGPL-3.0</span></div>
       <div class="foot-col"><h5>Get started</h5>
         <a href="#how">Install</a><a id="foot-dashboard" href="/" style="display:none">Dashboard</a></div>
     </div>
