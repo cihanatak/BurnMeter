@@ -1116,6 +1116,9 @@ function start() {
   initModularGrid();
   const rl = $("reset-layout");
   if (rl) rl.addEventListener("click", () => { localStorage.removeItem("burnmeter_layout_v2"); location.reload(); });
+  // First paint is cold until the local logs are parsed — on large histories that
+  // first read can take a few seconds. Say so instead of showing a blank "…" gauge.
+  $("last-updated").textContent = "Burnmeter loglarını okuyor — ilk açılış birkaç saniye sürebilir…";
   refresh(false);
   setInterval(() => refresh(false), 10000);
   setInterval(updateLiveStamp, 1000);
