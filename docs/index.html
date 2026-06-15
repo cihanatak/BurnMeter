@@ -63,11 +63,14 @@ h1{font-size:52px;line-height:1.08;letter-spacing:-.025em;color:var(--t1);font-w
 .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:18px}
 
 /* install command box (hero) */
-.install{display:flex;align-items:stretch;max-width:430px;margin:0 auto;background:var(--inset);border:1px solid var(--b2);border-radius:11px;overflow:hidden}
-.install code{flex:1;padding:13px 16px;font-family:var(--mono);font-size:13.5px;color:var(--t2);text-align:left;white-space:nowrap;overflow:auto}
-.install .cp{border:0;border-left:1px solid var(--b1);background:var(--raised);color:var(--t3);padding:0 16px;cursor:pointer;font-family:var(--sans);font-size:12px;font-weight:600;letter-spacing:.02em;transition:.15s}
+.install{display:flex;align-items:stretch;max-width:560px;margin:0 auto;background:var(--inset);border:1px solid var(--b2);border-radius:12px;overflow:hidden;text-align:left}
+.install .install-lines{flex:1;min-width:0;padding:7px 0}
+.install .cmd{display:block;padding:9px 18px;font-family:var(--mono);font-size:16px;line-height:1.5;color:var(--t1);white-space:nowrap;overflow:auto}
+.install .cmd .pr{color:var(--t4);user-select:none;-webkit-user-select:none}
+.install .cp{border:0;border-left:1px solid var(--b1);background:var(--raised);color:var(--t3);padding:0 18px;cursor:pointer;font-family:var(--sans);font-size:13px;font-weight:600;letter-spacing:.02em;transition:.15s}
 .install .cp:hover{color:var(--t1);background:var(--surface)}
 .install .cp.ok{color:var(--good)}
+@media(max-width:560px){.install .cmd{font-size:13.5px;padding:8px 14px}}
 .cta-note{font-size:12.5px;color:var(--t4);margin-top:14px}
 .cta-note code{font-family:var(--mono);color:var(--t3)}
 
@@ -183,10 +186,13 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
     <a href="#how" class="btn btn-ghost">How it works</a>
   </div>
   <div class="install">
-    <code id="install-cmd">pip install git+https://github.com/cihanatak/BurnMeter</code>
-    <button class="cp" id="install-copy" type="button" aria-label="copy install command">Copy</button>
+    <div class="install-lines">
+      <code class="cmd"><span class="pr" aria-hidden="true">$ </span><span id="install-cmd">pip install git+https://github.com/cihanatak/BurnMeter</span></code>
+      <code class="cmd"><span class="pr" aria-hidden="true">$ </span>burnmeter serve</code>
+    </div>
+    <button class="cp" id="install-copy" type="button" aria-label="copy both commands">Copy</button>
   </div>
-  <div class="cta-note">Python 3.10+ · run <code>burnmeter serve</code> and the dashboard opens in your browser automatically · no sign-up, no API key, nothing leaves your machine</div>
+  <div class="cta-note">Python 3.10+ · just these two commands → the dashboard opens in your browser automatically · no sign-up, no API key, nothing leaves your machine</div>
 
   <div class="trust">
     <span><b>AGPL-3.0</b> open source</span>
@@ -347,7 +353,10 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
     // copy the install command
     var btn = document.getElementById('install-copy');
     if (btn) btn.addEventListener('click', function () {
-      var cmd = (document.getElementById('install-cmd') || {}).textContent || '';
+      var lines = document.querySelectorAll('.install .cmd');
+      var cmd = Array.prototype.map.call(lines, function (el) {
+        return el.textContent.replace(/^\s*\$\s*/, '');
+      }).join('\n');
       if (navigator.clipboard) navigator.clipboard.writeText(cmd).then(function () {
         btn.textContent = 'Copied'; btn.classList.add('ok');
         setTimeout(function () { btn.textContent = 'Copy'; btn.classList.remove('ok'); }, 1600);
