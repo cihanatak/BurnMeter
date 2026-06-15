@@ -22,3 +22,10 @@ Thumbs.db
 # Logs / scratch
 *.log
 /tmp/
+
+# Internal agent-handoff + tooling — machine-local, NEVER public
+AGENTS.md
+CLAUDE.md
+COMPANY_OS_BOOTSTRAP.md
+.claude/
+.playwright-mcp/

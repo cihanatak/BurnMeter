@@ -26,5 +26,5 @@
   `UsageRecord` uses `__slots__`.
 
 ### Notes
-- Rebranding in progress (see NAMING.md) — "burnmeter" is a working title.
+- Rebranded ccmeter → **Burnmeter** — vendor-neutral (tracks Claude Code + OpenAI Codex, more agents planned). See NAMING.md.
 - Costs are client-side estimates; for billing see your provider's console.
