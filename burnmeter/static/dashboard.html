@@ -1,8 +1,8 @@
 <!doctype html>
-<html lang="tr">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Burnmeter — AI coding yakıt metresi</title>
+  <title>Burnmeter — AI coding fuel gauge</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack.min.css" />
   <link rel="stylesheet" href="/static/dashboard.css?v=20260531z" />
@@ -26,24 +26,24 @@
   <div class="header-meta">
     <span class="meta-txt" id="data-source">…</span>
     <span class="meta-txt" id="last-updated">…</span>
-    <span class="live-dot live" id="live-dot" title="canlı"></span>
-    <a id="home-link" href="/landing" title="Ana sayfa — tanıtım / landing sayfası">Ana sayfa</a>
-    <a id="pro-link" href="/pricing" title="Pro / Fiyatlar — cihazlar arası sync, akıllı uyarılar, ekip">✦ Pro</a>
-    <button id="export-csv" title="kayıtları CSV indir">⬇</button>
-    <button id="alert-toggle" title="limit uyarıları kapalı (tıkla)">🔔</button>
-    <button id="reset-layout" title="kart düzenini varsayılana döndür">⤢ Düzeni sıfırla</button>
-    <button id="refresh" title="şimdi yenile">↻</button>
+    <span class="live-dot live" id="live-dot" title="live"></span>
+    <a id="home-link" href="/landing" title="Home — intro / landing page">Home</a>
+    <a id="pro-link" href="/pricing" title="Pro / Pricing — cross-device sync, smart alerts, team">✦ Pro</a>
+    <button id="export-csv" title="download records as CSV">⬇</button>
+    <button id="alert-toggle" title="limit alerts off (click)">🔔</button>
+    <button id="reset-layout" title="restore card layout to default">⤢ Reset layout</button>
+    <button id="refresh" title="refresh now">↻</button>
   </div>
 </header>
 
 <main>
 
-  <!-- ROW 1 — HERO: burn-rate SPEEDOMETER (araba göstergesi) + binding-constraint aside -->
+  <!-- ROW 1 — HERO: burn-rate SPEEDOMETER (car gauge) + binding-constraint aside -->
   <section class="card card-hero col-8" data-card="hero">
     <div class="card-title">
-      Burn rate · çok mu yakıyorsun?
+      Burn rate · burning too fast?
       <span class="picker" id="burn-window-picker">
-        <button data-h="0.0833">5dk</button><button data-h="0.25">15dk</button><button data-h="1">1h</button>
+        <button data-h="0.0833">5m</button><button data-h="0.25">15m</button><button data-h="1">1h</button>
         <button data-h="2" class="active">2h</button><button data-h="4">4h</button><button data-h="6">6h</button>
       </span>
     </div>
@@ -57,7 +57,7 @@
     </div>
   </section>
   <section class="card col-4" data-card="hero-aside">
-    <div class="card-title" id="aside-title">Şu an <span class="sub" id="aside-sub"></span></div>
+    <div class="card-title" id="aside-title">Now <span class="sub" id="aside-sub"></span></div>
     <div id="hero-aside-body"></div>
   </section>
 
@@ -67,48 +67,48 @@
   <section class="card col-3" data-card="kpi"><div class="kpi-label" id="kpi3-l">…</div><div class="kpi-value" id="kpi3-v">—</div><div class="kpi-sub" id="kpi3-s"></div><div class="kpi-spark"><canvas id="kpi3-spark"></canvas></div></section>
   <section class="card col-3" data-card="kpi"><div class="kpi-label" id="kpi4-l">…</div><div class="kpi-value" id="kpi4-v">—</div><div class="kpi-sub" id="kpi4-s"></div><div class="kpi-spark"><canvas id="kpi4-spark"></canvas></div></section>
 
-  <!-- ROW 3 — CANLI ŞİMDİ (önem: en taze): şu an çalışan model + son aktivite -->
+  <!-- ROW 3 — LIVE NOW (most fresh): currently running model + recent activity -->
   <section class="card col-5" data-card="active-model">
-    <div class="card-title">Canlı aktif model <span class="sub">şu an çalışan</span>
+    <div class="card-title">Live active model <span class="sub">running now</span>
       <span class="picker" id="active-window-picker">
-        <button data-w="live" class="active">● Canlı</button><button data-w="1">1dk</button><button data-w="5">5dk</button><button data-w="15">15dk</button>
+        <button data-w="live" class="active">● Live</button><button data-w="1">1m</button><button data-w="5">5m</button><button data-w="15">15m</button>
       </span>
     </div>
     <div id="active-model-body"></div>
   </section>
   <section class="card col-7" data-card="recent">
-    <div class="card-title">Son aktivite · her satır 1 turn <span class="sub" id="recent-sub">maliyet ağırlıklı eşdeğer token</span></div>
+    <div class="card-title">Recent activity · one row per turn <span class="sub" id="recent-sub">cost-weighted equivalent tokens</span></div>
     <div class="scroll"><table class="tbl" id="recent-tbl">
-      <thead><tr><th>ne zaman</th><th>proje</th><th>model</th><th class="num">token</th><th class="num">$ (tahmin)</th><th class="num">cache</th></tr></thead>
+      <thead><tr><th>when</th><th>project</th><th>model</th><th class="num">token</th><th class="num">$ (est.)</th><th class="num">cache</th></tr></thead>
       <tbody></tbody></table></div>
   </section>
 
-  <!-- ROW — aylık BÜTÇE takibi (#7): bu ay harcanan vs senin belirlediğin $ limit -->
+  <!-- ROW — monthly BUDGET tracking (#7): spent this month vs your set $ limit -->
   <section class="card col-12" data-card="budget">
-    <div class="card-title">Aylık bütçe <span class="sub">bu ay vs belirlediğin $ limit · ay sonu projeksiyonu · $ tahmindir</span></div>
+    <div class="card-title">Monthly budget <span class="sub">this month vs your set $ limit · end-of-month projection · $ is an estimate</span></div>
     <div id="budget-body"></div>
   </section>
 
-  <!-- ROW — Pro cross-device sync: senkron cihazların özetleri (E2E şifreli) -->
+  <!-- ROW — Pro cross-device sync: summaries of synced devices (E2E encrypted) -->
   <section class="card col-12" data-card="sync-devices">
-    <div class="card-title">Cihazlar <span class="sub">Pro sync · E2E şifreli · relay yalnızca ciphertext görür</span></div>
+    <div class="card-title">Devices <span class="sub">Pro sync · E2E encrypted · relay only sees ciphertext</span></div>
     <div id="sync-devices-body"></div>
   </section>
 
   <!-- ROW 4 — verimlilik (sen vs tipik) + cache efficiency -->
   <section class="card col-8" data-card="eff">
-    <div class="card-title">Verimlilik · birim ekonomisi <span class="sub">sen vs tipik — token harcaman verimli mi?</span></div>
+    <div class="card-title">Efficiency · unit economics <span class="sub">you vs typical — is your token spend efficient?</span></div>
     <div id="eff-body"></div>
   </section>
   <section class="card col-4" data-card="cache">
-    <div class="card-title">Cache verimliliği <span class="sub">lifetime</span></div>
+    <div class="card-title">Cache efficiency <span class="sub">lifetime</span></div>
     <div id="cache-body"></div>
   </section>
 
   <!-- ROW 4 — usage over time (wide) + model split (donut) -->
   <section class="card col-8" data-card="trend">
     <div class="card-title">
-      Burn rate trendi · <span class="sub" id="trend-unit">$/saat</span>
+      Burn rate trend · <span class="sub" id="trend-unit">$/hr</span>
       <span class="picker" id="trend-picker">
         <button data-tf="1">1h</button><button data-tf="4">4h</button>
         <button data-tf="6">6h</button><button data-tf="12">12h</button>
@@ -121,39 +121,39 @@
       <button class="indicator-btn ma-25"  data-ma="25">25</button>
       <button class="indicator-btn ma-50"  data-ma="50">50</button>
       <button class="indicator-btn ma-100" data-ma="100">100</button>
-      <span class="dim" style="font-size:10px;margin-left:auto">son N bar hareketli ort.</span>
+      <span class="dim" style="font-size:10px;margin-left:auto">moving avg of last N bars</span>
     </div>
     <div class="chart-wrap tall"><canvas id="chart-trend"></canvas></div>
   </section>
   <section class="card col-4" data-card="models">
-    <div class="card-title">Model dağılımı <span class="sub">lifetime $ (tahmini)</span></div>
+    <div class="card-title">Model split <span class="sub">lifetime $ (est.)</span></div>
     <div class="donut-wrap"><canvas id="chart-models"></canvas>
-      <div class="donut-center"><div class="v" id="models-total">—</div><div class="l">toplam</div></div>
+      <div class="donut-center"><div class="v" id="models-total">—</div><div class="l">total</div></div>
     </div>
     <div id="models-legend" style="margin-top:12px"></div>
   </section>
 
   <!-- daily spend (wide) + per-project (side) -->
   <section class="card col-7" data-card="daily">
-    <div class="card-title">Son 30 gün · günlük $ (tahmini) <span class="sub" id="daily-sub"></span></div>
+    <div class="card-title">Last 30 days · daily $ (est.) <span class="sub" id="daily-sub"></span></div>
     <div class="chart-wrap"><canvas id="chart-daily"></canvas></div>
   </section>
   <section class="card col-5" data-card="projects">
-    <div class="card-title">Projeler · lifetime <span class="sub">hangi repo quota yiyor</span></div>
+    <div class="card-title">Projects · lifetime <span class="sub">which repo eats quota</span></div>
     <div class="scroll"><table class="tbl" id="projects-tbl">
-      <thead><tr><th>proje</th><th class="num">token</th><th class="num">$ (tahmini)</th></tr></thead>
+      <thead><tr><th>project</th><th class="num">token</th><th class="num">$ (est.)</th></tr></thead>
       <tbody></tbody></table></div>
   </section>
 
-  <!-- usage HEATMAP — saat × gün aktivite (yerel saat) -->
+  <!-- usage HEATMAP — hour × day activity (local time) -->
   <section class="card col-12" data-card="heatmap">
-    <div class="card-title">Aktivite ısı haritası <span class="sub">saat × gün · yerel saat · token yoğunluğu</span></div>
+    <div class="card-title">Activity heatmap <span class="sub">hour × day · local time · token density</span></div>
     <div id="heatmap-body"></div>
   </section>
 
-  <!-- per-model table (lifetime) + davranış + tool -->
+  <!-- per-model table (lifetime) + behavior + tool -->
   <section class="card col-6" data-card="model-table">
-    <div class="card-title">Modeller · lifetime <span class="sub">gerçek per-model fiyat</span></div>
+    <div class="card-title">Models · lifetime <span class="sub">real per-model pricing</span></div>
     <div class="scroll"><table class="tbl" id="modeltbl">
       <thead><tr><th>model</th><th class="num">turn</th><th class="num">token</th><th class="num">$</th></tr></thead>
       <tbody></tbody></table></div>
@@ -161,24 +161,24 @@
 
   <!-- ROW 7 — behavior (errors) + tool usage -->
   <section class="card col-6" data-card="behavior">
-    <div class="card-title">Davranış · son 24h hata <span class="sub" id="behavior-sub"></span></div>
+    <div class="card-title">Behavior · errors last 24h <span class="sub" id="behavior-sub"></span></div>
     <div id="behavior-body"></div>
   </section>
   <section class="card col-6" data-card="tools">
-    <div class="card-title">Tool kullanımı · lifetime <span class="sub" id="tools-sub"></span></div>
+    <div class="card-title">Tool usage · lifetime <span class="sub" id="tools-sub"></span></div>
     <div id="tools-body"></div>
   </section>
 
 </main>
 
-<!-- COMBINED "her ikisi" — Claude | Codex yan yana, ortadan bölünmüş (JS display:flex) -->
+<!-- COMBINED "both" — Claude | Codex side by side, split down the middle (JS display:flex) -->
 <section id="combined-view" class="combined-view">
   <div class="cv-half" id="cv-claude"></div>
   <div class="cv-half" id="cv-codex"></div>
 </section>
 
 <footer style="max-width:var(--maxw);margin:0 auto;padding:8px var(--page-pad) 32px;color:var(--text-4);font-size:11px;font-family:var(--font-mono);">
-  <span id="footer-text">lokal · ~/.claude/projects + ~/.codex/sessions okur · $ tahmindir</span>
+  <span id="footer-text">local · reads ~/.claude/projects + ~/.codex/sessions · $ is an estimate</span>
 </footer>
 
 </body>

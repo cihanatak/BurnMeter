@@ -37,19 +37,19 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<"
 function relTime(iso) {
   if (!iso) return "—";
   const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (diff < 0) return "az sonra";
-  if (diff < 60) return diff + "sn önce";
-  if (diff < 3600) return Math.floor(diff / 60) + "dk önce";
-  if (diff < 86400) return Math.floor(diff / 3600) + "sa önce";
+  if (diff < 0) return "in a moment";
+  if (diff < 60) return diff + "s ago";
+  if (diff < 3600) return Math.floor(diff / 60) + "m ago";
+  if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
   const d = Math.floor(diff / 86400);
-  if (d < 7) return d + "g önce";
+  if (d < 7) return d + "d ago";
   return new Date(iso).toISOString().slice(0, 10);
 }
 function resetIn(epochSec) {
   if (!epochSec) return "";
   const rem = Math.max(0, epochSec - Date.now() / 1000);
   const h = Math.floor(rem / 3600), m = Math.floor((rem % 3600) / 60);
-  return h >= 1 ? `${h}sa ${m}dk` : `${m}dk`;
+  return h >= 1 ? `${h}h ${m}m` : `${m}m`;
 }
 function modelToFamily(m) {
   m = (m || "").toLowerCase();
@@ -126,7 +126,7 @@ async function refresh(force = false) {
     window.__lastRefreshMs = Date.now();
   } catch (e) {
     console.error(e);
-    $("last-updated").textContent = "yüklenemedi: " + e.message;
+    $("last-updated").textContent = "failed to load: " + e.message;
   } finally {
     window.__refreshInFlight = false;
   }
@@ -174,9 +174,9 @@ function render(rep) {
   document.documentElement.style.setProperty("--brand-soft", isCodex ? "var(--brand-codex-soft)" : "var(--brand-claude-soft)");
   $("app-name").textContent = "Burnmeter";
   $("brand-logo").textContent = isCodex ? "⌬" : "◔";
-  document.title = "Burnmeter — AI coding yakıt metresi";
+  document.title = "Burnmeter — AI coding fuel gauge";
   $("version").textContent = "v" + (rep._meta?.version || "?");
-  $("data-source").textContent = `${rep._meta?.files_scanned ?? "?"} dosya · ${fmtInt(rep.record_count || 0)} kayıt`;
+  $("data-source").textContent = `${rep._meta?.files_scanned ?? "?"} files · ${fmtInt(rep.record_count || 0)} records`;
 
   renderSpeedometer(rep, isCodex);
   renderHeroAside(rep, isCodex);
@@ -204,8 +204,8 @@ function render(rep) {
 // messages, cost_per_hour, seconds_since_last (canlı mı). En yakın = "şu an çalışan".
 // "ne zaman görüldü" etiketi — canlıysa yeşil nabız + şimdi (tickLive saniyede bir günceller)
 function seenLabel(s) {
-  return s < 120 ? `<span class="lp"></span>şimdi`
-    : s < 3600 ? `${Math.round(s / 60)}dk önce` : `${(s / 3600).toFixed(1)}sa önce`;
+  return s < 120 ? `<span class="lp"></span>now`
+    : s < 3600 ? `${Math.round(s / 60)}m ago` : `${(s / 3600).toFixed(1)}h ago`;
 }
 // SANİYELİK canlılık tiki: tüm am-row'lardaki (tek + İkisi) "şimdi"/dot durumunu
 // last_seen'den client-side yeniden hesaplar — backend refresh'ini beklemez.
@@ -228,7 +228,7 @@ function renderActiveModel(rep) {
   let models = (lam.models || []).filter(m => !String(m.model_id).startsWith("<"));
   if (w === "live") models = models.filter(m => (m.seconds_since_last ?? 9e9) < 120);
   if (!models.length) {
-    body.innerHTML = `<div class="dim" style="padding:16px 2px">${w === "live" ? "Şu an çalışan model yok." : `Son ${w}dk'da aktif model yok.`}</div>`;
+    body.innerHTML = `<div class="dim" style="padding:16px 2px">${w === "live" ? "No model running now." : `No active model in the last ${w}m.`}</div>`;
     return;
   }
   models = models.slice().sort((a, b) => (a.seconds_since_last ?? 9e9) - (b.seconds_since_last ?? 9e9));
@@ -237,9 +237,9 @@ function renderActiveModel(rep) {
     return `<div class="am-row${i === 0 ? " am-top" : ""}" data-ls="${m.last_seen || ""}">
       <span class="am-dot${live ? " live" : ""}"></span>
       <span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span>${deviceBadge(m.device)}</span>
-      <span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/dk</span></span>
+      <span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/min</span></span>
       <span class="am-msg dim">${m.messages || 0} msg</span>
-      <span class="am-rate num">${fmtMoney(m.cost_per_hour || 0)}<span class="dim">/sa</span></span>
+      <span class="am-rate num">${fmtMoney(m.cost_per_hour || 0)}<span class="dim">/hr</span></span>
       <span class="am-seen${live ? " live" : ""} dim">${seenLabel(s)}</span>
     </div>`;
   }).join("");
@@ -255,8 +255,8 @@ function renderCombined(cl, cx) {
   document.title = "Burnmeter — Claude + Codex";
   $("version").textContent = "v" + (cl._meta?.version || cx._meta?.version || "?");
   window.__multiDevice = new Set([...Object.keys(cl.by_device || {}), ...Object.keys(cx.by_device || {})]).size > 1;
-  $("data-source").textContent = `Claude ${fmtInt(cl.record_count || 0)} · Codex ${fmtInt(cx.record_count || 0)} kayıt`;
-  $("last-updated").textContent = "şimdi";
+  $("data-source").textContent = `Claude ${fmtInt(cl.record_count || 0)} · Codex ${fmtInt(cx.record_count || 0)} records`;
+  $("last-updated").textContent = "now";
   const a = $("cv-claude"); if (a) a.innerHTML = halfStructure(cl, false, "claude");
   const b = $("cv-codex");  if (b) b.innerHTML = halfStructure(cx, true, "codex");
   paintCombinedSide("claude", cl, false);
@@ -297,8 +297,8 @@ function paintCombinedActive(side, rep) {
   if (w === "live") models = models.filter(m => (m.seconds_since_last ?? 9e9) < 120);
   box.innerHTML = models.length ? models.map(m => {
     const s = m.seconds_since_last ?? 9e9, live = s < 120;
-    return `<div class="am-row" data-ls="${m.last_seen || ""}"><span class="am-dot${live ? " live" : ""}"></span><span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span>${deviceBadge(m.device)}</span><span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/dk</span></span><span class="am-seen${live ? " live" : ""} dim">${seenLabel(s)}</span></div>`;
-  }).join("") : `<div class="dim" style="padding:6px 0">${w === "live" ? "şu an çalışan model yok" : `son ${w}dk'da aktif model yok`}</div>`;
+    return `<div class="am-row" data-ls="${m.last_seen || ""}"><span class="am-dot${live ? " live" : ""}"></span><span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span>${deviceBadge(m.device)}</span><span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/min</span></span><span class="am-seen${live ? " live" : ""} dim">${seenLabel(s)}</span></div>`;
+  }).join("") : `<div class="dim" style="padding:6px 0">${w === "live" ? "no model running now" : `no active model in the last ${w}m`}</div>`;
 }
 
 // ===== gauge TEK KAYNAK (single tab renderSpeedometer + İkisi paintBurnGauge ortak) =====
@@ -315,17 +315,17 @@ function computeGaugeSpec(rep, isCodex, hoursStr) {
   const g = {
     value: rate, max: z.max || 50, zones: z,
     ticks: zd
-      ? [{ v: 0, l: "$0" }, { v: z.typical, l: "tipik (varsayılan)" }, { v: z.busy, l: "yoğun (varsayılan)" }, { v: z.heavy, l: "ağır" }]
-      : [{ v: 0, l: "$0" }, { v: z.typical, l: "senin tipik" }, { v: z.busy, l: "senin yoğun (P90)" }, { v: z.heavy, l: "çok yoğun" }],
+      ? [{ v: 0, l: "$0" }, { v: z.typical, l: "typical (default)" }, { v: z.busy, l: "busy (default)" }, { v: z.heavy, l: "heavy" }]
+      : [{ v: 0, l: "$0" }, { v: z.typical, l: "your typical" }, { v: z.busy, l: "your heavy (P90)" }, { v: z.heavy, l: "very heavy" }],
     valueText: fmtMoney(rate),
-    unitText: `/saat · son ${hoursStr === "0.0833" ? "5dk" : hoursStr === "0.25" ? "15dk" : hoursStr + "h"} ort.${isCodex ? " (notional)" : " (tahmini $)"}`,
-    zone: rate >= z.heavy ? ["bad", "🔴 ağır bölge · çok yoğun yakıyorsun"]
-        : rate >= z.busy ? ["warn", "🟠 yoğun bölge"]
-        : rate >= z.typical ? ["warn", "🟡 normal üstü"]
-        :                  ["good", "🟢 sakin · verimli"],
+    unitText: `/hr · last ${hoursStr === "0.0833" ? "5m" : hoursStr === "0.25" ? "15m" : hoursStr + "h"} avg${isCodex ? " (notional)" : " (est. $)"}`,
+    zone: rate >= z.heavy ? ["bad", "🔴 heavy zone · burning very hot"]
+        : rate >= z.busy ? ["warn", "🟠 busy zone"]
+        : rate >= z.typical ? ["warn", "🟡 above normal"]
+        :                  ["good", "🟢 calm · efficient"],
     ratio: rep.current_window?.vs_baseline_ratio, below: rate < z.typical,
-    note: zd ? "Eşikler varsayılan — henüz kişisel hız geçmişin yok."
-             : "Eşikler senin geçmiş 5s pencerelerinden (P50/P90).",
+    note: zd ? "Thresholds are defaults — no personal pace history yet."
+             : "Thresholds from your past 5s windows (P50/P90).",
   };
   return { g, rate, fc, isLimit: false };
 }
@@ -360,42 +360,42 @@ function paintBurnGauge(els, rep, isCodex, hoursStr) {
   if (!els.svg) return;
   const { g, fc, isLimit } = computeGaugeSpec(rep, isCodex, hoursStr);
   drawGaugeSvg(els.svg, g);
-  if (els.title) els.title.textContent = isLimit ? "Limit · duvara ne kadar var?" : "Burn rate · çok mu yakıyorsun?";
+  if (els.title) els.title.textContent = isLimit ? "Limit · how far to the wall?" : "Burn rate · burning too fast?";
   if (els.zone) {
     els.zone.className = "cv-zone2 " + g.zone[0];
     let txt = g.zone[1];
-    if (g.ratio != null && g.ratio > 0) txt += ` · normalinin ${g.ratio.toFixed(1)}x`;
-    else if (g.below) txt += " · normalin altında";
+    if (g.ratio != null && g.ratio > 0) txt += ` · ${g.ratio.toFixed(1)}× normal`;
+    else if (g.below) txt += " · below normal";
     els.zone.textContent = txt;
   }
   if (els.breakdown) {
     const bd = (fc.burn_rates_by_hours_by_model || {})[hoursStr] || [];
     const vis = bd.filter(m => !String(m.model_id).startsWith("<")).slice(0, 4);
     els.breakdown.innerHTML = vis.length ? vis.map(m =>
-      `<span class="sb-row ${modelToFamily(m.model_id)}"><span class="sb-name">${esc(modelDisplay(m.model_id))}</span><span class="sb-val">${fmtMoney(m.cost_per_hour)}/sa</span><span class="sb-share">%${(m.share * 100).toFixed(0)}</span></span>`).join("") : "";
+      `<span class="sb-row ${modelToFamily(m.model_id)}"><span class="sb-name">${esc(modelDisplay(m.model_id))}</span><span class="sb-val">${fmtMoney(m.cost_per_hour)}/hr</span><span class="sb-share">${(m.share * 100).toFixed(0)}%</span></span>`).join("") : "";
   }
 }
 
 // bir yarının iskeleti: head + GERÇEK speedometer (svg + window picker) + canlı model + son işler
 function halfStructure(rep, isCodex, side) {
   const h = localStorage.getItem("burnmeter_burn_hours_" + side) || "2";
-  const picker = [["0.0833", "5dk"], ["0.25", "15dk"], ["1", "1h"], ["2", "2h"], ["4", "4h"], ["6", "6h"]]
+  const picker = [["0.0833", "5m"], ["0.25", "15m"], ["1", "1h"], ["2", "2h"], ["4", "4h"], ["6", "6h"]]
     .map(([v, l]) => `<button data-h="${v}"${v === h ? ' class="active"' : ""}>${l}</button>`).join("");
-  const ago = (iso) => { const s = (Date.now() - new Date(iso).getTime()) / 1000; return s < 60 ? "şimdi" : s < 3600 ? Math.round(s / 60) + "dk" : s < 86400 ? Math.round(s / 3600) + "sa" : Math.round(s / 86400) + "g"; };
+  const ago = (iso) => { const s = (Date.now() - new Date(iso).getTime()) / 1000; return s < 60 ? "now" : s < 3600 ? Math.round(s / 60) + "m" : s < 86400 ? Math.round(s / 3600) + "h" : Math.round(s / 86400) + "d"; };
   let aw = localStorage.getItem("burnmeter_active_window3_" + side) || "live"; if (!["live", "1", "5", "15"].includes(aw)) aw = "live";
-  const amPicker = [["live", "● Canlı"], ["1", "1dk"], ["5", "5dk"], ["15", "15dk"]]
+  const amPicker = [["live", "● Live"], ["1", "1m"], ["5", "5m"], ["15", "15m"]]
     .map(([v, l]) => `<button data-w="${v}"${v === aw ? ' class="active"' : ""}>${l}</button>`).join("");
   const recent = (rep.recent_turns || []).filter(t => !String(t.model || "").startsWith("<")).slice(0, 6);
-  const recRows = recent.length ? recent.map(t => `<div class="cvr-row"><span class="cvr-when dim">${ago(t.timestamp)}</span><span class="cvr-proj"><span class="cvr-projname">${esc(t.project_label || "?")}</span><span class="badge ${t.device || "mac"}">${t.device || "mac"}</span></span><span class="cvr-model ${modelToFamily(t.model)}">${esc(modelDisplay(t.model))}</span><span class="cvr-tok num">${fmtInt(t.total_tokens || 0)}</span></div>`).join("") : `<div class="dim" style="padding:6px 0">aktivite yok</div>`;
-  return `<div class="cv-head"><span class="cv-logo">${isCodex ? "⌬" : "◔"}</span><span class="cv-title">${isCodex ? "Codex" : "Claude Code"}</span><span class="cv-sub dim">${fmtInt(rep.record_count || 0)} kayıt</span></div>
+  const recRows = recent.length ? recent.map(t => `<div class="cvr-row"><span class="cvr-when dim">${ago(t.timestamp)}</span><span class="cvr-proj"><span class="cvr-projname">${esc(t.project_label || "?")}</span>${deviceBadge(t.device)}</span><span class="cvr-model ${modelToFamily(t.model)}">${esc(modelDisplay(t.model))}</span><span class="cvr-tok num">${fmtInt(t.total_tokens || 0)}</span></div>`).join("") : `<div class="dim" style="padding:6px 0">no activity</div>`;
+  return `<div class="cv-head"><span class="cv-logo">${isCodex ? "⌬" : "◔"}</span><span class="cv-title">${isCodex ? "Codex" : "Claude Code"}</span><span class="cv-sub dim">${fmtInt(rep.record_count || 0)} records</span></div>
     <div class="cvb cv-herobox">
-      <div class="cvb-trow"><span class="cvb-t dim">Burn rate · çok mu yakıyorsun?</span><span class="picker cv-picker">${picker}</span></div>
+      <div class="cvb-trow"><span class="cvb-t dim">Burn rate · burning too fast?</span><span class="picker cv-picker">${picker}</span></div>
       <svg class="cv-speedo" viewBox="0 0 400 272" preserveAspectRatio="xMidYMid meet"></svg>
       <div class="cv-zone2"></div>
       <div class="cv-breakdown speedo-breakdown"></div>
     </div>
-    <div class="cvb"><div class="cvb-trow"><span class="cvb-t dim">Canlı aktif model</span><span class="picker cv-am-picker">${amPicker}</span></div><div class="cv-am-rows"></div></div>
-    <div class="cvb"><div class="cvb-t dim">Son işler</div>${recRows}</div>`;
+    <div class="cvb"><div class="cvb-trow"><span class="cvb-t dim">Live active model</span><span class="picker cv-am-picker">${amPicker}</span></div><div class="cv-am-rows"></div></div>
+    <div class="cvb"><div class="cvb-t dim">Recent activity</div>${recRows}</div>`;
 }
 
 // ---------- hero SPEEDOMETER (araba göstergesi) ----------
@@ -422,13 +422,13 @@ function renderSpeedometer(rep, isCodex) {
   zoneEl.textContent = zw;
   if (g.ratio != null && g.ratio > 0) {
     const span = document.createElement("span");
-    span.append(" · normalinin ");
+    span.append(" · ");
     const strong = document.createElement("strong");
-    strong.textContent = g.ratio.toFixed(1) + "x";
-    span.append(strong, " hızı");
+    strong.textContent = g.ratio.toFixed(1) + "×";
+    span.append(strong, " your normal pace");
     zoneEl.appendChild(span);
   } else if (g.below) {
-    zoneEl.append(" · normalin altında");
+    zoneEl.append(" · below normal");
   }
 
   // efficiency headline (fuel_efficiency) + demoted note (öbür limit / eşik kaynağı)
@@ -440,9 +440,9 @@ function renderSpeedometer(rep, isCodex) {
   const bd = (fc.burn_rates_by_hours_by_model || {})[hoursStr] || [];
   const vis = bd.filter(m => !String(m.model_id).startsWith("<")).slice(0, 4);
   $("speedo-breakdown").innerHTML = vis.length
-    ? `<div class="dim" style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">bu hızı kim yakıyor · tahmini $</div>` +
+    ? `<div class="dim" style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">who's burning this pace · est. $</div>` +
       vis.map(m => `<span class="sb-row ${modelToFamily(m.model_id)}"><span class="sb-name">${esc(modelDisplay(m.model_id))}</span>
-        <span class="sb-val">${fmtMoney(m.cost_per_hour)}/sa</span><span class="sb-share">%${(m.share * 100).toFixed(0)}</span></span>`).join("")
+        <span class="sb-val">${fmtMoney(m.cost_per_hour)}/hr</span><span class="sb-share">${(m.share * 100).toFixed(0)}%</span></span>`).join("")
     : "";
 }
 
@@ -450,14 +450,14 @@ function renderSpeedometer(rep, isCodex) {
 function renderHeroAside(rep, isCodex) {
   const fc = rep.forecast || {};
   const cw = rep.current_window || {};
-  $("aside-title").firstChild.textContent = isCodex ? "Plan limiti · duvar " : "Lokal kullanım ";
+  $("aside-title").firstChild.textContent = isCodex ? "Plan limit · wall " : "Local usage ";
   $("aside-sub").textContent = isCodex ? "Codex Pro" : "Claude";
 
   const bigPct = (pct, label, sub, resetSec) => {
     const c = sevClass(pct);
     return `<div style="margin-bottom:14px">
       <div style="display:flex;align-items:baseline;gap:8px">
-        <span class="num ${c}" style="font-size:34px;font-weight:600">%${Math.round(pct)}</span>
+        <span class="num ${c}" style="font-size:34px;font-weight:600">${Math.round(pct)}%</span>
         <span style="color:var(--text-3);font-size:12px;font-weight:600">${label}</span></div>
       <div class="meter-track" style="margin:8px 0 5px"><div class="meter-fill ${c}" style="width:${Math.min(100, pct)}%"></div></div>
       <div class="dim" style="font-size:11px">${sub}${resetSec ? ` · ↻ ${resetIn(resetSec)}` : ""}</div></div>`;
@@ -469,8 +469,8 @@ function renderHeroAside(rep, isCodex) {
     const rl = rep.codex_rate_limits || {};
     const dev = rl.mac || Object.values(rl)[0] || {};
     const wk = dev.secondary || {}, h5 = dev.primary || {};
-    body += bigPct(wk.used_percent || 0, "haftalık Codex limiti", "bu hafta kullandığın oran", wk.resets_at);
-    body += bigPct(h5.used_percent || 0, "5 saat limiti", "son 5 saatte kullandığın oran", h5.resets_at);
+    body += bigPct(wk.used_percent || 0, "weekly Codex limit", "used this week", wk.resets_at);
+    body += bigPct(h5.used_percent || 0, "5-hour limit", "used in the last 5 hours", h5.resets_at);
   } else {
     // Claude: Anthropic exposes NO account limit/quota → we deliberately do NOT
     // show any "% of limit" gauge (it would be fabricated). Honest local usage
@@ -483,20 +483,20 @@ function renderHeroAside(rep, isCodex) {
     const used = cw.cost_usd || 0, p90 = cw.baseline_cost_p90 || 0;
     const wc = rep.weekly_cap || {};
     const rate = cw.cost_per_hour;
-    body += bigFact("~" + fmtMoney0(used), "bu 5 saatlik blok",
-      (cw.active ? "şu an açık" : "blok kapalı")
-      + (rate ? ` · ~${fmtMoney(rate)}/sa` : "")
-      + (p90 ? ` · yoğun bloğun ~${fmtMoney0(p90)}` : ""));
-    body += bigFact("~" + fmtMoney0(wc.rolling_7d_cost || 0), "bu hafta (7 gün)",
-      wc.historical_7d_p95 ? `yoğun haftan ~${fmtMoney0(wc.historical_7d_p95)}` : "lokal toplam");
-    body += `<div class="dim" style="font-size:10.5px;line-height:1.45;margin:-4px 0 14px;color:var(--text-4)">Anthropic hesap-limiti/kotası vermez — bunlar sadece lokal kullanım (tahmini $).</div>`;
+    body += bigFact("~" + fmtMoney0(used), "this 5-hour block",
+      (cw.active ? "open now" : "block closed")
+      + (rate ? ` · ~${fmtMoney(rate)}/hr` : "")
+      + (p90 ? ` · your heaviest block ~${fmtMoney0(p90)}` : ""));
+    body += bigFact("~" + fmtMoney0(wc.rolling_7d_cost || 0), "this week (7 days)",
+      wc.historical_7d_p95 ? `your heaviest week ~${fmtMoney0(wc.historical_7d_p95)}` : "local total");
+    body += `<div class="dim" style="font-size:10.5px;line-height:1.45;margin:-4px 0 14px;color:var(--text-4)">Anthropic exposes no account limit/quota — these are local usage only (est. $).</div>`;
   }
 
   // key stats footer — clearly labeled
   const rows = [];
-  rows.push(["Bugün", fmtMoney0(fc.today?.so_far ?? 0)]);
-  if (fc.today?.projected_eod != null) rows.push(["Gün sonu tahmini", fmtMoney0(fc.today.projected_eod)]);
-  if (!isCodex && cw.projected_close_cost != null) rows.push(["Bu blok ~kapanış", fmtMoney0(cw.projected_close_cost)]);
+  rows.push(["Today", fmtMoney0(fc.today?.so_far ?? 0)]);
+  if (fc.today?.projected_eod != null) rows.push(["End-of-day estimate", fmtMoney0(fc.today.projected_eod)]);
+  if (!isCodex && cw.projected_close_cost != null) rows.push(["This block ~close", fmtMoney0(cw.projected_close_cost)]);
   body += `<div style="margin-top:4px;padding-top:12px;border-top:1px solid var(--border-subtle)">` +
     rows.map(([l, v]) => `<div style="display:flex;justify-content:space-between;padding:5px 0">
       <span style="color:var(--text-3);font-size:12px">${l}</span>
@@ -513,9 +513,9 @@ function renderKPIs(rep, isCodex) {
   const burn = fc.burn_rate_per_hour_recent ?? 0;
   const notional = isCodex ? " (notional)" : "";
   const kpis = [
-    { l: "Bugün harcanan", v: "~" + fmtMoney(fc.today?.so_far ?? 0), s: `${fmtInt(todayE.messages || 0)} turn`, spark: daily.slice(-14).map(d => d.cost_usd || 0) },
-    { l: "Burn rate", v: "~" + fmtMoney(burn), unit: "/sa", s: "son 2 saat tempo" + notional, spark: null },
-    { l: "Önlenen maliyet (notional)", v: "~" + fmtMoney0(ce.usd_saved || 0), s: `~%${Math.round((ce.discount_pct || 0) * 100)} daha ucuz · varsayımsal · lifetime`, spark: null },
+    { l: "Spent today", v: "~" + fmtMoney(fc.today?.so_far ?? 0), s: `${fmtInt(todayE.messages || 0)} turns`, spark: daily.slice(-14).map(d => d.cost_usd || 0) },
+    { l: "Burn rate", v: "~" + fmtMoney(burn), unit: "/hr", s: "last 2h pace" + notional, spark: null },
+    { l: "Prevented cost (notional)", v: "~" + fmtMoney0(ce.usd_saved || 0), s: `~${Math.round((ce.discount_pct || 0) * 100)}% cheaper · hypothetical · lifetime`, spark: null },
     { l: "Lifetime $", v: "~" + fmtMoney0(t.cost_usd || 0) + notional, s: `${fmtCompact(t.total_tokens || 0)} token`, spark: daily.slice(-14).map(d => d.cost_usd || 0) },
   ];
   kpis.forEach((k, i) => {
@@ -543,25 +543,25 @@ function renderEfficiency(rep, isCodex) {
 
   const ph = fe.per_active_hour || {}, pd = fe.per_active_day || {}, pc = fe.per_commit || {},
         pt = fe.per_turn || {}, ch = fe.cache_hit_rate || {};
-  const est = isCodex ? " (notional)" : " (tahmini)";
+  const est = isCodex ? " (notional)" : " (est.)";
   let html = "";
-  if (ph.you != null) html += row("Saat başı maliyet",
-    "~" + fmtMoney(ph.you) + "/sa" + est, `senin tipik $${ph.band_normal_low}–${ph.band_normal_high}/sa aralığın · ${ph.hours_per_active_day}h/gün · aktif saat 5dk bucket'tan`,
+  if (ph.you != null) html += row("Cost per hour",
+    "~" + fmtMoney(ph.you) + "/hr" + est, `your typical $${ph.band_normal_low}–${ph.band_normal_high}/hr range · ${ph.hours_per_active_day}h/day · active hours from 5m buckets`,
     ph.verdict_label || "", ph.verdict_kind);
-  if (pd.you_avg_recent7 != null) html += row("Gün başı maliyet",
-    "~" + fmtMoney0(pd.you_avg_recent7) + est, `senin son-30g ort. ~$${pd.baseline_avg}/gün (yoğun P90 $${pd.baseline_p90})`,
+  if (pd.you_avg_recent7 != null) html += row("Cost per day",
+    "~" + fmtMoney0(pd.you_avg_recent7) + est, `your 30d avg ~$${pd.baseline_avg}/day (heavy P90 $${pd.baseline_p90})`,
     pd.verdict_label || "", pd.verdict_kind);
-  if (pc.you_median != null) html += row("Commit başı maliyet",
-    "~" + fmtMoney(pc.you_median) + est, `${pc.matched_commits} commit eşleşti · ortanca/commit · hesap verisi yok → kıyas yok`,
+  if (pc.you_median != null) html += row("Cost per commit",
+    "~" + fmtMoney(pc.you_median) + est, `${pc.matched_commits} commits matched · median/commit · no account data → no comparison`,
     pc.verdict_label || "", pc.verdict_kind);
-  if (pt.you != null) html += row("Turn başı maliyet",
-    "~" + fmtMoney(pt.you) + est, `community tahmini ~$${pt.baseline_low}–$${pt.baseline_high}/turn (yayınlanmış norm yok) · ${fmtInt(pt.turns)} turn · tüm geçmiş ort.`,
+  if (pt.you != null) html += row("Cost per turn",
+    "~" + fmtMoney(pt.you) + est, `community estimate ~$${pt.baseline_low}–$${pt.baseline_high}/turn (no published norm) · ${fmtInt(pt.turns)} turns · all-time avg`,
     pt.verdict_label || "", pt.verdict_kind);
   if (ch.you != null) html += row("Cache hit",
-    fmtPct(ch.you), `hedef ≥%${Math.round((ch.target_excellent || .85) * 100)} mükemmel`,
+    fmtPct(ch.you), `target ≥${Math.round((ch.target_excellent || .85) * 100)}% excellent`,
     ch.verdict_label || "", ch.verdict_kind);
 
-  $("eff-body").innerHTML = html || `<div class="empty">Yeterli veri yok</div>`;
+  $("eff-body").innerHTML = html || `<div class="empty">Not enough data</div>`;
 }
 
 // ---------- cache efficiency ----------
@@ -570,14 +570,14 @@ function renderCache(rep) {
   const hit = (ce.hit_rate || 0) * 100;
   $("cache-body").innerHTML =
     `<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px">
-       <span class="num" style="font-size:34px;font-weight:600;color:var(--text-1)">%${hit.toFixed(1)}</span>
+       <span class="num" style="font-size:34px;font-weight:600;color:var(--text-1)">${hit.toFixed(1)}%</span>
        <span class="dim" style="font-size:12px">cache hit</span></div>
      <div class="meter-track" style="margin:10px 0"><div class="meter-fill good" style="width:${Math.min(100, hit)}%"></div></div>
      <div style="display:flex;justify-content:space-between;margin-top:14px">
-       <div><div class="num" style="font-size:18px;color:var(--good)">~${fmtMoney0(ce.usd_saved || 0)}</div><div class="dim" style="font-size:11px">önlenen maliyet (varsayımsal)</div></div>
-       <div style="text-align:right"><div class="num" style="font-size:18px;color:var(--text-1)">~${fmtMoney0(ce.usd_on_cache || 0)}</div><div class="dim" style="font-size:11px">cache okuma maliyeti (tahmini)</div></div>
+       <div><div class="num" style="font-size:18px;color:var(--good)">~${fmtMoney0(ce.usd_saved || 0)}</div><div class="dim" style="font-size:11px">prevented cost (hypothetical)</div></div>
+       <div style="text-align:right"><div class="num" style="font-size:18px;color:var(--text-1)">~${fmtMoney0(ce.usd_on_cache || 0)}</div><div class="dim" style="font-size:11px">cache read cost (est.)</div></div>
      </div>
-     <div class="dim" style="font-size:11px;margin-top:12px;line-height:1.5">Cache olmasaydı (aynı kullanımla) bu okumalar ~${fmtMoney0(ce.full_equiv_usd || 0)} ederdi — kaba bir üst sınır (~%${Math.round((ce.discount_pct || 0) * 100)} daha ucuz).</div>`;
+     <div class="dim" style="font-size:11px;margin-top:12px;line-height:1.5">Without cache (same usage) these reads would cost ~${fmtMoney0(ce.full_equiv_usd || 0)} — a rough upper bound (~${Math.round((ce.discount_pct || 0) * 100)}% cheaper).</div>`;
 }
 
 // ---------- aylık BÜTÇE takibi (#7) ----------
@@ -601,16 +601,16 @@ function renderBudget(rep, isCodex) {
     body.innerHTML =
       `<div class="budget-edit-wrap">
          <div class="dim" style="font-size:12.5px;line-height:1.55;max-width:560px">
-           ${budget > 0 ? "Aylık bütçeyi güncelle." : "Aylık bir $ bütçe belirle — bu ay ne harcadığını ve ay-sonu tahminini bütçene karşı gör."}
-           <span style="color:var(--text-4)">Yalnızca bu tarayıcıda saklanır; rakamlar tahmindir.</span>
+           ${budget > 0 ? "Update your monthly budget." : "Set a monthly $ budget — see what you've spent this month and the end-of-month estimate against it."}
+           <span style="color:var(--text-4)">Stored only in this browser; figures are estimates.</span>
          </div>
          <div class="budget-set">
            <span class="budget-cur">$</span>
            <input id="budget-input" type="number" min="0" step="10" placeholder="200" value="${budget > 0 ? budget : ""}" inputmode="decimal" />
            <button id="budget-save">kaydet</button>
-           ${budget > 0 ? `<button id="budget-cancel" class="budget-ghost">vazgeç</button><button id="budget-clear" class="budget-ghost">sil</button>` : ""}
+           ${budget > 0 ? `<button id="budget-cancel" class="budget-ghost">cancel</button><button id="budget-clear" class="budget-ghost">clear</button>` : ""}
          </div>
-         <div class="dim" style="font-size:11px">${src} · bu ay şu ana dek: ~${fmtMoney0(soFar)}</div>
+         <div class="dim" style="font-size:11px">${src} · so far this month: ~${fmtMoney0(soFar)}</div>
        </div>`;
     const done = () => { _budgetEditing[src] = false; if (window.__lastReport) renderBudget(window.__lastReport, isCodex); };
     const inp = $("budget-input");
@@ -641,8 +641,8 @@ function renderBudget(rep, isCodex) {
   const over = projEom - budget;
   const cls = projEom > budget ? "bad" : pct > 90 ? "warn" : "good";
   const verdict = projEom > budget
-    ? `<span style="color:var(--bad);font-weight:600">⚠ ~${fmtMoney0(over)} aşım öngörülüyor</span>`
-    : `<span style="color:var(--good);font-weight:600">✓ bütçe içinde — ~${fmtMoney0(budget - projEom)} pay kalır</span>`;
+    ? `<span style="color:var(--bad);font-weight:600">⚠ ~${fmtMoney0(over)} overage projected</span>`
+    : `<span style="color:var(--good);font-weight:600">✓ within budget — ~${fmtMoney0(budget - projEom)} headroom left</span>`;
   const projMark = (projPct > pct && projPct <= 100)
     ? `<span class="budget-proj" style="left:${projPct.toFixed(1)}%" title="ay sonu tahmini ~${fmtMoney0(projEom)}"></span>` : "";
 
@@ -666,8 +666,8 @@ function renderBudget(rep, isCodex) {
        </div>
        <div class="budget-verdict">
          ${verdict}
-         <div class="dim" style="font-size:11px;margin-top:4px">kalan ${daysLeft}g · tipik ~${fmtMoney(dailyRate)}/gün · $ tahmindir</div>
-         <button id="budget-edit" class="budget-ghost" style="margin-top:9px">✎ bütçeyi düzenle</button>
+         <div class="dim" style="font-size:11px;margin-top:4px">${daysLeft}d left · typical ~${fmtMoney(dailyRate)}/day · $ is an estimate</div>
+         <button id="budget-edit" class="budget-ghost" style="margin-top:9px">✎ edit budget</button>
        </div>
      </div>`;
   const editBtn = $("budget-edit");
@@ -688,35 +688,35 @@ async function renderSyncDevices() {
   if (!data.configured) {
     body.innerHTML =
       `<div class="dim" style="font-size:12.5px;line-height:1.55;max-width:620px">
-         <span style="color:var(--text-3)">Pro cross-device sync kapalı.</span> Başka makinelerinin
-         kullanımını burada gör — uçtan-uca şifreli, relay yalnızca ciphertext görür, ham log gitmez.
+         <span style="color:var(--text-3)">Pro cross-device sync is off.</span> See your other machines'
+         usage here — end-to-end encrypted, the relay only sees ciphertext, raw logs never leave.
          <div style="margin-top:9px;font:500 11px/1.5 var(--font-mono);color:var(--text-4)">burnmeter sync login --relay &lt;url&gt; --token &lt;token&gt;<br>burnmeter sync push</div>
        </div>`;
     return;
   }
   if (data.error) {
-    body.innerHTML = `<div class="dim" style="font-size:12px;color:var(--warn)">relay'e ulaşılamadı: ${esc(String(data.error))}</div>`;
+    body.innerHTML = `<div class="dim" style="font-size:12px;color:var(--warn)">couldn't reach relay: ${esc(String(data.error))}</div>`;
     return;
   }
   const devs = data.devices || [];
   if (!devs.length) {
-    body.innerHTML = `<div class="dim" style="font-size:12.5px">henüz senkron cihaz yok — <span style="font-family:var(--font-mono)">burnmeter sync push</span> ile bu cihazı gönder.</div>`;
+    body.innerHTML = `<div class="dim" style="font-size:12.5px">no synced devices yet — push this device with <span style="font-family:var(--font-mono)">burnmeter sync push</span>.</div>`;
     return;
   }
-  const ago = (iso) => { if (!iso) return ""; const s = (Date.now() - new Date(iso).getTime()) / 1000; return s < 60 ? "şimdi" : s < 3600 ? Math.round(s / 60) + "dk" : s < 86400 ? Math.round(s / 3600) + "sa" : Math.round(s / 86400) + "g"; };
+  const ago = (iso) => { if (!iso) return ""; const s = (Date.now() - new Date(iso).getTime()) / 1000; return s < 60 ? "now" : s < 3600 ? Math.round(s / 60) + "m" : s < 86400 ? Math.round(s / 3600) + "h" : Math.round(s / 86400) + "d"; };
   body.innerHTML = `<div class="sync-grid">` + devs.map(d => {
     if (d._undecryptable) {
       return `<div class="sync-dev"><div class="sync-dev-head"><span class="sync-dot bad"></span><b>${esc(d.device_id || "?")}</b></div>
-        <div class="dim" style="font-size:11px">çözülemedi · passphrase farklı olabilir</div></div>`;
+        <div class="dim" style="font-size:11px">couldn't decrypt · passphrase may differ</div></div>`;
     }
     const me = d.device_id === data.this_device;
     const srcs = d.sources || {};
     const rows = Object.keys(srcs).map(s => {
       const v = srcs[s] || {};
       return `<div class="sync-src"><span class="sync-srcname ${s === 'codex' ? 'fam-gpt' : 'fam-opus'}">${esc(s)}</span>
-        <span class="num">~${fmtMoney(v.month_so_far || 0)}</span><span class="dim">bu ay</span>
-        <span class="num">${fmtInt(v.record_count || 0)}</span><span class="dim">kayıt</span></div>`;
-    }).join("") || `<div class="dim" style="font-size:11px">veri yok</div>`;
+        <span class="num">~${fmtMoney(v.month_so_far || 0)}</span><span class="dim">this month</span>
+        <span class="num">${fmtInt(v.record_count || 0)}</span><span class="dim">records</span></div>`;
+    }).join("") || `<div class="dim" style="font-size:11px">no data</div>`;
     // cross-device recent activity — straight from each device's snapshot tail (metadata only, no raw logs)
     const recent = Object.keys(srcs)
       .flatMap(s => (srcs[s].recent || []).map(t => ({ ...t, _src: s })))
@@ -745,7 +745,7 @@ function movingAverage(arr, n) {
 function renderTrend(rep, isCodex) {
   const tf = localStorage.getItem("burnmeter_trend_tf") || "24";
   const maList = JSON.parse(localStorage.getItem("burnmeter_trend_ma") || "[7]");
-  $("trend-unit").textContent = "$/saat (tahmini) · " + (tf === "24" ? "1 gün" : tf + "h") + " pencere";
+  $("trend-unit").textContent = "$/hr (est.) · " + (tf === "24" ? "1 day" : tf + "h") + " window";
   const series = (rep.burn_rate_timeseries || {})[tf] || [];
   const shortWin = (tf === "1" || tf === "4" || tf === "6");
   const labels = series.map(p => {
@@ -755,7 +755,7 @@ function renderTrend(rep, isCodex) {
                     : (dt.getMonth() + 1) + "/" + dt.getDate();
   });
   const burns = series.map(p => p.cost_per_hour ?? p.cost ?? 0);
-  const datasets = [{ type: "bar", label: `$/sa`, data: burns,
+  const datasets = [{ type: "bar", label: `$/hr`, data: burns,
     backgroundColor: "rgba(94,106,210,.32)", borderColor: "transparent", borderRadius: 2, order: 10 }];
   for (const n of maList) {
     datasets.push({ type: "line", label: `MA ${n}`, data: movingAverage(burns, n),
@@ -770,8 +770,8 @@ function renderTrend(rep, isCodex) {
       responsive: true, maintainAspectRatio: false, animation: false,
       plugins: {
         legend: { display: maList.length > 0, position: "top", align: "end",
-          labels: { color: "#8A8F98", font: { size: 10 }, boxWidth: 10, padding: 8, filter: i => i.text !== "$/sa" } },
-        tooltip: { ...tooltipCfg(), callbacks: { label: c => `${c.dataset.label}: ~${fmtMoney(c.parsed.y || 0)}/sa (tahmini)` } }
+          labels: { color: "#8A8F98", font: { size: 10 }, boxWidth: 10, padding: 8, filter: i => i.text !== "$/hr" } },
+        tooltip: { ...tooltipCfg(), callbacks: { label: c => `${c.dataset.label}: ~${fmtMoney(c.parsed.y || 0)}/hr (est.)` } }
       },
       scales: {
         x: { grid: { display: false }, border: { display: false }, ticks: { color: "#62666D", font: { size: 10, family: "'Geist Mono',monospace" }, maxTicksLimit: 8 } },
@@ -809,13 +809,13 @@ function renderDaily(rep) {
   const data = daily.map(d => d.cost_usd || 0);
   const today = labels.length - 1;
   const colors = data.map((_, i) => i === today ? "#5E6AD2" : "rgba(98,102,109,0.5)");
-  $("daily-sub").textContent = daily.length ? `toplam ~${fmtMoney0(data.reduce((a, b) => a + b, 0))} (tahmini)` : "";
+  $("daily-sub").textContent = daily.length ? `total ~${fmtMoney0(data.reduce((a, b) => a + b, 0))} (est.)` : "";
   const ctx = $("chart-daily");
   if (window.__charts.daily) window.__charts.daily.destroy();
   // Daily bars are per-DAY totals (estimated $), not an hourly rate — override
   // the shared yMoney tooltip (which appends "/sa") to label them correctly.
   const dailyOpts = chartOpts({ yMoney: true });
-  dailyOpts.plugins.tooltip.callbacks = { label: (c) => fmtMoney(c.parsed.y) + " (gün toplamı · tahmini)" };
+  dailyOpts.plugins.tooltip.callbacks = { label: (c) => fmtMoney(c.parsed.y) + " (daily total · est.)" };
   window.__charts.daily = new Chart(ctx, {
     type: "bar",
     data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 3, maxBarThickness: 18 }] },
@@ -828,7 +828,7 @@ function renderProjects(rep) {
   const ps = (rep.by_project || []).slice(0, 12);
   const max = Math.max(...ps.map(p => p.cost_usd || 0), 1);
   const tb = document.querySelector("#projects-tbl tbody");
-  if (!ps.length) { tb.innerHTML = `<tr><td colspan="3" class="empty">Veri yok</td></tr>`; return; }
+  if (!ps.length) { tb.innerHTML = `<tr><td colspan="3" class="empty">No data</td></tr>`; return; }
   tb.innerHTML = ps.map(p =>
     `<tr><td><div>${esc(p.project_label)}</div><div class="cell-bar"><i style="width:${(p.cost_usd || 0) / max * 100}%"></i></div></td>
       <td class="num">${fmtCompact(p.total_tokens || 0)}</td>
@@ -839,10 +839,10 @@ function renderProjects(rep) {
 function renderRecent(rep) {
   const isCodex = (rep._meta?.source || "claude") === "codex";
   const rsub = $("recent-sub");
-  if (rsub) rsub.textContent = isCodex ? "saf net (limitten düşen)" : "maliyet ağırlıklı eşdeğer token";
+  if (rsub) rsub.textContent = isCodex ? "pure net (counts against limit)" : "cost-weighted equivalent tokens";
   const turns = (rep.recent_turns || []).filter(t => !String(t.model || "").startsWith("<"));
   const tb = document.querySelector("#recent-tbl tbody");
-  if (!turns.length) { tb.innerHTML = `<tr><td colspan="6" class="empty">Henüz aktivite yok</td></tr>`; return; }
+  if (!turns.length) { tb.innerHTML = `<tr><td colspan="6" class="empty">No activity yet</td></tr>`; return; }
   tb.innerHTML = turns.map(t => {
     const fam = modelToFamily(t.model);
     return `<tr>
@@ -859,8 +859,8 @@ function renderRecent(rep) {
 function renderHeatmap(rep) {
   const body = $("heatmap-body"); if (!body) return;
   const hm = rep.usage_heatmap || {}, grid = hm.grid || [], mx = hm.max || 0;
-  if (!grid.length || !mx) { body.innerHTML = `<div class="dim" style="padding:10px 0">aktivite verisi yok</div>`; return; }
-  const days = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"];
+  if (!grid.length || !mx) { body.innerHTML = `<div class="dim" style="padding:10px 0">no activity data</div>`; return; }
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   let h = `<div class="hm-grid"><div class="hm-corner"></div>`;
   for (let x = 0; x < 24; x++) h += `<div class="hm-hour">${x % 3 === 0 ? x : ""}</div>`;
   for (let d = 0; d < 7; d++) {
@@ -878,7 +878,7 @@ function renderHeatmap(rep) {
 function renderModelTable(rep) {
   const bmf = (rep.by_model_full || []).filter(m => !String(m.model_id || "").startsWith("<")).slice(0, 10);
   const tb = document.querySelector("#modeltbl tbody");
-  if (!bmf.length) { tb.innerHTML = `<tr><td colspan="4" class="empty">Veri yok</td></tr>`; return; }
+  if (!bmf.length) { tb.innerHTML = `<tr><td colspan="4" class="empty">No data</td></tr>`; return; }
   tb.innerHTML = bmf.map(m => {
     const fam = modelToFamily(m.model_id);
     return `<tr><td><span class="pill ${fam}">${modelDisplay(m.model_id)}</span></td>
@@ -889,15 +889,15 @@ function renderModelTable(rep) {
 }
 
 // ---------- behavior (errors) ----------
-const ERR_LABELS = { timeout: "timeout", file_not_found: "dosya yok", permission_denied: "izin yok", command_not_found: "komut yok", python_error: "python", bash_failure: "bash exit1", stale_reference: "stale ref", output_too_large: "büyük çıktı", rate_limited: "rate limit", other_error: "diğer" };
+const ERR_LABELS = { timeout: "timeout", file_not_found: "file not found", permission_denied: "permission denied", command_not_found: "command not found", python_error: "python", bash_failure: "bash exit1", stale_reference: "stale ref", output_too_large: "large output", rate_limited: "rate limit", other_error: "other" };
 function renderBehavior(rep) {
   const e = rep.errors || {};
-  $("behavior-sub").textContent = `${e.total || 0} hata · lifetime ${fmtInt(e.total_lifetime || 0)}`;
+  $("behavior-sub").textContent = `${e.total || 0} errors · lifetime ${fmtInt(e.total_lifetime || 0)}`;
   const cats = (e.by_category || []).slice(0, 5);
-  if (!cats.length) { $("behavior-body").innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:10px 0"><span class="num" style="font-size:30px;color:var(--good)">0</span><span class="dim">son 24h temiz</span></div>`; return; }
+  if (!cats.length) { $("behavior-body").innerHTML = `<div style="display:flex;align-items:center;gap:8px;padding:10px 0"><span class="num" style="font-size:30px;color:var(--good)">0</span><span class="dim">clean in last 24h</span></div>`; return; }
   const max = Math.max(...cats.map(c => c.count), 1);
   $("behavior-body").innerHTML =
-    `<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px"><span class="num" style="font-size:28px;color:${e.total > 20 ? "var(--warn)" : "var(--text-1)"}">${e.total || 0}</span><span class="dim" style="font-size:12px">son 24h</span></div>` +
+    `<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px"><span class="num" style="font-size:28px;color:${e.total > 20 ? "var(--warn)" : "var(--text-1)"}">${e.total || 0}</span><span class="dim" style="font-size:12px">last 24h</span></div>` +
     cats.map(c => {
       const col = c.share > 0.5 ? "var(--bad)" : c.share > 0.2 ? "var(--warn)" : "var(--accent)";
       return `<div class="bar-list-row"><span class="nm">${ERR_LABELS[c.category] || esc(c.category)}</span>
@@ -909,18 +909,18 @@ function renderBehavior(rep) {
 // ---------- tools ----------
 function renderTools(rep) {
   const all = (rep.by_tool || []).filter(t => t.tool && t.tool !== "(no tool)");
-  if (!all.length) { $("tools-sub").textContent = ""; $("tools-body").innerHTML = `<div class="empty">Tool verisi yok (Codex tool isimleri parse edilmiyor)</div>`; return; }
+  if (!all.length) { $("tools-sub").textContent = ""; $("tools-body").innerHTML = `<div class="empty">No tool data (Codex tool names aren't parsed)</div>`; return; }
   const rows = all.map(t => ({ tool: t.tool, calls: t.calls || 0, tok: t.approx_output_tokens || 0 })).sort((a, b) => b.tok - a.tok).slice(0, 8);
   const totalTok = all.reduce((s, t) => s + (t.approx_output_tokens || 0), 0);
   const mcp = all.filter(t => /^mcp__/.test(t.tool) || /Chrome|chrome/.test(t.tool));
   const ctok = mcp.reduce((s, t) => s + (t.approx_output_tokens || 0), 0);
-  $("tools-sub").textContent = `≈${fmtCompact(totalTok)} output token` + (ctok ? ` · MCP %${(ctok / totalTok * 100).toFixed(1)} (tümü)` : "");
+  $("tools-sub").textContent = `≈${fmtCompact(totalTok)} output tokens` + (ctok ? ` · MCP ${(ctok / totalTok * 100).toFixed(1)}% (all)` : "");
   const max = Math.max(...rows.map(r => r.tok), 1);
   $("tools-body").innerHTML = rows.map(r => {
     const short = r.tool.replace(/^mcp__/, "").replace(/__/g, ":").slice(0, 28);
     return `<div class="bar-list-row"><span class="nm" title="${esc(r.tool)}">${esc(short)}</span>
       <span class="tr"><i style="width:${r.tok / max * 100}%"></i></span>
-      <span class="vl" title="output token tool sayısına eşit bölünerek yaklaşık hesaplandı">${fmtInt(r.calls)}× · ≈${fmtCompact(r.tok)}t</span></div>`;
+      <span class="vl" title="approximated by dividing output tokens equally across tool calls">${fmtInt(r.calls)}× · ≈${fmtCompact(r.tok)}t</span></div>`;
   }).join("");
 }
 
@@ -956,7 +956,7 @@ function updateLiveStamp() {
   const last = window.__lastRefreshMs; if (!last) return;
   const s = Math.floor((Date.now() - last) / 1000);
   const dot = $("live-dot");
-  $("last-updated").textContent = s < 2 ? "şimdi" : s < 60 ? s + "sn önce" : Math.floor(s / 60) + "dk önce";
+  $("last-updated").textContent = s < 2 ? "now" : s < 60 ? s + "s ago" : Math.floor(s / 60) + "m ago";
   if (dot) { dot.classList.toggle("live", s < 30); dot.classList.toggle("stale", s >= 30); }
 }
 
@@ -1017,14 +1017,14 @@ function alertLevelOf(rep, isCodex) {
   if (isCodex && rep.codex_rate_limits && Object.keys(rep.codex_rate_limits).length) {
     const dev = rep.codex_rate_limits.mac || Object.values(rep.codex_rate_limits)[0] || {};
     const bp = Math.max(dev.primary?.used_percent || 0, dev.secondary?.used_percent || 0);
-    if (bp >= 95) return { level: 3, msg: `🔴 Codex limiti %${Math.round(bp)} — throttle ÇOK YAKIN` };
-    if (bp >= 85) return { level: 2, msg: `🟠 Codex limiti %${Math.round(bp)} — duvara yaklaşıyorsun` };
+    if (bp >= 95) return { level: 3, msg: `🔴 Codex limit ${Math.round(bp)}% — throttle VERY CLOSE` };
+    if (bp >= 85) return { level: 2, msg: `🟠 Codex limit ${Math.round(bp)}% — approaching the wall` };
     return { level: 0, msg: "" };
   }
   // Claude (hesap limiti yok) → aşırı burn uyarısı
   const fc = rep.forecast || {}, z = rep.burn_rate_zones || {};
   const rate = (fc.burn_rates_by_hours || {})["2"] ?? fc.burn_rate_per_hour_recent ?? 0;
-  if (z.heavy && rate >= z.heavy * 1.6) return { level: 2, msg: `🟠 Burn rate çok yüksek: ${fmtMoney(rate)}/sa` };
+  if (z.heavy && rate >= z.heavy * 1.6) return { level: 2, msg: `🟠 Burn rate very high: ${fmtMoney(rate)}/hr` };
   return { level: 0, msg: "" };
 }
 function checkAlerts(rep, isCodex) {
@@ -1042,18 +1042,18 @@ function fireAlert(msg, level) {
   t.textContent = msg;
   clearTimeout(window.__alertHide);
   window.__alertHide = setTimeout(() => t.classList.remove("show"), 12000);
-  try { if (window.Notification && Notification.permission === "granted") new Notification("Burnmeter · limit uyarısı", { body: msg }); } catch (e) {}
+  try { if (window.Notification && Notification.permission === "granted") new Notification("Burnmeter · limit alert", { body: msg }); } catch (e) {}
 }
 function wireAlerts() {
   const b = $("alert-toggle"); if (!b) return;
-  const sync = () => { const on = localStorage.getItem("burnmeter_alerts_on") === "1"; b.classList.toggle("on", on); b.title = on ? "limit uyarıları AÇIK" : "limit uyarıları kapalı (tıkla)"; };
+  const sync = () => { const on = localStorage.getItem("burnmeter_alerts_on") === "1"; b.classList.toggle("on", on); b.title = on ? "limit alerts ON" : "limit alerts off (click)"; };
   sync();
   b.addEventListener("click", async () => {
     const on = localStorage.getItem("burnmeter_alerts_on") === "1";
     if (!on) {
       localStorage.setItem("burnmeter_alerts_on", "1");
       try { if (window.Notification && Notification.permission === "default") await Notification.requestPermission(); } catch (e) {}
-      fireAlert("🔔 Limit uyarıları açıldı — duvara %85'te haber veririm.", 2);
+      fireAlert("🔔 Limit alerts on — I'll warn you at 85% of the wall.", 2);
     } else { localStorage.setItem("burnmeter_alerts_on", "0"); }
     sync();
   });
@@ -1075,7 +1075,7 @@ function start() {
       window.__source = src; localStorage.setItem("burnmeter_source", src);
       document.querySelectorAll("#source-toggle button").forEach(x => x.classList.toggle("active", x.dataset.source === src));
       const instant = renderFromCache(src);                 // INSTANT switch if this source is already cached
-      if (!instant) $("last-updated").textContent = "Burnmeter yükleniyor…";
+      if (!instant) $("last-updated").textContent = "Burnmeter loading…";
       window.__refreshInFlight = false; refresh(false);     // silent background revalidate (SWR)
     });
   });
@@ -1127,7 +1127,7 @@ function start() {
   if (rl) rl.addEventListener("click", () => { localStorage.removeItem("burnmeter_layout_v2"); location.reload(); });
   // First paint is cold until the local logs are parsed — on large histories that
   // first read can take a few seconds. Say so instead of showing a blank "…" gauge.
-  $("last-updated").textContent = "Burnmeter loglarını okuyor — ilk açılış birkaç saniye sürebilir…";
+  $("last-updated").textContent = "Reading your Burnmeter logs — first load can take a few seconds…";
   refresh(false);
   setInterval(() => refresh(false), 10000);
   setInterval(updateLiveStamp, 1000);

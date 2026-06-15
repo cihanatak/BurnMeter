@@ -639,13 +639,13 @@ def weekly_cap_status(records: list[UsageRecord], daily: list[dict]) -> dict:
     pct_of_p95 = (rolling_7d_cost / p95 * 100) if p95 > 0 else 0
 
     if pct_of_p95 >= 100:
-        kind, label = "bad",  "tarihteki en yoğun haftana ulaştın"
+        kind, label = "bad",  "hit your heaviest week ever"
     elif pct_of_p95 >= 75:
-        kind, label = "warn", "geçmiş yoğun haftalarına yakın"
+        kind, label = "warn", "near your past heavy weeks"
     elif pct_of_p95 >= 40:
-        kind, label = "good", "tipik bir hafta"
+        kind, label = "good", "a typical week"
     else:
-        kind, label = "good", "düşük tempo"
+        kind, label = "good", "low pace"
 
     return {
         "rolling_7d_cost": round(rolling_7d_cost, 2),
@@ -1034,15 +1034,15 @@ def fuel_efficiency(
     if hours_stats["active_hours"] < 0.5:
         hour_kind, hour_label = "neutral", "barely any recent activity"
     elif not _hour_anchored:
-        hour_kind, hour_label = "neutral", "henüz kişisel baz yok"
+        hour_kind, hour_label = "neutral", "no personal baseline yet"
     elif you_per_hour < HOUR_LIGHT:
-        hour_kind, hour_label = "good", "senin tipiğinin altında"
+        hour_kind, hour_label = "good", "below your typical"
     elif you_per_hour < HOUR_NORMAL_HI:
-        hour_kind, hour_label = "good", "senin tipik aralığında"
+        hour_kind, hour_label = "good", "within your typical range"
     elif you_per_hour < HOUR_HEAVY:
-        hour_kind, hour_label = "warn", "senin yoğun saatlerin seviyesinde"
+        hour_kind, hour_label = "warn", "at your heavy-hour level"
     else:
-        hour_kind, hour_label = "bad", "senin yoğun saatlerinin üstünde"
+        hour_kind, hour_label = "bad", "above your heavy hours"
 
     # Self-relative day verdict: compare recent $/day to the user's OWN prior
     # 30d average (NOT an unverifiable industry constant). Anthropic exposes no
@@ -1067,13 +1067,13 @@ def fuel_efficiency(
     else:
         ratio = recent_avg / day_anchor
         if ratio < 0.7:
-            day_kind, day_label = "good", f"{ratio:.1f}x senin normalin (düşük)"
+            day_kind, day_label = "good", f"{ratio:.1f}× your normal (low)"
         elif ratio < 1.3:
-            day_kind, day_label = "good", f"{ratio:.1f}x senin normalin"
+            day_kind, day_label = "good", f"{ratio:.1f}× your normal"
         elif ratio < 2.0:
-            day_kind, day_label = "warn", f"{ratio:.1f}x senin normalin (yoğun)"
+            day_kind, day_label = "warn", f"{ratio:.1f}× your normal (heavy)"
         else:
-            day_kind, day_label = "bad", f"{ratio:.1f}x senin normalin (çok yoğun)"
+            day_kind, day_label = "bad", f"{ratio:.1f}× your normal (very heavy)"
 
     # --- 2. Per commit ---
     you_per_commit = git_attr.get("mean_cost_usd", 0)
@@ -1083,9 +1083,9 @@ def fuel_efficiency(
     # $/commit number (the old "industry $13/day ÷ 3 commits" anchor was
     # fabricated). So this is DESCRIPTIVE only — the raw figure, no judgment.
     if matched < 3:
-        commit_kind, commit_label = "neutral", "yeterli commit eşleşmedi"
+        commit_kind, commit_label = "neutral", "not enough commits matched"
     else:
-        commit_kind, commit_label = "neutral", "ham · kıyas yok"
+        commit_kind, commit_label = "neutral", "raw · no comparison"
 
     # --- 3. Cache hit rate ---
     cache_rate = totals_dict.get("cache_hit_rate", 0)
@@ -1155,7 +1155,7 @@ def fuel_efficiency(
         headline_label = "Power user · efficient unit economics"
         _prior_hpd = prior_hours_stats.get("hours_per_active_day", 0)
         _vs_prior = (
-            f" (senin son-30g ort. ~{_prior_hpd}h/gün)" if _prior_hpd and _prior_hpd > 0 else ""
+            f" (your 30d avg ~{_prior_hpd}h/day)" if _prior_hpd and _prior_hpd > 0 else ""
         )
         headline_detail = (
             f"You're using {tool_label} ~{hours_stats['hours_per_active_day']}h/day"
