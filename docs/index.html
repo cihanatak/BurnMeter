@@ -14,6 +14,9 @@
 <meta property="og:title" content="Burnmeter — one dashboard for every AI coding agent" />
 <meta property="og:description" content="See where your tokens go — cost, burn-rate, rate-limit. Local-first, no API keys, open source." />
 <meta property="og:image" content="https://burnmeter.dev/og.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="The Burnmeter dashboard — burn-rate, rate-limit and cost in one local view" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="Burnmeter — one dashboard for every AI coding agent" />
 <meta name="twitter:description" content="See where your tokens go — cost, burn-rate, rate-limit. Local-first, no API keys, open source." />
@@ -153,7 +156,7 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
 .foot-tag{font-size:13px;color:var(--t4);margin-top:13px;max-width:290px}
 .foot-links{display:flex;gap:42px;flex-wrap:wrap}
 .foot-col{display:flex;flex-direction:column;gap:10px}
-.foot-col h5{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--t4);margin:0 0 3px;font-weight:600}
+.foot-col h4{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--t4);margin:0 0 3px;font-weight:600}
 .foot-col a{font-size:13.5px;color:var(--t3)}
 .foot-col a:hover{color:var(--t1)}
 .foot-bottom{margin-top:36px;padding-top:22px;border-top:1px solid var(--b1);font-size:12.5px;color:var(--t4);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
@@ -162,7 +165,7 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
 <body>
 
 <nav><div class="wrap">
-  <a class="logo" href="/" id="brand-home" title="Ana sayfa"><span class="mark">◔</span> Burnmeter</a>
+  <a class="logo" href="/" id="brand-home" title="Home"><span class="mark" aria-hidden="true">◔</span> Burnmeter</a>
   <div class="nav-links">
     <a href="#features">Features</a><a href="#how">How</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a>
     <a id="nav-dashboard" href="/" style="display:none">Dashboard</a>
@@ -199,7 +202,7 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
     <div class="mock-grid">
     <div class="mcard hero-c">
       <div class="mrow">
-        <div class="ring"><div class="rv">%97</div><div class="rl">weekly limit</div></div>
+        <div class="ring"><div class="rv">97%</div><div class="rl">weekly limit</div></div>
         <div>
           <div class="mh">⚠️ Near your weekly limit</div>
           <div class="md">Codex Pro · flat-fee — the wall is the rate limit, not $. Resets in 20h.</div>
@@ -224,6 +227,7 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
 </div></header>
 
 <section id="why"><div class="wrap"><div class="why">
+  <h2 style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0">Why Burnmeter exists</h2>
   <p>Neither Anthropic nor OpenAI exposes a real-time per-token usage API for
   <strong>individual</strong> Pro / Max / subscription plans. So if you're on a
   flat-fee plan, <strong>your local session logs are the only accurate source of
@@ -240,7 +244,7 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
     <div class="step"><div class="n">2</div><h3>Run</h3>
       <p><code>burnmeter serve</code> — finds <code>~/.claude</code> &amp; <code>~/.codex</code> automatically and starts the local dashboard.</p></div>
     <div class="step"><div class="n">3</div><h3>Open</h3>
-      <p>Visit <code>localhost:9876</code> — live burn-rate, rate-limit and cost. Everything stays on your machine.</p></div>
+      <p>Visit <code>localhost:8765</code> — live burn-rate, rate-limit and cost. Everything stays on your machine.</p></div>
   </div>
 </div></section>
 
@@ -248,21 +252,21 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
   <div class="sec-head"><h2>Built for the question you actually have</h2>
     <p>Not a token accountant — a fuel gauge. Four things the other meters miss.</p></div>
   <div class="feat">
-    <div class="fcard"><h3><span class="ico">◔</span> Rate-limit hero</h3>
+    <div class="fcard"><h3><span class="ico" aria-hidden="true">◔</span> Rate-limit hero</h3>
       <p>For subscription plans the wall is the rate limit, not the dollar. A red ring at
       90%+ tells you, in under a second, whether you can start that big task or you're
       about to get throttled — 5-hour and weekly windows, per device.</p></div>
-    <div class="fcard"><h3><span class="ico">⛽</span> Burn-rate vs. your normal</h3>
+    <div class="fcard"><h3><span class="ico" aria-hidden="true">⛽</span> Burn-rate vs. your normal</h3>
       <p>"Is this run burning a lot or a little?" Your current $/hr against personal
       typical / busy / heavy reference zones, with a verdict like "3× faster than your
       usual." Efficiency, at a glance.</p></div>
-    <div class="fcard"><h3><span class="ico">⚡</span> Cache-efficiency value</h3>
+    <div class="fcard"><h3><span class="ico" aria-hidden="true">⚡</span> Cache-efficiency value</h3>
       <p>Cache reads cost ~10% of fresh input. Burnmeter shows your hit rate and the
       <em>real dollars cache saved you</em> — often the "I'm getting $50k of value for
       $200" number nobody else surfaces.</p></div>
-    <div class="fcard"><h3><span class="ico">▣</span> Per-project & per-model</h3>
+    <div class="fcard"><h3><span class="ico" aria-hidden="true">▣</span> Per-project & per-model</h3>
       <p>Which repo is eating your quota, and which model is eating your dollars — at
-      real per-model pricing (Opus/Sonnet/Haiku, GPT-5.5/Codex/mini). The model mix
+      real per-model pricing (Opus/Sonnet/Haiku, GPT-5.5/5.4/Codex/mini). The model mix
       <em>is</em> the cost story.</p></div>
   </div>
 </div></section>
@@ -275,6 +279,7 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
       <div class="price">$0</div>
       <ul><li>Full local dashboard, every agent</li><li>Rate-limit, burn-rate, cost projection</li>
       <li>Cache-efficiency, per-project & git/branch attribution</li><li>Monthly budget · 30 days history · CSV export</li>
+      <li>Terminal statusline · config-file alert rules</li>
       <li>AGPL-3.0, yours forever</li></ul></div>
     <div class="tier pro"><div class="name">Pro <span class="badge-soon">soon</span></div>
       <div class="price">$7<small>/mo</small></div>
@@ -298,7 +303,7 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
     <details><summary>Which agents are supported?</summary>
       <p>Claude Code and Codex today — separately or combined in one view. The parser is pluggable, so more agents are on the roadmap.</p></details>
     <details><summary>Are the dollar figures exact?</summary>
-      <p>They're best-effort estimates at published per-model pricing (Opus/Sonnet/Haiku, GPT-5.5/Codex/mini). On a flat-fee plan the real constraint is the rate limit — which Burnmeter tracks directly — so the $ is for relative insight: what's expensive, and how much cache saved you.</p></details>
+      <p>They're best-effort estimates at published per-model pricing (Opus/Sonnet/Haiku, GPT-5.5/5.4/Codex/mini). On a flat-fee plan the real constraint is the rate limit — which Burnmeter tracks directly — so the $ is for relative insight: what's expensive, and how much cache saved you.</p></details>
     <details><summary>Is it really free?</summary>
       <p>The entire local dashboard is open source (AGPL-3.0) and free forever — every agent, every panel, never gated. Pro (~$7/mo) only adds services a single machine can't do alone: hosted multi-device sync, durable cross-device history, and smart alerts — and the sync relay is itself open-source and self-hostable for $0.</p></details>
   </div>
@@ -307,17 +312,17 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
 <footer><div class="wrap">
   <div class="foot-grid">
     <div>
-      <div class="foot-brand"><span class="mark">◔</span> Burnmeter</div>
+      <div class="foot-brand"><span class="mark" aria-hidden="true">◔</span> Burnmeter</div>
       <p class="foot-tag">A local-first fuel gauge for every AI coding agent. Your data never leaves your machine.</p>
     </div>
     <div class="foot-links">
-      <div class="foot-col"><h5>Product</h5>
+      <div class="foot-col"><h4>Product</h4>
         <a href="#features">Features</a><a href="#how">How it works</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a></div>
-      <div class="foot-col"><h5>Project</h5>
+      <div class="foot-col"><h4>Project</h4>
         <a href="https://github.com/cihanatak/BurnMeter" target="_blank" rel="noopener">GitHub</a>
         <a href="https://github.com/cihanatak/BurnMeter#readme" target="_blank" rel="noopener">Docs</a>
         <a href="https://github.com/cihanatak/BurnMeter/blob/main/LICENSE" target="_blank" rel="noopener">License</a></div>
-      <div class="foot-col"><h5>Get started</h5>
+      <div class="foot-col"><h4>Get started</h4>
         <a href="#how">Install</a><a id="foot-dashboard" href="/" style="display:none">Dashboard</a></div>
     </div>
   </div>
@@ -328,11 +333,11 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
 </div></footer>
 
 <script>
-  // Local-only behaviour: when the landing is served by the running dashboard (port 9876 / localhost),
+  // Local-only behaviour: when the landing is served by the running dashboard (port 8765 / localhost),
   // reveal the in-app "Dashboard" links and point the logo at /landing (the local homepage).
   // On a public web deploy these stay hidden and the logo points at "/" (site root = homepage).
   (function () {
-    var local = location.port === '9876' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    var local = location.port === '8765' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
     if (local) {
       ['nav-dashboard', 'foot-dashboard'].forEach(function (id) {
         var el = document.getElementById(id); if (el) el.style.display = '';
