@@ -241,6 +241,17 @@ def cmd_serve(args):
     extras = [Path(p).expanduser() for p in (args.extra_projects_dir or [])]
     codex_extras = [Path(p).expanduser() for p in (getattr(args, "codex_extra_dir", []) or [])]
     codex_dir = Path(args.codex_dir).expanduser() if getattr(args, "codex_dir", None) else None
+    # First-run UX: drop a "Burnmeter" desktop shortcut so the user can relaunch by a
+    # double-click (created once; --no-shortcut opts out).
+    if not getattr(args, "no_shortcut", False):
+        try:
+            from . import desktop
+            path, created = desktop.ensure_shortcut(port=args.port)
+            if created and path:
+                print(green(f"✓ Added a '{path.name}' shortcut to your Desktop — double-click it any time."))
+        except Exception:
+            pass
+    print(f"Burnmeter → http://127.0.0.1:{args.port}  (opening in your browser…)")
     serve(host=args.host, port=args.port,
           projects_dir=Path(args.projects_dir), ttl_seconds=args.ttl,
           extra_roots=extras,
@@ -469,6 +480,8 @@ def main(argv=None):
     p_serve.add_argument("--ttl", type=int, default=15)
     p_serve.add_argument("--no-browser", action="store_true",
                          help="dashboard'ı tarayıcıda otomatik açma")
+    p_serve.add_argument("--no-shortcut", action="store_true",
+                         help="masaüstü kısayolu oluşturma")
     p_serve.add_argument("--extra-projects-dir", action="append", default=[],
                          help="ek Claude JSONL dizinleri (PC Syncthing mirror'ı vb.). "
                               "Birden çok için flag'i tekrarla.")

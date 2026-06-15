@@ -31,6 +31,30 @@ def create_shortcut(port: int = 8765, desktop_dir=None) -> Path:
     return _linux(desktop, py, port)
 
 
+def _shortcut_target(desktop_dir=None) -> Path:
+    d = _desktop_dir(desktop_dir)
+    if sys.platform == "win32":
+        return d / "Burnmeter.lnk"
+    if sys.platform == "darwin":
+        return d / "Burnmeter.command"
+    return d / "Burnmeter.desktop"
+
+
+def ensure_shortcut(port: int = 8765, desktop_dir=None):
+    """Create the desktop shortcut only if it isn't already there.
+    Returns (path, created: bool). Never raises — best-effort UX."""
+    target = _shortcut_target(desktop_dir)
+    alt = target.with_suffix(".cmd") if sys.platform == "win32" else None
+    if target.exists():
+        return target, False
+    if alt and alt.exists():
+        return alt, False
+    try:
+        return create_shortcut(port=port, desktop_dir=desktop_dir), True
+    except Exception:
+        return None, False
+
+
 def _win(desktop: Path, py: str, port: int) -> Path:
     lnk = desktop / "Burnmeter.lnk"
 
