@@ -1,9 +1,14 @@
-"""Pricing tables for Claude models.
+"""Pricing tables for Claude Code + OpenAI Codex models.
 
-Source of truth: Anthropic public pricing pages (cross-referenced April 2026).
-- Opus 4.6 / 4.7: $5 / $25 per 1M tokens (input/output)
+Source of truth: official Anthropic + OpenAI pricing pages.
+RE-VERIFIED 2026-06-15 against platform.claude.com/docs/en/about-claude/pricing
+and openai.com/api/pricing — every rate below matches the live pages (no changes
+needed this pass). Re-check when a new model ships or a provider changes prices.
+- Opus 4.5–4.8: $5 / $25 per 1M tokens (input/output)
 - Sonnet 4.5 / 4.6: $3 / $15
 - Haiku 4.5: $1 / $5
+- Fable 5 / Mythos 5: $10 / $50
+- GPT-5.5 $5/$30 · GPT-5.4 $2.50/$15 · GPT-5.4-mini $0.75/$4.50 · Codex $1.75/$14
 
 Cache reads are billed at ~10% of standard input rate (90% discount).
 Cache writes (cache_creation_input_tokens) are billed at the standard input
