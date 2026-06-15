@@ -70,18 +70,18 @@ burnmeter desktop          # optional: adds a double-click "Burnmeter" desktop s
 Or with pip, or straight from a source checkout:
 
 ```bash
-pip install git+https://github.com/cihanatak/BurnMeter && burnmeter serve
-# — or —
-git clone https://github.com/cihanatak/BurnMeter && cd BurnMeter
-python3 -m burnmeter serve --port 9876
+pip install git+https://github.com/cihanatak/BurnMeter
+burnmeter serve
+# — or, from a source checkout —
+git clone https://github.com/cihanatak/BurnMeter
+cd BurnMeter
+python3 -m burnmeter serve
 ```
 
 Multi-source (Claude + Codex) and a synced second machine:
 
 ```bash
-burnmeter serve --port 9876 \
-  --extra-projects-dir ~/.claude/projects-pc \
-  --codex-extra-dir   ~/.codex/sessions-pc
+burnmeter serve --extra-projects-dir ~/.claude/projects-pc --codex-extra-dir ~/.codex/sessions-pc
 ```
 
 ## Running on another machine
