@@ -82,23 +82,7 @@ h1{font-size:52px;line-height:1.08;letter-spacing:-.025em;color:var(--t1);font-w
 .mock{margin:52px auto 0;max-width:960px;background:var(--surface);border:1px solid var(--b1);border-radius:16px;padding:22px;box-shadow:0 40px 120px -40px rgba(94,106,210,.25);position:relative}
 .mock::before{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 1px 0 rgba(255,255,255,.05);pointer-events:none}
 .mock-cap{font-size:11px;color:var(--t4);text-transform:uppercase;letter-spacing:.07em;margin-bottom:14px;text-align:left}
-.mock-grid{display:grid;grid-template-columns:1.4fr 1fr;gap:14px}
-@media(max-width:640px){.mock-grid{grid-template-columns:1fr}}
-.mcard{background:var(--surface);border:1px solid var(--b1);border-radius:12px;padding:18px}
-.mcard.hero-c{background:radial-gradient(120% 140% at 0 0,rgba(16,163,127,.07),transparent 55%),var(--surface)}
-.ring{width:120px;height:120px;border-radius:50%;position:relative;display:grid;place-items:center;flex-shrink:0}
-.ring::before{content:"";position:absolute;inset:0;border-radius:50%;background:conic-gradient(var(--bad) 100%,var(--inset) 0);-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 11px),#000 calc(100% - 11px));mask:radial-gradient(farthest-side,transparent calc(100% - 11px),#000 calc(100% - 11px))}
-.ring .rv{position:relative;font-family:var(--mono);font-size:28px;font-weight:600;color:var(--t1)}
-.ring .rl{position:relative;font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
-.mrow{display:flex;gap:16px;align-items:center}
-.mh{font-size:14px;font-weight:600;color:var(--t1);margin-bottom:3px}
-.md{font-size:12px;color:var(--t3)}
-.mlabel{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--t3);margin-bottom:8px}
-.mval{font-family:var(--mono);font-size:24px;font-weight:600;color:var(--t1)}
-.msub{font-family:var(--mono);font-size:11px;color:var(--t3);margin-top:5px}
-.burn-track{height:9px;border-radius:999px;margin:12px 0 5px;background:linear-gradient(90deg,var(--good) 0 18%,var(--warn) 18% 46%,#f0883e 46% 70%,var(--bad) 70% 100%);position:relative}
-.burn-track .m{position:absolute;top:-4px;left:8%;width:3px;height:17px;border-radius:2px;background:var(--t1);box-shadow:0 0 0 2px var(--surface)}
-.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px}
+.mock-img{display:block;width:100%;height:auto;border:1px solid var(--b2);border-radius:11px}
 
 /* sections */
 section{padding:64px 0;border-top:1px solid var(--b1)}
@@ -199,33 +183,11 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
     <span>Python <b>3.10+</b></span>
   </div>
 
-  <!-- representative dashboard preview (illustrative numbers — not real usage) -->
+  <!-- real Burnmeter dashboard screenshot — sample data, no real usage -->
   <div class="mock">
-    <div class="mock-cap">Dashboard preview</div>
-    <div class="mock-grid">
-    <div class="mcard hero-c">
-      <div class="mrow">
-        <div class="ring"><div class="rv">97%</div><div class="rl">weekly limit</div></div>
-        <div>
-          <div class="mh">⚠️ Near your weekly limit</div>
-          <div class="md">Codex Pro · flat-fee — the wall is the rate limit, not $. Resets in 20h.</div>
-        </div>
-      </div>
-    </div>
-    <div class="mcard">
-      <div class="mlabel">Burn rate · right now</div>
-      <div class="mval">$21<small style="font-size:13px;color:var(--t3)">/hr</small></div>
-      <div style="color:var(--warn);font-size:12px;font-weight:600;margin-top:3px">above normal · 3.0× your usual pace</div>
-      <div class="burn-track"><div class="m"></div></div>
-      <div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--t4)">
-        <span>typical $11</span><span>busy $26</span><span>heavy $52</span></div>
-    </div>
-  </div>
-  <div class="kpis">
-    <div class="mcard"><div class="mlabel">Today</div><div class="mval">$124</div><div class="msub">475 turns</div></div>
-    <div class="mcard"><div class="mlabel">Cache saved</div><div class="mval" style="color:var(--good)">$45,303</div><div class="msub">90% discount · lifetime</div></div>
-    <div class="mcard"><div class="mlabel">Cache hit</div><div class="mval">97.7%</div><div class="msub">warm context</div></div>
-  </div>
+    <div class="mock-cap">Dashboard preview · sample data</div>
+    <img class="mock-img" src="dashboard-preview.png" width="1460" height="920" loading="lazy"
+         alt="Burnmeter dashboard: live burn-rate speedometer, today's spend, prevented cost, per-model breakdown, and recent sessions" />
   </div>
 </div></header>
 
