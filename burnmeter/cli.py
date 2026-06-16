@@ -384,7 +384,10 @@ def cmd_relaunch(args):
             break                             # down → proceed
     time.sleep(1.5)                           # let the socket fully release
     ob = not getattr(args, "no_browser", False)
-    common = dict(host=args.host, port=args.port)
+    # reuse_addr=True: the previous instance just exited; its port may be in
+    # TIME_WAIT on Windows, so we must allow reuse to rebind the SAME port (else the
+    # restart lands on 7655 and the user's tab can't reach it).
+    common = dict(host=args.host, port=args.port, reuse_addr=True)
     try:
         from . import tray as traymod
         return traymod.run_tray(open_browser=ob, **common)

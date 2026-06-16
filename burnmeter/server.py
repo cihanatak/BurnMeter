@@ -514,7 +514,8 @@ def trigger_restart(host: str, port: int, open_browser: bool = True) -> None:
     it exits and frees the port → the relauncher rebinds with the new code. Falls
     back to os._exit(0) if there's no clean restart hook (self-heal handles the
     leftover pidfile)."""
-    _spawn_relaunch(host, port, open_browser=open_browser)
+    if not _spawn_relaunch(host, port, open_browser=open_browser):
+        return   # couldn't spawn the relauncher → do NOT kill ourselves (no dead server)
     hook = _RESTART_HOOK
     if hook is not None:
         try:
@@ -643,7 +644,8 @@ def setup_server(host: str = "127.0.0.1", port: int = 7654,
                  extra_roots: Optional[list[Path]] = None,
                  codex_dir: Optional[Path] = None,
                  codex_extra_roots: Optional[list[Path]] = None,
-                 codex_since_days: int = 90) -> "_ServerHandle":
+                 codex_since_days: int = 90,
+                 reuse_addr: bool = False) -> "_ServerHandle":
     """Build caches, bind the port (with fallback), write the pidfile (incl. a
     per-process instance token), log the reading paths. Returns a bound
     _ServerHandle. Does NOT serve_forever, open the browser, or start the warm
@@ -693,7 +695,11 @@ def setup_server(host: str = "127.0.0.1", port: int = 7654,
         # On Windows SO_REUSEADDR lets a second bind silently SUCCEED on a port
         # another server already holds (port hijack) — disable reuse there so a
         # busy port raises and we fall back; keep it on POSIX (restart-friendly).
-        allow_reuse_address = not sys.platform.startswith("win")
+        # EXCEPT on a relaunch (reuse_addr=True): the previous instance just exited
+        # and its port may be in TIME_WAIT, so we MUST allow reuse to rebind the
+        # SAME port (otherwise the auto-update restart lands on 7655 and the user's
+        # tab can't reach it).
+        allow_reuse_address = reuse_addr or not sys.platform.startswith("win")
         # Daemonise per-request worker threads so an in-flight request — e.g. a
         # 20-minute cold codex build — never blocks Ctrl+C / tray Quit teardown.
         daemon_threads = True
@@ -751,14 +757,15 @@ def serve(host: str = "127.0.0.1", port: int = 7654,
           codex_dir: Optional[Path] = None,
           codex_extra_roots: Optional[list[Path]] = None,
           codex_since_days: int = 90,
-          open_browser: bool = False) -> None:
+          open_browser: bool = False, reuse_addr: bool = False) -> None:
     """Blocking console server (terminal / CI / power users). Always binds its
     OWN instance — no single-instance guard here, preserving the documented
     two-terminals-two-ports workflow. The tray path (run_tray) is the one that
     de-dupes via _already_running()."""
     try:
         h = setup_server(host, port, projects_dir, ttl_seconds, extra_roots,
-                         codex_dir, codex_extra_roots, codex_since_days)
+                         codex_dir, codex_extra_roots, codex_since_days,
+                         reuse_addr=reuse_addr)
     except RuntimeError as e:
         sys.stderr.write(f"[burnmeter] ERROR: {e}\n")
         return

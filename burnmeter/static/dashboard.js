@@ -255,7 +255,10 @@ async function doDashboardUpdate(latest) {
     }
   } catch (e) {
     el.textContent = orig; el.dataset.busy = "";
-    alert("Update failed — couldn't reach the local Burnmeter server.");
+    alert("Burnmeter doesn't seem to be running anymore — this page is stale.\n\n"
+        + "Open Burnmeter again (the 🔥 tray icon, or run `burnmeter tray`), then "
+        + "update from there.\n\nOr update manually:\n"
+        + "pip install --force-reinstall --no-cache-dir git+https://github.com/cihanatak/BurnMeter");
   }
 }
 

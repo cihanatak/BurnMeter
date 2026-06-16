@@ -79,7 +79,7 @@ def _make_image():
 def run_tray(host: str = "127.0.0.1", port: int = 7654, projects_dir=None,
              ttl_seconds: int = 15, extra_roots=None, codex_dir=None,
              codex_extra_roots=None, codex_since_days: int = 90,
-             open_browser: bool = True) -> int:
+             open_browser: bool = True, reuse_addr: bool = False) -> int:
     """Run Burnmeter in the system tray. Blocks on the main thread until Quit.
 
     Raises TrayUnavailable if the tray can't run here (so the caller falls back
@@ -105,7 +105,8 @@ def run_tray(host: str = "127.0.0.1", port: int = 7654, projects_dir=None,
         raise TrayUnavailable(f"tray unavailable: {e}") from e
 
     h = setup_server(host, port, projects_dir, ttl_seconds, extra_roots,
-                     codex_dir, codex_extra_roots, codex_since_days)
+                     codex_dir, codex_extra_roots, codex_since_days,
+                     reuse_addr=reuse_addr)
 
     srv_thread = threading.Thread(target=h.server.serve_forever, daemon=True)
     started = False
