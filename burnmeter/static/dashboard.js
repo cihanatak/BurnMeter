@@ -1301,5 +1301,14 @@ function start() {
   setInterval(updateLiveStamp, 1000);
   setInterval(tickLive, 1000);   // canlı aktif model: saniyelik nabız/şimdi güncellemesi
   setInterval(liveGaugeTick, 5000);   // burn-rate gauge decays live (→ $0 when idle)
+  // Re-check for a new version every 3h so a long-open dashboard surfaces the
+  // update pill on its own (not only on first load / the tray's 6h check).
+  setInterval(() => {
+    window.__updateChecked = false;
+    const v = window.__lastReport?._meta?.version
+          || window.__lastReport?.claude?._meta?.version
+          || window.__lastReport?.codex?._meta?.version;
+    if (v) checkForUpdate(v);
+  }, 3 * 60 * 60 * 1000);
 }
 document.addEventListener("DOMContentLoaded", start);
