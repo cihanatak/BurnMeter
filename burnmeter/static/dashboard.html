@@ -5,10 +5,10 @@
   <title>Burnmeter — AI coding fuel gauge</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack.min.css" />
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260616h" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260616i" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack-all.js" defer></script>
-  <script src="/static/dashboard.js?v=20260616h" defer></script>
+  <script src="/static/dashboard.js?v=20260616i" defer></script>
 </head>
 <body>
 
@@ -29,7 +29,7 @@
     <span class="meta-txt" id="last-updated">…</span>
     <span class="live-dot live" id="live-dot" title="live"></span>
     <a id="home-link" href="https://burnmeter.dev/" target="_blank" rel="noopener" title="Home — burnmeter.dev">Home</a>
-    <a id="pro-link" href="https://burnmeter.dev/#pricing" target="_blank" rel="noopener" title="Pro / Pricing — cross-device sync, smart alerts, team">✦ Pro</a>
+    <a id="pro-link" href="https://burnmeter.dev/#pricing" target="_blank" rel="noopener" title="Pro — cross-device sync + limit alerts (desktop & Slack)">✦ Pro</a>
     <button id="export-csv" title="download records as CSV">⬇</button>
     <button id="alert-toggle" title="limit alerts off (click)">🔔</button>
     <button id="reset-layout" title="restore card layout to default">⤢ Reset layout</button>
@@ -81,9 +81,9 @@
     <div id="active-model-body"></div>
   </section>
   <section class="card col-7" data-card="recent">
-    <div class="card-title">Recent activity · one row per turn <span class="sub" id="recent-sub">cost-weighted equivalent tokens</span></div>
+    <div class="card-title">Recent activity · one row per prompt <span class="sub" id="recent-sub">tokens, weighted by cost</span></div>
     <div class="scroll"><table class="tbl" id="recent-tbl">
-      <thead><tr><th>when</th><th>project</th><th>model</th><th class="num">token</th><th class="num">$ (est.)</th><th class="num">cache</th></tr></thead>
+      <thead><tr><th>when</th><th>project</th><th>model</th><th class="num">tokens</th><th class="num">$ (est.)</th><th class="num">cache hit</th></tr></thead>
       <tbody></tbody></table></div>
   </section>
 
@@ -95,17 +95,17 @@
 
   <!-- ROW — Pro cross-device sync: summaries of synced devices (E2E encrypted) -->
   <section class="card col-12" data-card="sync-devices">
-    <div class="card-title">Devices <span class="sub">Pro sync · E2E encrypted · relay only sees ciphertext</span></div>
+    <div class="card-title">Devices <span class="sub">Pro sync · end-to-end encrypted · our servers never see your data</span></div>
     <div id="sync-devices-body"></div>
   </section>
 
   <!-- ROW 4 — verimlilik (sen vs tipik) + cache efficiency -->
   <section class="card col-8" data-card="eff">
-    <div class="card-title">Efficiency · unit economics <span class="sub">you vs typical — is your token spend efficient?</span></div>
+    <div class="card-title">Efficiency · cost per unit of work <span class="sub">your cost per hour, day, commit & turn — mostly vs your own past</span></div>
     <div id="eff-body"></div>
   </section>
   <section class="card col-4" data-card="cache">
-    <div class="card-title">Cache efficiency <span class="sub">lifetime</span></div>
+    <div class="card-title">Cache efficiency <span class="sub">how much input was reused from cache — higher saves money (all-time)</span></div>
     <div id="cache-body"></div>
   </section>
 
@@ -143,29 +143,29 @@
     <div class="chart-wrap"><canvas id="chart-daily"></canvas></div>
   </section>
   <section class="card col-5" data-card="projects">
-    <div class="card-title">Projects · lifetime <span class="sub">which repo eats quota</span></div>
+    <div class="card-title">Projects · lifetime <span class="sub">where your spend goes</span></div>
     <div class="scroll"><table class="tbl" id="projects-tbl">
-      <thead><tr><th>project</th><th class="num">token</th><th class="num">$ (est.)</th></tr></thead>
+      <thead><tr><th>project</th><th class="num">tokens</th><th class="num">$ (est.)</th></tr></thead>
       <tbody></tbody></table></div>
   </section>
 
   <!-- usage HEATMAP — hour × day activity (local time) -->
   <section class="card col-12" data-card="heatmap">
-    <div class="card-title">Activity heatmap <span class="sub">hour × day · local time · token density</span></div>
+    <div class="card-title">Activity heatmap <span class="sub">hour × day · local time · darker = more tokens</span></div>
     <div id="heatmap-body"></div>
   </section>
 
   <!-- per-model table (lifetime) + behavior + tool -->
   <section class="card col-6" data-card="model-table">
-    <div class="card-title">Models · lifetime <span class="sub">real per-model pricing</span></div>
+    <div class="card-title">Models · lifetime <span class="sub">each model at its actual rate</span></div>
     <div class="scroll"><table class="tbl" id="modeltbl">
-      <thead><tr><th>model</th><th class="num">turn</th><th class="num">token</th><th class="num">$</th></tr></thead>
+      <thead><tr><th>model</th><th class="num">prompts</th><th class="num">tokens</th><th class="num">$</th></tr></thead>
       <tbody></tbody></table></div>
   </section>
 
   <!-- ROW 7 — behavior (errors) + tool usage -->
   <section class="card col-6" data-card="behavior">
-    <div class="card-title">Behavior · errors last 24h <span class="sub" id="behavior-sub"></span></div>
+    <div class="card-title">Errors · last 24h <span class="sub" id="behavior-sub"></span></div>
     <div id="behavior-body"></div>
   </section>
   <section class="card col-6" data-card="tools">

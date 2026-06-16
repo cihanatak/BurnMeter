@@ -1159,7 +1159,7 @@ def fuel_efficiency(
 
     if per_unit_good and (heavy_hour or warn_hour) and high_hours_per_day:
         headline_kind = "good"
-        headline_label = "Power user · efficient unit economics"
+        headline_label = "Power user — heavy use, but efficient"
         _prior_hpd = prior_hours_stats.get("hours_per_active_day", 0)
         _vs_prior = (
             f" (your 30d avg ~{_prior_hpd}h/day)" if _prior_hpd and _prior_hpd > 0 else ""
@@ -1178,7 +1178,7 @@ def fuel_efficiency(
         )
     elif not per_unit_good and (heavy_hour or warn_hour):
         headline_kind = "bad"
-        headline_label = "High spend AND weak per-unit economics"
+        headline_label = "High spend AND high cost per task"
         headline_detail = (
             "Both your volume and your per-unit costs are above typical. "
             "First lever: cache hit rate. Second: prompt length per turn."

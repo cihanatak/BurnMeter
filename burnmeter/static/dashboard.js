@@ -493,17 +493,17 @@ function computeGaugeSpec(rep, isCodex, hoursStr) {
   const g = {
     value: rate, max: z.max || 50, zones: z,
     ticks: zd
-      ? [{ v: 0, l: "$0" }, { v: z.typical, l: "plan-typical" }, { v: z.busy, l: "plan-busy" }, { v: z.heavy, l: "plan-heavy" }]
-      : [{ v: 0, l: "$0" }, { v: z.typical, l: "your typical" }, { v: z.busy, l: "your heavy (P90)" }, { v: z.heavy, l: "very heavy" }],
+      ? [{ v: 0, l: "$0" }, { v: z.typical, l: "typical (est.)" }, { v: z.busy, l: "busy (est.)" }, { v: z.heavy, l: "heavy (est.)" }]
+      : [{ v: 0, l: "$0" }, { v: z.typical, l: "your typical" }, { v: z.busy, l: "your heavy" }, { v: z.heavy, l: "very heavy" }],
     valueText: fmtMoney(rate),
-    unitText: `/hr · last ${hoursStr === "0.0833" ? "5m" : hoursStr === "0.25" ? "15m" : hoursStr + "h"} avg${isCodex ? " (notional)" : " (est. $)"}`,
+    unitText: `/hr · last ${hoursStr === "0.0833" ? "5m" : hoursStr === "0.25" ? "15m" : hoursStr + "h"} avg (est.)`,
     zone: rate >= z.heavy ? ["bad", "🔴 heavy zone · burning very hot"]
         : rate >= z.busy ? ["warn", "🟠 busy zone"]
         : rate >= z.typical ? ["warn", "🟡 above normal"]
-        :                  ["good", "🟢 calm · efficient"],
+        :                  ["good", "🟢 calm · low burn right now"],
     ratio: rep.current_window?.vs_baseline_ratio, below: rate < z.typical,
-    note: zd ? "Plan-typical market estimate — recalibrates to your own pace over the next day or two."
-             : "Thresholds from your past 5s windows (P50/P90).",
+    note: zd ? "Market-normal estimate for your plan — it recalibrates to your own pace as Burnmeter learns it."
+             : "Tuned to you: “typical” is your median 5-hour block, “heavy” is your busiest ~10%. (Started from a market-normal estimate.)",
   };
   return { g, rate, fc, isLimit: false };
 }
@@ -689,12 +689,12 @@ function renderKPIs(rep, isCodex) {
   const daily = rep.daily || [];
   const todayE = daily[daily.length - 1] || {};
   const burn = fc.burn_rate_per_hour_recent ?? 0;
-  const notional = isCodex ? " (notional)" : "";
+  const est = isCodex ? " (est.)" : "";
   const kpis = [
-    { l: "Spent today", v: "~" + fmtMoney(fc.today?.so_far ?? 0), s: `${fmtInt(todayE.messages || 0)} turns`, spark: daily.slice(-14).map(d => d.cost_usd || 0) },
-    { l: "Burn rate", v: "~" + fmtMoney(burn), unit: "/hr", s: "last 2h pace" + notional, spark: null },
-    { l: "Prevented cost (notional)", v: "~" + fmtMoney0(ce.usd_saved || 0), s: `~${Math.round((ce.discount_pct || 0) * 100)}% cheaper · hypothetical · lifetime`, spark: null },
-    { l: "Lifetime $", v: "~" + fmtMoney0(t.cost_usd || 0) + notional, s: `${fmtCompact(t.total_tokens || 0)} token`, spark: daily.slice(-14).map(d => d.cost_usd || 0) },
+    { l: "Spent today", v: "~" + fmtMoney(fc.today?.so_far ?? 0), s: `${fmtInt(todayE.messages || 0)} prompts`, spark: daily.slice(-14).map(d => d.cost_usd || 0) },
+    { l: "Burn rate", v: "~" + fmtMoney(burn), unit: "/hr", s: "avg over last 2h" + est, spark: null },
+    { l: "Cache savings", v: "~" + fmtMoney0(ce.usd_saved || 0), s: `~${Math.round((ce.discount_pct || 0) * 100)}% cheaper than no-cache · all-time est.`, spark: null },
+    { l: "Total spent", v: "~" + fmtMoney0(t.cost_usd || 0), s: `${fmtCompact(t.total_tokens || 0)} tokens · all-time${est}`, spark: daily.slice(-14).map(d => d.cost_usd || 0) },
   ];
   kpis.forEach((k, i) => {
     const n = i + 1;
@@ -752,10 +752,10 @@ function renderCache(rep) {
        <span class="dim" style="font-size:12px">cache hit</span></div>
      <div class="meter-track" style="margin:10px 0"><div class="meter-fill good" style="width:${Math.min(100, hit)}%"></div></div>
      <div style="display:flex;justify-content:space-between;margin-top:14px">
-       <div><div class="num" style="font-size:18px;color:var(--good)">~${fmtMoney0(ce.usd_saved || 0)}</div><div class="dim" style="font-size:11px">prevented cost (hypothetical)</div></div>
-       <div style="text-align:right"><div class="num" style="font-size:18px;color:var(--text-1)">~${fmtMoney0(ce.usd_on_cache || 0)}</div><div class="dim" style="font-size:11px">cache read cost (est.)</div></div>
+       <div><div class="num" style="font-size:18px;color:var(--good)">~${fmtMoney0(ce.usd_saved || 0)}</div><div class="dim" style="font-size:11px">saved by caching (est.)</div></div>
+       <div style="text-align:right"><div class="num" style="font-size:18px;color:var(--text-1)">~${fmtMoney0(ce.usd_on_cache || 0)}</div><div class="dim" style="font-size:11px">you paid for cache (est.)</div></div>
      </div>
-     <div class="dim" style="font-size:11px;margin-top:12px;line-height:1.5">Without cache (same usage) these reads would cost ~${fmtMoney0(ce.full_equiv_usd || 0)} — a rough upper bound (~${Math.round((ce.discount_pct || 0) * 100)}% cheaper).</div>`;
+     <div class="dim" style="font-size:11px;margin-top:12px;line-height:1.5">Caching cut your input cost ~${Math.round((ce.discount_pct || 0) * 100)}%. The same work without it would have cost about ~${fmtMoney0(ce.full_equiv_usd || 0)} (rough estimate).</div>`;
 }
 
 // ---------- aylık BÜTÇE takibi (#7) ----------
@@ -868,7 +868,7 @@ async function renderSyncDevices() {
       `<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;max-width:820px">
          <div style="flex:1;min-width:280px">
            <div style="font-size:14.5px;font-weight:600;color:var(--text-1);margin-bottom:5px">All your machines in one view <span style="color:var(--brand)">✦ Pro</span></div>
-           <div class="dim" style="font-size:12.5px;line-height:1.6">Sync your Claude Code + Codex usage across every device — end-to-end encrypted, the relay only ever sees ciphertext, your raw logs never leave your machine.</div>
+           <div class="dim" style="font-size:12.5px;line-height:1.6">Sync your Claude Code + Codex usage across every device — end-to-end encrypted, so only summaries sync and your raw logs never leave your machine.</div>
          </div>
          <a href="https://burnmeter.dev/#pricing" target="_blank" rel="noopener" class="get-pro-btn">Get Pro →</a>
        </div>`;
@@ -1019,7 +1019,7 @@ function renderProjects(rep) {
 function renderRecent(rep) {
   const isCodex = (rep._meta?.source || "claude") === "codex";
   const rsub = $("recent-sub");
-  if (rsub) rsub.textContent = isCodex ? "pure net (counts against limit)" : "cost-weighted equivalent tokens";
+  if (rsub) rsub.textContent = isCodex ? "tokens that count toward your limit" : "tokens, weighted by cost";
   const turns = (rep.recent_turns || []).filter(t => !String(t.model || "").startsWith("<"));
   const tb = document.querySelector("#recent-tbl tbody");
   if (!turns.length) { tb.innerHTML = `<tr><td colspan="6" class="empty">No activity yet</td></tr>`; return; }
@@ -1048,7 +1048,7 @@ function renderHeatmap(rep) {
     for (let x = 0; x < 24; x++) {
       const v = grid[d][x] || 0, it = mx ? v / mx : 0;
       const lvl = v === 0 ? 0 : it > 0.66 ? 4 : it > 0.33 ? 3 : it > 0.12 ? 2 : 1;
-      h += `<div class="hm-cell lvl${lvl}" title="${days[d]} ${x}:00 · ${fmtInt(v)} token"></div>`;
+      h += `<div class="hm-cell lvl${lvl}" title="${days[d]} ${x}:00 · ${fmtInt(v)} tokens"></div>`;
     }
   }
   body.innerHTML = h + `</div>`;
