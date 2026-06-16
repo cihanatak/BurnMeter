@@ -278,6 +278,33 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 self.address_string(), format % args
             ))
 
+        def do_POST(self):
+            path = urlparse(self.path).path
+            if path == "/api/update":
+                # One-click self-update from the dashboard. CSRF guard: a random
+                # web page can't set this custom header without a CORS preflight
+                # (which we never grant), so only our own same-origin dashboard
+                # reaches the pip install. Source is the fixed official repo.
+                if self.headers.get("X-Burnmeter-Update") != "1":
+                    _json_response(self, 403, {"ok": False, "message": "forbidden"})
+                    return
+                import subprocess
+                from ._proc import NO_WINDOW
+                try:
+                    r = subprocess.run(
+                        [sys.executable, "-m", "pip", "install", "--upgrade",
+                         "git+https://github.com/cihanatak/BurnMeter"],
+                        capture_output=True, text=True, timeout=600,
+                        creationflags=NO_WINDOW)
+                    ok = r.returncode == 0
+                    msg = ("Updated. Restart Burnmeter to apply."
+                           if ok else (r.stderr or r.stdout or "pip failed")[-300:])
+                except Exception as e:
+                    ok, msg = False, str(e)
+                _json_response(self, 200 if ok else 500, {"ok": ok, "message": msg})
+                return
+            _json_response(self, 404, {"ok": False, "message": "not found"})
+
         def do_GET(self):
             url = urlparse(self.path)
             qs = parse_qs(url.query)

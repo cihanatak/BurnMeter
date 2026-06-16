@@ -184,11 +184,38 @@ async function checkForUpdate(current) {
     if (!m || _verCmp(m[1], current) <= 0) return;
     const el = $("update-link");
     if (!el) return;
-    el.textContent = `↑ Update v${m[1]}`;
+    const latest = m[1];
+    el.textContent = `↑ Update to v${latest}`;
     el.href = "https://github.com/cihanatak/BurnMeter";
-    el.title = `New version v${m[1]} is available (you have v${current}).\nUpdate:  pip install --force-reinstall --no-cache-dir git+https://github.com/cihanatak/BurnMeter`;
+    el.title = `New version v${latest} is available (you have v${current}). Click to install.`;
     el.style.display = "";
+    el.onclick = (ev) => { ev.preventDefault(); doDashboardUpdate(latest); };
   } catch (e) { /* offline / blocked → silently skip (local-first) */ }
+}
+
+// One-click update straight from the dashboard: POST to the local server, which
+// runs `pip install --upgrade git+…`. Then the user just restarts Burnmeter.
+async function doDashboardUpdate(latest) {
+  const el = $("update-link"); if (!el || el.dataset.busy === "1") return;
+  el.dataset.busy = "1";
+  const orig = el.textContent;
+  el.textContent = "⏳ Updating…";
+  try {
+    const r = await fetch("/api/update", { method: "POST", headers: { "X-Burnmeter-Update": "1" } });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d.ok) {
+      el.textContent = `✓ Updated to v${latest} — restart Burnmeter`;
+      el.title = "Update installed. Quit & relaunch Burnmeter (tray → Quit, or close the window) to apply.";
+      el.onclick = (ev) => ev.preventDefault();
+    } else {
+      el.textContent = orig; el.dataset.busy = "";
+      alert("Update failed:\n" + (d.message || ("HTTP " + r.status))
+            + "\n\nUpdate manually:\npip install --upgrade git+https://github.com/cihanatak/BurnMeter");
+    }
+  } catch (e) {
+    el.textContent = orig; el.dataset.busy = "";
+    alert("Update failed — couldn't reach the local Burnmeter server.");
+  }
 }
 
 function render(rep) {
@@ -285,6 +312,29 @@ function tickLive() {
     if (seen) { seen.classList.toggle("live", live); seen.innerHTML = seenLabel(Math.max(0, s)); }
   });
 }
+// Re-render the burn-rate gauge from the cached report every few seconds so it
+// reflects the BROWSER's now — decays as time passes, drops to $0 when idle —
+// without a server round-trip. renderSpeedometer / paintBurnGauge are draw-only
+// (no listeners attached), so repeated calls are safe.
+function liveGaugeTick() {
+  const rep = window.__lastReport; if (!rep) return;
+  try {
+    if (rep._combined) {
+      [["claude", rep.claude, false], ["codex", rep.codex, true]].forEach(([side, r, isCodex]) => {
+        const root = document.getElementById("cv-" + side); if (!root || !r) return;
+        paintBurnGauge({
+          svg: root.querySelector(".cv-speedo"),
+          zone: root.querySelector(".cv-zone2"),
+          breakdown: root.querySelector(".cv-breakdown"),
+          title: root.querySelector(".cvb-trow .cvb-t"),
+        }, r, isCodex, localStorage.getItem("burnmeter_burn_hours_" + side) || "2");
+      });
+    } else {
+      renderSpeedometer(rep, window.__source === "codex");
+    }
+  } catch (e) {}
+}
+
 function renderActiveModel(rep) {
   const body = $("active-model-body"); if (!body) return;
   let w = localStorage.getItem("burnmeter_active_window3") || "live"; if (!["live", "1", "5", "15"].includes(w)) w = "live";
@@ -370,9 +420,25 @@ function paintCombinedActive(side, rep) {
 // ===== gauge TEK KAYNAK (single tab renderSpeedometer + İkisi paintBurnGauge ortak) =====
 // Hangi gauge: CODEX rate-limit verisi varsa → binding-constraint rate-limit % (duvar);
 // yoksa (Claude veya limitsiz) → burn-rate $/saat. İki yer de bunu çağırır → ASLA ayrışmaz.
+// LIVE windowed $/hr from the server's per-minute cost buckets, relative to the
+// BROWSER'S now — so the gauge decays as time passes and reads $0 when idle,
+// independent of the server cache TTL (which used to freeze it at build time →
+// "stuck", and never 0 when no project ran). Falls back to the server-computed
+// value for reports from an older server with no recent_costs.
+function liveBurnRate(fc, hoursStr) {
+  const rc = fc.recent_costs, hours = parseFloat(hoursStr) || 2;
+  if (Array.isArray(rc)) {
+    const cut = Date.now() / 1000 - hours * 3600;
+    let cost = 0;
+    for (let i = 0; i < rc.length; i++) if (rc[i][0] >= cut) cost += rc[i][1];
+    return cost / hours;
+  }
+  return (fc.burn_rates_by_hours || {})[hoursStr] ?? fc.burn_rate_per_hour_recent ?? 0;
+}
+
 function computeGaugeSpec(rep, isCodex, hoursStr) {
   const fc = rep.forecast || {};
-  const rate = (fc.burn_rates_by_hours || {})[hoursStr] ?? fc.burn_rate_per_hour_recent ?? 0;
+  const rate = liveBurnRate(fc, hoursStr);
   // Hem Claude HEM Codex → AYNI burn-rate $/saat göstergesi (tutarlılık — kullanıcı
   // talebi). Codex'in rate-limit %'si hero'da DEĞİL; yan kutuda ("Plan limiti · duvar")
   // gösterilir (renderHeroAside) → bilgi kaybolmaz, ama hero her iki araçta da burn.
@@ -1216,5 +1282,6 @@ function start() {
   setInterval(() => refresh(false), 10000);
   setInterval(updateLiveStamp, 1000);
   setInterval(tickLive, 1000);   // canlı aktif model: saniyelik nabız/şimdi güncellemesi
+  setInterval(liveGaugeTick, 5000);   // burn-rate gauge decays live (→ $0 when idle)
 }
 document.addEventListener("DOMContentLoaded", start);

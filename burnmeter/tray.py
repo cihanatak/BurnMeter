@@ -135,12 +135,36 @@ def run_tray(host: str = "127.0.0.1", port: int = 7654, projects_dir=None,
             elif manual:
                 _notify(icon, f"You're on the latest version (v{__version__}).")
 
+        def _do_update(icon):
+            import subprocess
+            from ._proc import NO_WINDOW
+            _notify(icon, "Updating Burnmeter — this can take a minute…", "Updating")
+            try:
+                r = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "--upgrade",
+                     "git+https://github.com/cihanatak/BurnMeter"],
+                    capture_output=True, text=True, timeout=600, creationflags=NO_WINDOW)
+                ok = r.returncode == 0
+            except Exception:
+                ok = False
+            if ok:
+                _notify(icon, f"Updated to v{update['latest']}. Right-click the tray icon "
+                              f"→ Quit, then start Burnmeter again to apply.", "Update complete")
+            else:
+                _notify(icon, "Update failed. From a terminal:\n"
+                              "pip install --upgrade git+https://github.com/cihanatak/BurnMeter",
+                        "Update failed")
+
         def _update_text(item):
             v = update["latest"]
-            return f"⬆ Update available: v{v}" if v else "Check for updates"
+            return f"⬆ Update to v{v} (click to install)" if v else "Check for updates"
 
         def _on_check(icon, item):
-            threading.Thread(target=lambda: _do_check(icon, manual=True), daemon=True).start()
+            # When an update is known, the item installs it; otherwise it re-checks.
+            if update["latest"]:
+                threading.Thread(target=lambda: _do_update(icon), daemon=True).start()
+            else:
+                threading.Thread(target=lambda: _do_check(icon, manual=True), daemon=True).start()
 
         def _on_ready(icon):
             # pystray calls setup() on its loop thread once the icon is actually

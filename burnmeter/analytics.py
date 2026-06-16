@@ -1532,12 +1532,32 @@ def forecast(records: list[UsageRecord], daily: list[dict]) -> dict:
         rows.sort(key=lambda x: x["cost_per_hour"], reverse=True)
         burn_rates_by_hours_by_model[str(hours)] = rows
 
+    # Compact per-minute cost buckets for the last 6h so the CLIENT can compute a
+    # LIVE burn rate against ITS OWN clock — the gauge then decays as time passes
+    # and drops to 0 when idle, instead of being frozen at server build time
+    # (which made it look "stuck" and never reach 0 when no project was running).
+    rc_cut = now - timedelta(hours=6)
+    rc_buckets: dict[int, float] = defaultdict(float)
+    for r in records:
+        if r.timestamp < rc_cut:
+            continue
+        minute = int(r.timestamp.timestamp()) // 60 * 60
+        rc_buckets[minute] += estimate_cost_usd(
+            r.model,
+            input_tokens=r.input_tokens,
+            output_tokens=r.output_tokens,
+            cache_read_tokens=r.cache_read_tokens,
+            cache_creation_tokens=r.cache_creation_tokens,
+        )
+    recent_costs = sorted([m, round(c, 4)] for m, c in rc_buckets.items())
+
     return {
         "now": now.isoformat(),
         "burn_rate_per_hour_recent": round(burn_rate_now, 2),
         "burn_rate_recent_window_hours": round(hours_elapsed_2h, 2),
         "burn_rates_by_hours": burn_rates_by_hours,
         "burn_rates_by_hours_by_model": burn_rates_by_hours_by_model,
+        "recent_costs": recent_costs,
         "today": {
             "so_far": round(today_so_far, 2),
             "projected_eod": round(today_projected, 2),
