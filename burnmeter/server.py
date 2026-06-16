@@ -175,6 +175,11 @@ def _file_response(handler: BaseHTTPRequestHandler, path: Path, content_type: st
 # the pidfile describes (not merely "a" Burnmeter on that port).
 _INSTANCE_TOKEN: Optional[str] = None
 
+# Set by the active launcher to a callable that cleanly stops THIS instance:
+# icon.stop in tray mode, server.shutdown in console mode. trigger_restart() calls
+# it so a one-click update can exit gracefully and a relauncher rebinds the port.
+_RESTART_HOOK = None
+
 
 def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
 
@@ -301,11 +306,21 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                         capture_output=True, text=True, timeout=600,
                         creationflags=NO_WINDOW)
                     ok = r.returncode == 0
-                    msg = ("Updated. Quit Burnmeter and open it again to apply."
+                    msg = ("Updated — restarting Burnmeter…"
                            if ok else (r.stderr or r.stdout or "pip failed")[-300:])
                 except Exception as e:
                     ok, msg = False, str(e)
                 _json_response(self, 200 if ok else 500, {"ok": ok, "message": msg})
+                if ok:
+                    # Auto-restart so the user doesn't have to quit/reopen. Done
+                    # AFTER the response flushes (brief delay), off the request path.
+                    host, port = self.server.server_address[0], self.server.server_address[1]
+                    def _restart_later():
+                        time.sleep(0.8)
+                        # The dashboard tab polls /api/health and reloads itself,
+                        # so don't pop a duplicate browser tab.
+                        trigger_restart(host, port, open_browser=False)
+                    threading.Thread(target=_restart_later, daemon=True).start()
                 return
             _json_response(self, 404, {"ok": False, "message": "not found"})
 
@@ -455,6 +470,47 @@ def _open_browser_async(url: str, delay: float = 1.2) -> None:
         except Exception:
             pass
     threading.Thread(target=_open, daemon=True).start()
+
+
+def _spawn_relaunch(host: str, port: int, open_browser: bool = True) -> bool:
+    """Spawn a DETACHED helper that waits for THIS instance to exit, then starts a
+    fresh Burnmeter (running the freshly-installed code). Returns True on spawn.
+    open_browser=False when the dashboard initiated it (that tab reloads itself,
+    so we don't pop a duplicate)."""
+    import subprocess
+    from ._proc import NO_WINDOW
+    from . import desktop
+    argv = [desktop._pythonw(sys.executable), "-m", "burnmeter", "_relaunch",
+            "--host", str(host), "--port", str(port)]
+    if not open_browser:
+        argv.append("--no-browser")
+    try:
+        kw = {"close_fds": True, "cwd": str(Path.home())}
+        if sys.platform == "win32":
+            # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+            kw["creationflags"] = 0x00000008 | 0x00000200 | NO_WINDOW
+        else:
+            kw["start_new_session"] = True
+        subprocess.Popen(argv, **kw)
+        return True
+    except Exception:
+        return False
+
+
+def trigger_restart(host: str, port: int, open_browser: bool = True) -> None:
+    """One-click-update restart: spawn the relauncher, then stop THIS instance so
+    it exits and frees the port → the relauncher rebinds with the new code. Falls
+    back to os._exit(0) if there's no clean restart hook (self-heal handles the
+    leftover pidfile)."""
+    _spawn_relaunch(host, port, open_browser=open_browser)
+    hook = _RESTART_HOOK
+    if hook is not None:
+        try:
+            hook()
+            return
+        except Exception:
+            pass
+    os._exit(0)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -696,6 +752,10 @@ def serve(host: str = "127.0.0.1", port: int = 7654,
         return
 
     h.start_warm()
+    # Console restart hook: shutdown() unblocks serve_forever → serve() returns and
+    # the process exits (so a one-click update's relauncher can rebind the port).
+    global _RESTART_HOOK
+    _RESTART_HOOK = h.server.shutdown
     if open_browser:
         _open_browser_async(h.url)
 

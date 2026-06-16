@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import time
 
 from . import __version__
 from .server import setup_server, _already_running, _open_browser_async
@@ -152,8 +153,10 @@ def run_tray(host: str = "127.0.0.1", port: int = 7654, projects_dir=None,
             except Exception:
                 ok = False
             if ok:
-                _notify(icon, f"Updated to v{update['latest']}. Right-click the tray icon "
-                              f"→ Quit, then open Burnmeter again to apply.", "Update complete")
+                _notify(icon, f"Updated to v{update['latest']} — restarting Burnmeter…", "Updating")
+                from .server import trigger_restart
+                time.sleep(0.8)          # let the notification surface first
+                trigger_restart(h.host, h.port)   # spawns relauncher + quits this one
             else:
                 _notify(icon, "Update failed. From a terminal:\n"
                               "pip install --force-reinstall --no-cache-dir "
@@ -204,6 +207,10 @@ def run_tray(host: str = "127.0.0.1", port: int = 7654, projects_dir=None,
             title=f"Burnmeter v{__version__} — {h.url}",
             menu=menu,
         )
+        # Tray restart hook: a one-click update calls this to quit cleanly → the
+        # relauncher then rebinds the port with the freshly-installed code.
+        from . import server as _server_mod
+        _server_mod._RESTART_HOOK = icon.stop
         icon.run(setup=_on_ready)        # BLOCKS on the main thread until Quit
     except Exception as e:
         raise TrayUnavailable(f"tray failed: {e}") from e

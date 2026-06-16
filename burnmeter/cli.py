@@ -370,6 +370,30 @@ def cmd_tray(args):
         return 0
 
 
+def cmd_relaunch(args):
+    """Internal: wait for the previous Burnmeter on this port to exit, then start a
+    fresh tray running the freshly-installed code. Spawned by the one-click update's
+    auto-restart. Falls back to console serve so Burnmeter never just vanishes."""
+    import time, urllib.request
+    url = f"http://{args.host}:{args.port}/api/health"
+    for _ in range(60):                       # up to ~30s for the old one to go down
+        try:
+            urllib.request.urlopen(url, timeout=1).read()
+            time.sleep(0.5)                   # still up → keep waiting
+        except Exception:
+            break                             # down → proceed
+    time.sleep(1.5)                           # let the socket fully release
+    ob = not getattr(args, "no_browser", False)
+    common = dict(host=args.host, port=args.port)
+    try:
+        from . import tray as traymod
+        return traymod.run_tray(open_browser=ob, **common)
+    except Exception:
+        from .server import serve
+        serve(open_browser=ob, **common)
+        return 0
+
+
 def cmd_stop(args):
     """Stop a backgrounded Burnmeter server.
 
@@ -681,6 +705,11 @@ def main(argv=None):
     p_tray.add_argument("--codex-days", type=int, default=90,
                         help="recent days of Codex history to scan (default 90; 0 = all-time)")
 
+    p_relaunch = sub.add_parser("_relaunch", help=argparse.SUPPRESS)   # internal (auto-restart)
+    p_relaunch.add_argument("--host", default="127.0.0.1")
+    p_relaunch.add_argument("--port", type=int, default=7654)
+    p_relaunch.add_argument("--no-browser", action="store_true")
+
     sub.add_parser("stop",
                    help="stop a backgrounded dashboard (the tray / windowless one)")
 
@@ -726,6 +755,7 @@ def main(argv=None):
         "sessions": cmd_sessions,
         "serve": cmd_serve,
         "tray": cmd_tray,
+        "_relaunch": cmd_relaunch,
         "stop": cmd_stop,
         "statusline": cmd_statusline,
         "sync": cmd_sync,

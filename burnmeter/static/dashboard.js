@@ -204,9 +204,10 @@ async function doDashboardUpdate(latest) {
     const r = await fetch("/api/update", { method: "POST", headers: { "X-Burnmeter-Update": "1" } });
     const d = await r.json().catch(() => ({}));
     if (r.ok && d.ok) {
-      el.textContent = `✓ Updated to v${latest} — restart Burnmeter`;
-      el.title = "Update installed. Quit & relaunch Burnmeter (tray → Quit, or close the window) to apply.";
+      el.textContent = `⏳ Updating to v${latest} — restarting…`;
+      el.title = "Burnmeter is restarting itself; this page will reload on the new version.";
       el.onclick = (ev) => ev.preventDefault();
+      waitForRestartAndReload(latest);     // server restarts itself; reload when back
     } else {
       el.textContent = orig; el.dataset.busy = "";
       alert("Update failed:\n" + (d.message || ("HTTP " + r.status))
@@ -216,6 +217,23 @@ async function doDashboardUpdate(latest) {
     el.textContent = orig; el.dataset.busy = "";
     alert("Update failed — couldn't reach the local Burnmeter server.");
   }
+}
+
+// After a one-click update the server restarts itself on the same port. Wait for
+// it to go down and come back, then reload THIS tab onto the new version.
+async function waitForRestartAndReload(latest) {
+  let downSeen = false;
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 1000));
+    try {
+      const r = await fetch("/api/health", { cache: "no-store" });
+      if (r.ok) {
+        const d = await r.json().catch(() => ({}));
+        if (downSeen || d.version === latest) { location.reload(); return; }
+      }
+    } catch (e) { downSeen = true; }   // server is down → mid-restart
+  }
+  const el = $("update-link"); if (el) el.textContent = `✓ Updated to v${latest} — reload`;
 }
 
 function render(rep) {
