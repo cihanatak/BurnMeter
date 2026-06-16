@@ -393,8 +393,10 @@ def cmd_stop(args):
     killed = False
     try:
         if sys.platform == "win32":
+            from ._proc import NO_WINDOW
             r = subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"],
-                               capture_output=True, text=True)
+                               capture_output=True, text=True,
+                               creationflags=NO_WINDOW)
             killed = r.returncode == 0
         else:
             import signal

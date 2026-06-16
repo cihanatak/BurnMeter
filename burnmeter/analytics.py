@@ -37,6 +37,7 @@ from typing import Iterable, Optional
 
 from .parser import UsageRecord
 from .pricing import estimate_cost_usd, family_from_model, effective_tokens, price_for
+from ._proc import NO_WINDOW as _NO_WINDOW
 
 
 # Anthropic plan token budgets per 5-hour window (approximate; Anthropic
@@ -759,6 +760,9 @@ def _git_log(repo_path: Path, since_days: int) -> list[dict]:
             # chokes on →/emoji/Turkish bytes in commit subjects). errors="replace"
             # guarantees a decode can never crash this worker.
             encoding="utf-8", errors="replace",
+            # No console window — git is spawned on every build; under the
+            # windowless tray it would otherwise flash a cmd window each time.
+            creationflags=_NO_WINDOW,
         )
     except (subprocess.SubprocessError, FileNotFoundError, OSError, UnicodeError):
         return []

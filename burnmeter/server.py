@@ -61,11 +61,15 @@ class _Cache:
     def _run_worker(self) -> Optional[dict]:
         """Spawn the build worker; return its report dict or None on failure."""
         import subprocess
+        from ._proc import NO_WINDOW
         try:
             proc = subprocess.run(
                 [sys.executable, "-m", "burnmeter._worker"],
                 input=json.dumps(self.worker_config or {}),
                 capture_output=True, text=True, timeout=1200,
+                # No console window — else under the windowless tray this child
+                # pops (flashes) a cmd window every rebuild.
+                creationflags=NO_WINDOW,
             )
             if proc.returncode != 0:
                 sys.stderr.write(f"[burnmeter] worker rc={proc.returncode}: {proc.stderr[:300]}\n")

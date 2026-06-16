@@ -157,10 +157,12 @@ def _win(desktop: Path, py: str, port: int) -> Path:
     )
     cmd = desktop / "Burnmeter.cmd"
     try:
+        from ._proc import NO_WINDOW
         subprocess.run(
             ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
             check=True, capture_output=True, timeout=25,
             encoding="utf-8", errors="replace",
+            creationflags=NO_WINDOW,       # no PowerShell window flash under the tray
         )
         _rm(cmd)                       # drop a stale .cmd sibling so only the .lnk remains
         return lnk
