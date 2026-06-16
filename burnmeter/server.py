@@ -62,7 +62,7 @@ class _Cache:
             proc = subprocess.run(
                 [sys.executable, "-m", "burnmeter._worker"],
                 input=json.dumps(self.worker_config or {}),
-                capture_output=True, text=True, timeout=600,
+                capture_output=True, text=True, timeout=1200,
             )
             if proc.returncode != 0:
                 sys.stderr.write(f"[burnmeter] worker rc={proc.returncode}: {proc.stderr[:300]}\n")

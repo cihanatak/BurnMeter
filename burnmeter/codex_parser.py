@@ -337,8 +337,15 @@ def load_codex_records(
                 prev = dedup.get(k)
                 if prev is None or rec.timestamp < prev.timestamp:
                     dedup[k] = rec
+            # Persist progress every ~25 parsed files so a slow/interrupted build of a
+            # huge ~/.codex (50 GB+) RESUMES from where it stopped instead of re-parsing
+            # from scratch — it eventually completes + caches, so the Codex/combined tab
+            # stops "hanging forever".
+            if reparsed and reparsed % 25 == 0:
+                _save_cache(new_cache)
 
-    _save_cache(new_cache)
+    if new_cache:                 # never clobber a good cache with an empty scan
+        _save_cache(new_cache)
     records = list(dedup.values())
     records.sort(key=lambda r: r.timestamp)
     return records, {

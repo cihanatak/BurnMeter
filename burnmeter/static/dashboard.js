@@ -687,10 +687,12 @@ async function renderSyncDevices() {
   } catch (e) { return; }   // server eski olabilir → sessizce geç
   if (!data.configured) {
     body.innerHTML =
-      `<div class="dim" style="font-size:12.5px;line-height:1.55;max-width:620px">
-         <span style="color:var(--text-3)">Pro cross-device sync is off.</span> See your other machines'
-         usage here — end-to-end encrypted, the relay only sees ciphertext, raw logs never leave.
-         <div style="margin-top:9px;font:500 11px/1.5 var(--font-mono);color:var(--text-4)">burnmeter sync login --relay &lt;url&gt; --token &lt;token&gt;<br>burnmeter sync push</div>
+      `<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;max-width:820px">
+         <div style="flex:1;min-width:280px">
+           <div style="font-size:14.5px;font-weight:600;color:var(--text-1);margin-bottom:5px">All your machines in one view <span style="color:var(--brand)">✦ Pro</span></div>
+           <div class="dim" style="font-size:12.5px;line-height:1.6">Sync your Claude Code + Codex usage across every device — end-to-end encrypted, the relay only ever sees ciphertext, your raw logs never leave your machine.</div>
+         </div>
+         <a href="/pricing" target="_blank" rel="noopener" class="get-pro-btn">Get Pro →</a>
        </div>`;
     return;
   }
