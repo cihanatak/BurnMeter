@@ -315,7 +315,7 @@ function computeGaugeSpec(rep, isCodex, hoursStr) {
   const g = {
     value: rate, max: z.max || 50, zones: z,
     ticks: zd
-      ? [{ v: 0, l: "$0" }, { v: z.typical, l: "typical (default)" }, { v: z.busy, l: "busy (default)" }, { v: z.heavy, l: "heavy" }]
+      ? [{ v: 0, l: "$0" }, { v: z.typical, l: "plan-typical" }, { v: z.busy, l: "plan-busy" }, { v: z.heavy, l: "plan-heavy" }]
       : [{ v: 0, l: "$0" }, { v: z.typical, l: "your typical" }, { v: z.busy, l: "your heavy (P90)" }, { v: z.heavy, l: "very heavy" }],
     valueText: fmtMoney(rate),
     unitText: `/hr · last ${hoursStr === "0.0833" ? "5m" : hoursStr === "0.25" ? "15m" : hoursStr + "h"} avg${isCodex ? " (notional)" : " (est. $)"}`,
@@ -324,7 +324,7 @@ function computeGaugeSpec(rep, isCodex, hoursStr) {
         : rate >= z.typical ? ["warn", "🟡 above normal"]
         :                  ["good", "🟢 calm · efficient"],
     ratio: rep.current_window?.vs_baseline_ratio, below: rate < z.typical,
-    note: zd ? "Thresholds are defaults — no personal pace history yet."
+    note: zd ? "Plan-typical market estimate — recalibrates to your own pace over the next day or two."
              : "Thresholds from your past 5s windows (P50/P90).",
   };
   return { g, rate, fc, isLimit: false };

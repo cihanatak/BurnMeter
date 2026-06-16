@@ -442,7 +442,10 @@ def window_baseline(windows: list[dict]) -> dict:
     past = windows[:-1]
     billable = sorted(w.get("billable_tokens", 0) for w in past if w.get("billable_tokens", 0) > 0)
     costs = sorted(w.get("cost_usd", 0.0) for w in past if w.get("cost_usd", 0.0) > 0)
-    if len(billable) < 3:
+    if len(billable) < 8:
+        # Need enough windows for a stable P90 — fewer than this and one intense early
+        # session would define "busy" and mis-scale the gauge. Until then the UI uses the
+        # plan-aware market-normal zones (burn_rate_zones falls back on missing cost_p90).
         return {"samples": len(billable)}
     return {
         "samples": len(billable),
@@ -1554,30 +1557,49 @@ def forecast(records: list[UsageRecord], daily: list[dict]) -> dict:
     }
 
 
-def burn_rate_zones(window_baseline_data: dict) -> dict:
-    """Speedometer zone boundaries based on user's own historical windows.
+# Market-normal $/hr gauge zones by plan tier — the COLD-START baseline (blended out as
+# the user's own history accrues). Without this a brand-new user got arbitrary numbers and
+# a meaningless verdict ("$10 in 5 min = very heavy"). Derived from the public flat-fee
+# prices ($20 Pro / $100 Max-5x / $200 Max-20x) ÷ ~30-50 active hrs/mo for a per-hour value
+# anchor ("typical"), then ~2× (busy), ~4× (heavy); max = gauge ceiling.
+_MARKET_ZONES = {
+    "pro":   {"typical": 8.0,  "busy": 18.0, "heavy": 35.0,  "max": 60.0},
+    "max5":  {"typical": 15.0, "busy": 35.0, "heavy": 70.0,  "max": 120.0},
+    "max20": {"typical": 30.0, "busy": 70.0, "heavy": 140.0, "max": 240.0},
+}
 
-    Cost in a 5h window / 5 = average $/hr during that window.
-    """
-    if not window_baseline_data.get("samples"):
-        # Not enough personal history yet → default thresholds (NOT derived from
-        # the user's own data). Flag it so the UI labels them as "varsayılan"
-        # instead of presenting them as measured personal zones.
-        return {
-            "typical": 4.0,
-            "busy": 12.0,
-            "heavy": 25.0,
-            "max": 50.0,
-            "insufficient_history": True,
-        }
-    typical = (window_baseline_data.get("cost_p50") or 0) / 5.0
-    busy = (window_baseline_data.get("cost_p90") or 0) / 5.0
-    return {
-        "typical": round(typical, 2),
-        "busy": round(busy, 2),
-        "heavy": round(busy * 2, 2),
-        "max": round(busy * 3, 2),
+
+def _market_zones(plan_guess: Optional[str]) -> dict:
+    g = (plan_guess or "").lower()
+    if "20" in g:
+        return dict(_MARKET_ZONES["max20"])
+    if "max" in g or "5" in g:
+        return dict(_MARKET_ZONES["max5"])
+    return dict(_MARKET_ZONES["pro"])   # pro / codex pro / unknown → conservative Pro band
+
+
+def burn_rate_zones(window_baseline_data: dict, plan_guess: Optional[str] = None) -> dict:
+    """Speedometer zone boundaries ($/hr). Cold start = plan-aware MARKET-NORMAL zones (a
+    sensible scale for a brand-new user); as the user's own 5h-window history builds we
+    BLEND smoothly to their personal P50/P90 over windows ~8→16, so one intense early
+    session can't permanently mis-scale the gauge. Cost in a 5h window / 5 = avg $/hr."""
+    mkt = _market_zones(plan_guess)
+    cp90 = window_baseline_data.get("cost_p90")
+    if not cp90:
+        # 0-7 windows / no stable personal P90 yet → market-normal estimate.
+        return {**mkt, "insufficient_history": True, "market_default": True,
+                "plan_basis": (plan_guess or "pro")}
+    n = window_baseline_data.get("samples") or 0
+    p_busy = cp90 / 5.0
+    personal = {
+        "typical": (window_baseline_data.get("cost_p50") or 0) / 5.0,
+        "busy": p_busy, "heavy": p_busy * 2.0, "max": max(p_busy * 3.0, 1.0),
     }
+    # Blend market→personal over windows 8..16 (w: 0→1) for a smooth, several-day handoff.
+    w = max(0.0, min(1.0, (n - 8) / 8.0))
+    blended = {k: round((1 - w) * mkt[k] + w * personal[k], 2)
+               for k in ("typical", "busy", "heavy", "max")}
+    return {**blended, "blend_ratio": round(w, 2), "plan_basis": (plan_guess or "pro")}
 
 
 def errors_summary(error_events: list[dict], lookback_hours: int = 24) -> dict:
@@ -1882,7 +1904,7 @@ def build_report(
             "24": burn_rate_timeseries(records, bucket_hours=24, num_buckets=120),
         },
         "forecast": forecast(records, daily),
-        "burn_rate_zones": burn_rate_zones(window_baseline(windows)),
+        "burn_rate_zones": burn_rate_zones(window_baseline(windows), plan_guess.get("guess")),
         "live_active_models_by_window": {
             "1":    live_active_models(records, lookback_min=1),
             "5":    live_active_models(records, lookback_min=5),
