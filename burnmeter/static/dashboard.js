@@ -164,6 +164,33 @@ function deviceBadge(dev) {
   return d ? `<span class="badge ${d}">${esc(d)}</span>` : "";
 }
 
+// ---------- in-dashboard update check ----------
+// Users install via `pip install git+…` and otherwise have no way to know a new version
+// shipped. On load we check the version on GitHub (a single GET to a public file — no
+// user data sent) and show a small "↑ Update" pill if newer. Fail-silent when offline.
+function _verCmp(a, b) {
+  const pa = String(a).split(".").map(n => parseInt(n, 10) || 0);
+  const pb = String(b).split(".").map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d > 0 ? 1 : -1; }
+  return 0;
+}
+async function checkForUpdate(current) {
+  if (!current || current === "?" || window.__updateChecked) return;
+  window.__updateChecked = true;
+  try {
+    const r = await fetch("https://raw.githubusercontent.com/cihanatak/BurnMeter/main/burnmeter/__init__.py", { cache: "no-store" });
+    if (!r.ok) return;
+    const m = (await r.text()).match(/__version__\s*=\s*["']([\d.]+)["']/);
+    if (!m || _verCmp(m[1], current) <= 0) return;
+    const el = $("update-link");
+    if (!el) return;
+    el.textContent = `↑ Update v${m[1]}`;
+    el.href = "https://github.com/cihanatak/BurnMeter";
+    el.title = `New version v${m[1]} is available (you have v${current}).\nUpdate:  pip install --force-reinstall --no-cache-dir git+https://github.com/cihanatak/BurnMeter`;
+    el.style.display = "";
+  } catch (e) { /* offline / blocked → silently skip (local-first) */ }
+}
+
 function render(rep) {
   { const cv = $("combined-view"); if (cv) cv.style.display = "none";
     const mn = document.querySelector("main"); if (mn) mn.style.display = ""; }
@@ -176,6 +203,7 @@ function render(rep) {
   $("brand-logo").textContent = isCodex ? "⌬" : "◔";
   document.title = "Burnmeter — AI coding fuel gauge";
   $("version").textContent = "v" + (rep._meta?.version || "?");
+  checkForUpdate(rep._meta?.version);
   $("data-source").textContent = `${rep._meta?.files_scanned ?? "?"} files · ${fmtInt(rep.record_count || 0)} records`;
 
   renderSpeedometer(rep, isCodex);
@@ -254,6 +282,7 @@ function renderCombined(cl, cx) {
   $("app-name").textContent = "Burnmeter"; $("brand-logo").textContent = "◫";
   document.title = "Burnmeter — Claude + Codex";
   $("version").textContent = "v" + (cl._meta?.version || cx._meta?.version || "?");
+  checkForUpdate(cl._meta?.version || cx._meta?.version);
   window.__multiDevice = new Set([...Object.keys(cl.by_device || {}), ...Object.keys(cx.by_device || {})]).size > 1;
   $("data-source").textContent = `Claude ${fmtInt(cl.record_count || 0)} · Codex ${fmtInt(cx.record_count || 0)} records`;
   $("last-updated").textContent = "now";

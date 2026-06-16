@@ -440,3 +440,10 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
   border-radius:var(--radius-full); padding:11px 20px; letter-spacing:.01em; transition:transform .15s, box-shadow .15s;
   box-shadow:0 6px 18px -6px rgba(94,106,210,.6); }
 .get-pro-btn:hover{ transform:translateY(-1px); box-shadow:0 10px 24px -6px rgba(94,106,210,.75); color:#fff; }
+
+/* "↑ Update vX" pill — shown when a newer version exists on GitHub */
+.update-pill{ display:inline-flex; align-items:center; text-decoration:none; white-space:nowrap;
+  font:600 11px/1 var(--font-sans); color:var(--good); background:var(--good-bg);
+  border:1px solid rgba(43,217,107,.42); border-radius:var(--radius-full); padding:4px 10px;
+  margin-left:2px; cursor:pointer; transition:.15s; }
+.update-pill:hover{ background:rgba(43,217,107,.2); color:var(--good); }
