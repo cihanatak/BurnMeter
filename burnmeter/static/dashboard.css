@@ -41,7 +41,7 @@
   /* ---- Spacing ---- */
   --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s8:32px; --s10:40px;
   --radius-sm:6px; --radius-md:10px; --radius-lg:14px; --radius-full:9999px;
-  --gap:16px; --pad:20px; --pad-lg:24px; --maxw:min(95vw, 2600px); --page-pad:28px;
+  --gap:16px; --pad:20px; --pad-lg:24px; --maxw:min(94vw, 1900px); --page-pad:28px;
 
   /* ---- Fonts ---- */
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -134,8 +134,8 @@ header {
 .alert-toast.crit { border-color:#F2555A; color:#F2555A; }
 /* ---------- aktivite ısı haritası ---------- */
 .hm-grid { display:grid; grid-template-columns:36px repeat(24, 1fr); gap:2px; align-items:center; }
-.hm-hour { font-size:8.5px; color:var(--text-4); text-align:center; }
-.hm-day { font-size:9.5px; color:var(--text-3); }
+.hm-hour { font-size:11px; color:var(--text-4); text-align:center; }
+.hm-day { font-size:11px; color:var(--text-3); }
 .hm-cell { height:16px; border-radius:2px; background:var(--bg-inset); transition:transform .1s; }
 .hm-cell:hover { transform:scale(1.25); }
 .hm-cell.lvl1 { background:rgba(43,217,107,.20); }
@@ -187,11 +187,11 @@ main.gs-active { display:block; }
 .am-seen.live { color:#2BD96B !important; font-weight:600; }
 .am-name { font-weight:600; display:flex; align-items:center; gap:7px; min-width:0; color:var(--text-2); }
 .am-name .am-modelname { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.am-row .badge { height:16px; padding:0 6px; font-size:9.5px; flex-shrink:0; }
+.am-row .badge { height:16px; padding:0 6px; font-size:10.5px; flex-shrink:0; }
 .am-top .am-name { color:var(--text-1); }
 .am-tpm, .am-rate { font-variant-numeric:tabular-nums; color:var(--text-2); }
-.am-msg { font-size:11px; }
-.am-seen { font-size:10.5px; text-align:right; min-width:52px; color:var(--text-3); }
+.am-msg { font-size:11.5px; }
+.am-seen { font-size:11.5px; text-align:right; min-width:56px; color:var(--text-3); }
 
 /* ---------- combined "her ikisi" görünümü (Claude | Codex yan yana) ---------- */
 .combined-view { display:none; max-width:var(--maxw); margin:18px auto 0; padding:0 var(--page-pad); }
@@ -216,10 +216,10 @@ main.gs-active { display:block; }
 .cvr-row:last-child { border-bottom:none; }
 .cvr-proj { display:flex; align-items:center; gap:6px; min-width:0; color:var(--text-2); }
 .cvr-proj .cvr-projname { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.cvr-row .badge { height:16px; padding:0 6px; font-size:9.5px; flex-shrink:0; }
+.cvr-row .badge { height:16px; padding:0 6px; font-size:10.5px; flex-shrink:0; }
 .cvr-tok { font-variant-numeric:tabular-nums; color:var(--text-3); }
 .cv-herobox .cvb-trow { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:6px; }
-.cv-speedo { width:100%; max-width:330px; height:auto; display:block; margin:2px auto 0; }
+.cv-speedo { width:100%; max-width:420px; height:auto; display:block; margin:2px auto 0; }
 .cv-zone2 { font-size:13px; font-weight:600; text-align:center; margin-top:2px; }
 .cv-zone2.good{ color:#2BD96B } .cv-zone2.warn{ color:#F5A623 } .cv-zone2.bad{ color:#F2555A }
 .cv-breakdown { margin-top:12px; }
@@ -265,7 +265,7 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
 .kpi-label { font:600 11px/1 var(--font-sans); letter-spacing:.06em; text-transform:uppercase; color: var(--text-3); margin-bottom:10px; }
 .kpi-value { font:600 28px/1.1 var(--font-mono); color: var(--text-1); font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
 .kpi-value small { font-size:14px; color: var(--text-3); font-weight:500; margin-left:3px; }
-.kpi-sub { font:500 11px/1.3 var(--font-mono); color: var(--text-3); margin-top:8px; }
+.kpi-sub { font:500 12px/1.4 var(--font-mono); color: var(--text-3); margin-top:8px; }
 .kpi-spark { margin-top:10px; height:34px; }
 
 /* ---------- Meter (linear) ---------- */
@@ -303,19 +303,19 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
 /* ── SPEEDOMETER (araba göstergesi) — burn rate car gauge ──────────── */
 .speedo-wrap { display:flex; align-items:center; gap:var(--s6); }
 @media (max-width:640px){ .speedo-wrap{ flex-direction:column; } }
-#speedo-svg { width:330px; max-width:100%; height:auto; flex-shrink:0; }
+#speedo-svg { width:clamp(300px, 24vw, 480px); max-width:100%; height:auto; flex-shrink:0; }
 .speedo-zone-green  { stroke:var(--good); opacity:.9; }
 .speedo-zone-yellow { stroke:var(--warn); opacity:.9; }
 .speedo-zone-orange { stroke:#f0883e; opacity:.9; }
 .speedo-zone-red    { stroke:var(--bad); opacity:.9; }
 .speedo-hub { fill:var(--text-1); }
 .speedo-value { fill:var(--text-1); font:600 38px var(--font-mono); text-anchor:middle; }
-.speedo-unit  { fill:var(--text-3); font:500 12px var(--font-sans); text-anchor:middle; }
-.speedo-tick-label { fill:var(--text-4); font:500 10px var(--font-mono); }
+.speedo-unit  { fill:var(--text-3); font:500 13px var(--font-sans); text-anchor:middle; }
+.speedo-tick-label { fill:var(--text-4); font:500 11.5px var(--font-mono); }
 .speedo-zone-txt { font:600 14px/1.4 var(--font-sans); margin-bottom:4px; }
 .speedo-zone-txt.good{color:var(--good)} .speedo-zone-txt.warn{color:var(--warn)} .speedo-zone-txt.bad{color:var(--bad)}
 .speedo-breakdown { display:flex; flex-direction:column; gap:5px; margin-top:12px; }
-.sb-row { display:flex; align-items:center; gap:8px; font:500 12px/1 var(--font-mono); }
+.sb-row { display:flex; align-items:center; gap:8px; font:500 12.5px/1.5 var(--font-mono); }
 .sb-name { color:var(--text-2); min-width:88px; } .sb-val { color:var(--text-1); } .sb-share { color:var(--text-4); }
 .sb-row.opus .sb-name{color:#c4a8f5} .sb-row.sonnet .sb-name{color:#7cc0ff} .sb-row.haiku .sb-name{color:#6fdc8c} .sb-row.fable .sb-name{color:#ef7fd0}
 .sb-row.gpt-55 .sb-name,.sb-row.gpt-54 .sb-name,.sb-row.gpt-codex .sb-name,.sb-row.gpt-mini .sb-name{color:#1fd6a6}
@@ -323,7 +323,7 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
 /* trend MA indicator buttons */
 .indicator-bar { display:flex; align-items:center; gap:6px; margin:4px 0 10px; }
 .indicator-btn { background:var(--bg-raised); color:var(--text-3); border:1px solid var(--border-subtle);
-  border-radius:5px; padding:2px 8px; font:500 10px/1 var(--font-mono); cursor:pointer; transition:.12s; }
+  border-radius:5px; padding:3px 9px; font:500 12px/1.3 var(--font-mono); cursor:pointer; transition:.12s; }
 .indicator-btn:hover{ color:var(--text-1); }
 .indicator-btn.active{ color:var(--text-1); border-color:var(--border-strong); }
 .indicator-btn.ma-7.active{ background:rgba(94,106,210,.2); color:#8b97ff; border-color:#5E6AD2; }
@@ -374,7 +374,7 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
 /* ---------- Window picker ---------- */
 .picker { display:inline-flex; gap:2px; }
 .picker button { background:var(--bg-raised); color:var(--text-3); border:1px solid var(--border-subtle);
-  border-radius:5px; padding:2px 7px; font:500 10px/1 var(--font-mono); cursor:pointer; transition:all .12s; }
+  border-radius:5px; padding:3px 9px; font:600 12px/1.3 var(--font-mono); cursor:pointer; transition:all .12s; }
 .picker button:hover{ color:var(--text-1); }
 .picker button.active{ background:var(--accent); color:#fff; border-color:var(--accent); }
 /* "Canlı" penceresi seçiliyken yeşil — canlılık anlamı tek bakışta */
@@ -400,7 +400,7 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
 .sync-dot { width:8px; height:8px; border-radius:50%; background:var(--border-strong); flex-shrink:0; }
 .sync-dot.live { background:var(--good); }
 .sync-dot.bad { background:var(--bad); }
-.sync-badge { font:600 9px/1 var(--font-sans); text-transform:uppercase; letter-spacing:.04em;
+.sync-badge { font:600 10px/1 var(--font-sans); text-transform:uppercase; letter-spacing:.04em;
   color:var(--brand); border:1px solid var(--brand); border-radius:var(--radius-full); padding:3px 6px; }
 .sync-ago { margin-left:auto; font-size:11px; font-family:var(--font-mono); }
 .sync-src { display:flex; align-items:baseline; gap:7px; font-size:12px; margin:3px 0; }
@@ -409,10 +409,10 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
 .sync-srcname.fam-gpt { color:var(--brand-codex); }
 .sync-src .num { font-variant-numeric:tabular-nums; color:var(--text-1); }
 .sync-recent { margin-top:9px; padding-top:8px; border-top:1px solid var(--border-subtle); display:flex; flex-direction:column; gap:4px; }
-.sync-rrow { display:grid; grid-template-columns:34px minmax(0,1fr) auto auto; gap:8px; align-items:center; font-size:10.5px; }
+.sync-rrow { display:grid; grid-template-columns:38px minmax(0,1fr) auto auto; gap:8px; align-items:center; font-size:11px; }
 .sync-rago { font-variant-numeric:tabular-nums; }
 .sync-rproj { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-2); }
-.sync-rmodel { font:600 9.5px/1 var(--font-mono); text-transform:uppercase; white-space:nowrap; }
+.sync-rmodel { font:600 11px/1 var(--font-mono); text-transform:uppercase; white-space:nowrap; }
 .sync-rmodel.fam-opus { color:var(--brand-claude); } .sync-rmodel.fam-gpt { color:var(--brand-codex); }
 .sync-rtok { font-variant-numeric:tabular-nums; color:var(--text-3); }
 
@@ -425,3 +425,19 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
   border:1px solid var(--border-default); border-radius:var(--radius-full); padding:6px 11px;
   letter-spacing:.02em; transition:all .15s; white-space:nowrap; }
 #home-link:hover { color:var(--text-1); border-color:var(--text-4); background:var(--bg-raised); }
+
+/* ---------- large-screen scaling — laptop-sized px looked tiny on 2K/4K monitors ---------- */
+@media (min-width:1700px){
+  body{ font-size:15px }
+  .card-title{ font-size:14px } .card-title .sub{ font-size:12px }
+  .kpi-value{ font-size:31px } .kpi-label{ font-size:12px } .kpi-sub{ font-size:13px } .kpi-value small{ font-size:15px }
+  .am-row{ font-size:13px } .am-seen{ font-size:12px } .am-msg{ font-size:12px }
+  .tbl{ font-size:14px } .tbl thead th{ font-size:12px } .cell-sub{ font-size:12px }
+  .picker button,.indicator-btn{ font-size:12.5px } .hero-detail{ font-size:14px } .sb-row{ font-size:13px }
+  .meta-txt{ font-size:12.5px } .cv-title{ font-size:19px } .cvr-row{ font-size:12.5px } .bar-list-row{ font-size:13px }
+}
+@media (min-width:2300px){
+  body{ font-size:16px }
+  .card-title{ font-size:15px } .kpi-value{ font-size:34px } .kpi-sub{ font-size:13.5px }
+  .tbl{ font-size:15px } .am-row{ font-size:14px }
+}
