@@ -6,14 +6,44 @@ Cross-platform and dependency-free:
 - macOS:   an executable `Burnmeter.command`.
 - Linux:   an XDG `Burnmeter.desktop` entry.
 
-The shortcut runs `<this-python> -m burnmeter serve`, which auto-opens the browser.
+The shortcut runs `<this-python> -m burnmeter tray`, launching the system-tray
+dashboard (no console window).
 """
 from __future__ import annotations
 
 import functools
+import json
 import subprocess
 import sys
 from pathlib import Path
+
+# Bump whenever the shortcut's launch command/target changes so ensure_shortcut()
+# UPGRADES an existing (older) shortcut instead of leaving it stale. v1 = `serve`
+# (pre-stamp), v2 = `tray`.
+SHORTCUT_VERSION = 2
+_STAMP = Path.home() / ".burnmeter" / "shortcut.json"
+
+
+def _read_stamp() -> int:
+    try:
+        return int(json.loads(_STAMP.read_text(encoding="utf-8"))["version"])
+    except Exception:
+        return 0          # no stamp → an old (pre-stamp / v1 'serve') shortcut
+
+
+def _write_stamp(v: int = SHORTCUT_VERSION) -> None:
+    try:
+        _STAMP.parent.mkdir(parents=True, exist_ok=True)
+        _STAMP.write_text(json.dumps({"version": v}), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _rm(p: Path) -> None:
+    try:
+        p.unlink()
+    except Exception:
+        pass
 
 
 @functools.lru_cache(maxsize=1)
@@ -55,15 +85,18 @@ def _desktop_dir(override=None) -> Path:
 
 
 def create_shortcut(port: int = 7654, desktop_dir=None) -> Path:
-    """Create the shortcut for the current OS and return its path."""
+    """Create the shortcut for the current OS, stamp it, and return its path."""
     desktop = _desktop_dir(desktop_dir)
     desktop.mkdir(parents=True, exist_ok=True)
     py = sys.executable
     if sys.platform == "win32":
-        return _win(desktop, py, port)
-    if sys.platform == "darwin":
-        return _mac(desktop, py, port)
-    return _linux(desktop, py, port)
+        path = _win(desktop, py, port)
+    elif sys.platform == "darwin":
+        path = _mac(desktop, py, port)
+    else:
+        path = _linux(desktop, py, port)
+    _write_stamp()        # so `burnmeter desktop` carries a stamp too (no re-write churn)
+    return path
 
 
 def _shortcut_target(desktop_dir=None) -> Path:
@@ -76,18 +109,21 @@ def _shortcut_target(desktop_dir=None) -> Path:
 
 
 def ensure_shortcut(port: int = 7654, desktop_dir=None):
-    """Create the desktop shortcut only if it isn't already there.
-    Returns (path, created: bool). Never raises — best-effort UX."""
+    """Create the desktop shortcut if missing, or UPGRADE it when the on-disk
+    stamp is older than SHORTCUT_VERSION (e.g. a v1 'serve' shortcut → v2 'tray').
+    Returns (path, created_or_upgraded: bool). Never raises — best-effort UX."""
     target = _shortcut_target(desktop_dir)
     alt = target.with_suffix(".cmd") if sys.platform == "win32" else None
-    if target.exists():
-        return target, False
-    if alt and alt.exists():
-        return alt, False
+    exists = target.exists() or bool(alt and alt.exists())
+    if exists and _read_stamp() >= SHORTCUT_VERSION:
+        return (target if target.exists() else alt), False     # up to date
     try:
+        # Missing OR stale → (re)create. create_shortcut() overwrites in place,
+        # stamps, and (on Windows) _win removes the sibling .lnk/.cmd so exactly
+        # one shortcut artifact survives an upgrade.
         return create_shortcut(port=port, desktop_dir=desktop_dir), True
     except Exception:
-        return None, False
+        return (target if exists else None), False
 
 
 def _pythonw(py: str) -> str:
@@ -114,29 +150,33 @@ def _win(desktop: Path, py: str, port: int) -> Path:
     ps = (
         f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{q(lnk)}');"
         f"$s.TargetPath='{q(pyw)}';"
-        f"$s.Arguments='-m burnmeter serve';"
+        f"$s.Arguments='-m burnmeter tray';"
         f"$s.WorkingDirectory='{q(Path.home())}';"
         f"$s.Description='Burnmeter - AI coding usage dashboard';"
         f"$s.Save()"
     )
+    cmd = desktop / "Burnmeter.cmd"
     try:
         subprocess.run(
             ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
             check=True, capture_output=True, timeout=25,
             encoding="utf-8", errors="replace",
         )
+        _rm(cmd)                       # drop a stale .cmd sibling so only the .lnk remains
         return lnk
     except Exception:
-        # Fallback: a .cmd batch (always works; shows a console window).
-        cmd = desktop / "Burnmeter.cmd"
-        cmd.write_text(f'@echo off\r\n"{py}" -m burnmeter serve\r\n',
+        # Fallback: a .cmd batch. `start "" pythonw …` launches detached so the
+        # cmd.exe console flashes and self-closes instead of lingering — the tray
+        # icon is the UI, not the console.
+        cmd.write_text(f'@echo off\r\nstart "" "{pyw}" -m burnmeter tray\r\n',
                        encoding="utf-8")
+        _rm(lnk)                       # drop a stale .lnk sibling so only the .cmd remains
         return cmd
 
 
 def _mac(desktop: Path, py: str, port: int) -> Path:
     f = desktop / "Burnmeter.command"
-    f.write_text(f'#!/bin/bash\nexec "{py}" -m burnmeter serve\n',
+    f.write_text(f'#!/bin/bash\nexec "{py}" -m burnmeter tray\n',
                  encoding="utf-8")
     f.chmod(0o755)
     return f
@@ -149,8 +189,8 @@ def _linux(desktop: Path, py: str, port: int) -> Path:
         "Type=Application\n"
         "Name=Burnmeter\n"
         "Comment=AI coding usage dashboard\n"
-        f"Exec={py} -m burnmeter serve\n"
-        "Terminal=true\n"
+        f"Exec={py} -m burnmeter tray\n"
+        "Terminal=false\n"
         "Categories=Development;Utility;\n",
         encoding="utf-8",
     )

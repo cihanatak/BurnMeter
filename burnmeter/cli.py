@@ -239,32 +239,89 @@ def cmd_sessions(args):
     return 0
 
 
-def cmd_serve(args):
-    from .server import serve
-    extras = [Path(p).expanduser() for p in (args.extra_projects_dir or [])]
-    codex_extras = [Path(p).expanduser() for p in (getattr(args, "codex_extra_dir", []) or [])]
-    codex_dir = Path(args.codex_dir).expanduser() if getattr(args, "codex_dir", None) else None
-    # First-run UX: drop a "Burnmeter" desktop shortcut so the user can relaunch by a
-    # double-click (created once; --no-shortcut opts out).
-    if not getattr(args, "no_shortcut", False):
+def _common_kwargs(args) -> dict:
+    """The server/tray kwargs shared by `serve` and `tray` (identical options)."""
+    return dict(
+        host=args.host, port=args.port,
+        projects_dir=Path(args.projects_dir), ttl_seconds=args.ttl,
+        extra_roots=[Path(p).expanduser() for p in (args.extra_projects_dir or [])],
+        codex_dir=(Path(args.codex_dir).expanduser()
+                   if getattr(args, "codex_dir", None) else None),
+        codex_extra_roots=[Path(p).expanduser()
+                           for p in (getattr(args, "codex_extra_dir", []) or [])],
+        codex_since_days=getattr(args, "codex_days", 90),
+    )
+
+
+def _ensure_shortcut_once(args) -> None:
+    """Drop/upgrade the 'Burnmeter' desktop shortcut (double-click to relaunch).
+    Idempotent; --no-shortcut opts out. Never raises — best-effort UX."""
+    if getattr(args, "no_shortcut", False):
+        return
+    try:
+        from . import desktop
+        path, changed = desktop.ensure_shortcut(port=args.port)
+        if changed and path:
+            print(green(f"✓ '{path.name}' shortcut ready on your Desktop — double-click it any time."))
+    except Exception:
+        pass
+
+
+def _is_windowless() -> bool:
+    """True when launched via pythonw.exe (no console): main() has routed
+    stdout to os.devnull, so printed hints would be invisible."""
+    return getattr(sys.stdout, "name", "") == os.devnull
+
+
+def _windowless_notice(msg: str) -> None:
+    """Pop a native dialog so a windowless launch can still surface a message
+    (a console hint would go to devnull). Windows only; no-op elsewhere."""
+    if sys.platform == "win32":
         try:
-            from . import desktop
-            path, created = desktop.ensure_shortcut(port=args.port)
-            if created and path:
-                print(green(f"✓ Added a '{path.name}' shortcut to your Desktop — double-click it any time."))
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(0, msg, "Burnmeter", 0x40)  # MB_ICONINFORMATION
         except Exception:
             pass
+
+
+def cmd_serve(args):
+    # `burnmeter serve --tray` ≡ `burnmeter tray` — same code path.
+    if getattr(args, "tray", False):
+        return cmd_tray(args)
+    from .server import serve
+    _ensure_shortcut_once(args)
     # serve() prints the clear, clickable link with the REAL bound port (it may
-    # fall back from 7654 if that port is busy), so we only show a starting note here.
+    # fall back from 7654 if that port is busy), so we only show a starting note.
     print("Starting Burnmeter…")
-    serve(host=args.host, port=args.port,
-          projects_dir=Path(args.projects_dir), ttl_seconds=args.ttl,
-          extra_roots=extras,
-          codex_dir=codex_dir,
-          codex_extra_roots=codex_extras,
-          codex_since_days=getattr(args, "codex_days", 90),
-          open_browser=not getattr(args, "no_browser", False))
+    serve(open_browser=not getattr(args, "no_browser", False), **_common_kwargs(args))
     return 0
+
+
+def cmd_tray(args):
+    """Run Burnmeter in the system tray (recommended desktop launch). Falls back
+    to console mode — never a silent dead double-click — if the optional tray
+    dependency is missing or the tray can't run here."""
+    _ensure_shortcut_once(args)
+    kwargs = _common_kwargs(args)
+    open_browser = not getattr(args, "no_browser", False)
+    from . import tray as traymod
+    try:
+        return traymod.run_tray(open_browser=open_browser, **kwargs)
+    except (ImportError, traymod.TrayUnavailable):
+        from .server import serve
+        if _is_windowless():
+            _windowless_notice(
+                "Burnmeter's tray icon needs an extra package:\n\n"
+                "    pip install burnmeter[tray]\n\n"
+                "Opening the dashboard in your browser instead.")
+        else:
+            print(yellow("Tray support needs an extra package — install with:"))
+            print("    pip install burnmeter[tray]")
+            print(dim("Falling back to console mode (Ctrl+C to stop)…"))
+        # ALWAYS open the browser in the fallback — on the windowless path it's
+        # the only proof-of-life that the launch did something.
+        serve(open_browser=True, **kwargs)
+        return 0
 
 
 def cmd_stop(args):
@@ -316,9 +373,9 @@ def cmd_desktop(args):
     try:
         path = desktop.create_shortcut(port=args.port)
     except Exception as e:
-        print(red(f"kısayol oluşturulamadı: {e}")); return 1
-    print(green(f"✓ Masaüstü kısayolu hazır: {path}"))
-    print(dim("  Çift tıkla → burnmeter serve çalışır, dashboard tarayıcıda açılır."))
+        print(red(f"Couldn't create the shortcut: {e}")); return 1
+    print(green(f"✓ Desktop shortcut ready: {path}"))
+    print(dim("  Double-click it → Burnmeter opens in the system tray (no console window)."))
     return 0
 
 
@@ -552,9 +609,32 @@ def main(argv=None):
     p_serve.add_argument("--codex-days", type=int, default=90,
                          help="how many recent days of Codex history to scan "
                               "(default 90; 0 = all-time — slow on a huge ~/.codex)")
+    p_serve.add_argument("--tray", action="store_true",
+                         help="run in the system tray instead of blocking this console "
+                              "(same as: burnmeter tray)")
+
+    # tray — recommended desktop launch: system-tray icon, no console window,
+    # right-click Open/Quit. Mirrors serve's options so the two are interchangeable.
+    p_tray = sub.add_parser("tray",
+                            help="run Burnmeter in the system tray (no console window; recommended)")
+    p_tray.add_argument("--host", default="127.0.0.1")
+    p_tray.add_argument("--port", type=int, default=7654)
+    p_tray.add_argument("--ttl", type=int, default=15)
+    p_tray.add_argument("--no-browser", action="store_true",
+                        help="don't auto-open the dashboard in the browser")
+    p_tray.add_argument("--no-shortcut", action="store_true",
+                        help="don't create/upgrade the desktop shortcut")
+    p_tray.add_argument("--extra-projects-dir", action="append", default=[],
+                        help="extra Claude JSONL dirs (repeat the flag for more)")
+    p_tray.add_argument("--codex-dir", default=None,
+                        help="Codex sessions root (default ~/.codex/sessions)")
+    p_tray.add_argument("--codex-extra-dir", action="append", default=[],
+                        help="extra Codex sessions dirs (repeat the flag for more)")
+    p_tray.add_argument("--codex-days", type=int, default=90,
+                        help="recent days of Codex history to scan (default 90; 0 = all-time)")
 
     sub.add_parser("stop",
-                   help="stop a backgrounded dashboard (the windowless desktop-shortcut one)")
+                   help="stop a backgrounded dashboard (the tray / windowless one)")
 
     p_sl = sub.add_parser("statusline",
                           help="tek satır canlı durum (Claude Code statusLine.command için)")
@@ -597,6 +677,7 @@ def main(argv=None):
         "models": cmd_models,
         "sessions": cmd_sessions,
         "serve": cmd_serve,
+        "tray": cmd_tray,
         "stop": cmd_stop,
         "statusline": cmd_statusline,
         "sync": cmd_sync,

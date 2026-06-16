@@ -7,10 +7,12 @@ want fully air-gapped operation, vendor chart.umd.min.js into ./static.
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
 import sys
 import threading
+import uuid
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -164,6 +166,12 @@ def _file_response(handler: BaseHTTPRequestHandler, path: Path, content_type: st
     handler.wfile.write(data)
 
 
+# Per-process identity, set by setup_server() and echoed by /api/health. The
+# single-instance guard matches THIS token so it recognises the exact instance
+# the pidfile describes (not merely "a" Burnmeter on that port).
+_INSTANCE_TOKEN: Optional[str] = None
+
+
 def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
 
     def pick_cache(qs):
@@ -297,6 +305,7 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 _json_response(self, 200, {
                     "ok": True,
                     "version": __version__,
+                    "token": _INSTANCE_TOKEN,
                     "projects_dir": str(cache.projects_dir),
                     "projects_dir_exists": cache.projects_dir.exists(),
                 })
@@ -399,19 +408,149 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
     return Handler
 
 
-def serve(host: str = "127.0.0.1", port: int = 7654,
-          projects_dir: Optional[Path] = None,
-          ttl_seconds: int = 15,
-          extra_roots: Optional[list[Path]] = None,
-          codex_dir: Optional[Path] = None,
-          codex_extra_roots: Optional[list[Path]] = None,
-          codex_since_days: int = 90,
-          open_browser: bool = False) -> None:
+def _open_browser_async(url: str, delay: float = 1.2) -> None:
+    """Open `url` in the default browser after a short delay (lets the listener
+    come up first). Daemon thread; failures are non-fatal. Shared by serve(),
+    run_tray(), and the single-instance guard."""
+    def _open():
+        import webbrowser
+        time.sleep(delay)
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+    threading.Thread(target=_open, daemon=True).start()
+
+
+def _pid_alive(pid: int) -> bool:
+    """Best-effort liveness. POSIX os.kill(pid, 0) is cheap+reliable; on Windows
+    tasklist is flaky, so we don't gate the startup decision on it there — the
+    HTTP /api/health probe is the authoritative signal (a process that answers is
+    alive by definition)."""
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        return True   # advisory only — the health probe decides on Windows
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def _already_running(host: str, port: int, open_browser: bool = False) -> bool:
+    """True iff THIS machine's Burnmeter (per the pidfile) is already serving.
+
+    Identity-bound, not "any Burnmeter on that port": we require the recorded
+    port to answer /api/health with a token that MATCHES the pidfile's token —
+    defending against a reused PID, a foreign app squatting the port, and a
+    different Burnmeter instance. If the pidfile exists but the probe fails
+    (dead / foreign / nobody), we DELETE the stale pidfile so the next launch is
+    clean and fast, and return False (caller binds fresh)."""
+    import urllib.request
+    pf = Path.home() / ".burnmeter" / "server.json"
+    if not pf.exists():
+        return False
+    try:
+        info = json.loads(pf.read_text(encoding="utf-8"))
+        rport = int(info["port"])
+        rhost = info.get("host", host)
+        rtoken = info.get("token")
+    except Exception:
+        return False
+
+    probe_host = "127.0.0.1" if rhost in ("0.0.0.0", "") else rhost
+    url = f"http://{probe_host}:{rport}"
+    alive, rver = False, None
+    try:
+        with urllib.request.urlopen(f"{url}/api/health", timeout=1.0) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        if isinstance(data, dict):
+            rver = data.get("version")
+            alive = bool(data.get("ok") and rtoken and data.get("token") == rtoken)
+    except Exception:
+        alive = False
+
+    if not alive:
+        try:
+            pf.unlink()           # self-heal: stale/foreign pidfile
+        except Exception:
+            pass
+        return False
+
+    if rver and rver != __version__:
+        sys.stdout.write(
+            f"  Note: a different Burnmeter (v{rver}) is already running on "
+            f"{url}. Run `burnmeter stop` first if you want v{__version__}.\n")
+    sys.stdout.write(f"\n  ➜  Burnmeter is already running:  {url}\n")
+    sys.stdout.write("     Opening it in your browser…\n\n")
+    sys.stdout.flush()
+    if open_browser:
+        _open_browser_async(url)
+    return True
+
+
+class _ServerHandle:
+    """A bound (not-yet-serving) Burnmeter server plus its cleanup, so the
+    console path (block on serve_forever) and the tray path (serve_forever on a
+    daemon thread) share identical teardown. close() is idempotent —
+    server_close() + pidfile unlink. start_warm() is separate so the tray can
+    kick the cache pre-build AFTER serve_forever is actually accepting."""
+    def __init__(self, server, host, port, url, pidfile, warm_paths):
+        self.server = server
+        self.host = host
+        self.port = port
+        self.url = url
+        self._pidfile = pidfile
+        self._warm_paths = warm_paths
+        self._closed = False
+
+    def start_warm(self) -> None:
+        def _warm():
+            import urllib.request
+            time.sleep(1.0)
+            for p in self._warm_paths:
+                try:
+                    urllib.request.urlopen(
+                        f"http://{self.host}:{self.port}{p}", timeout=620).read()
+                except Exception:
+                    pass
+        threading.Thread(target=_warm, daemon=True).start()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self.server.server_close()
+        except Exception:
+            pass
+        if self._pidfile:
+            try:
+                self._pidfile.unlink()
+            except Exception:
+                pass
+
+
+def setup_server(host: str = "127.0.0.1", port: int = 7654,
+                 projects_dir: Optional[Path] = None,
+                 ttl_seconds: int = 15,
+                 extra_roots: Optional[list[Path]] = None,
+                 codex_dir: Optional[Path] = None,
+                 codex_extra_roots: Optional[list[Path]] = None,
+                 codex_since_days: int = 90) -> "_ServerHandle":
+    """Build caches, bind the port (with fallback), write the pidfile (incl. a
+    per-process instance token), log the reading paths. Returns a bound
+    _ServerHandle. Does NOT serve_forever, open the browser, or start the warm
+    thread — the caller drives those. Raises RuntimeError if no port binds."""
+    global _INSTANCE_TOKEN
     projects_dir = Path(projects_dir) if projects_dir else CLAUDE_PROJECTS_DIR
     # Claude now has a per-file cache (parser.py) → builds are fast (~5-8s warm,
     # only changed files re-read). A 30s floor keeps data fresh while staying
-    # comfortably above the build time (no churn even if a build spikes under
-    # memory pressure); bg stale-while-revalidate keeps it non-blocking.
+    # comfortably above the build time; bg stale-while-revalidate keeps it
+    # non-blocking.
     cache = _Cache(
         projects_dir, ttl_seconds=max(ttl_seconds, 30), extra_roots=extra_roots,
         worker_config={
@@ -449,14 +588,16 @@ def serve(host: str = "127.0.0.1", port: int = 7654,
     # only the bind is retried.
     class _Server(ThreadingHTTPServer):
         # On Windows SO_REUSEADDR lets a second bind silently SUCCEED on a port
-        # another server already holds (port hijack) — which would make the
-        # collision fallback below never trigger and run two servers on one port.
-        # Disable address reuse on Windows so a busy port raises and we fall back;
-        # keep it on POSIX where reuse is the restart-friendly default.
+        # another server already holds (port hijack) — disable reuse there so a
+        # busy port raises and we fall back; keep it on POSIX (restart-friendly).
         allow_reuse_address = not sys.platform.startswith("win")
+        # Daemonise per-request worker threads so an in-flight request — e.g. a
+        # 20-minute cold codex build — never blocks Ctrl+C / tray Quit teardown.
+        daemon_threads = True
 
     handler = make_handler(cache, codex_cache)
     server = None
+    requested = port
     for cand in [port, *range(port + 1, port + 11), 0]:
         try:
             server = _Server((host, cand), handler)
@@ -464,22 +605,24 @@ def serve(host: str = "127.0.0.1", port: int = 7654,
         except OSError:
             continue
     if server is None:
-        sys.stderr.write(f"[burnmeter] ERROR: could not bind any free port near {port}\n")
-        return
-    bound = server.server_address[1]
-    if bound != port:
-        sys.stderr.write(f"[burnmeter] port {port} was busy → using {bound} instead\n")
-    port = bound
-    # Pidfile so `burnmeter stop` can find a backgrounded server — e.g. one started
-    # by a desktop double-click via pythonw.exe, which has no console to Ctrl+C.
+        raise RuntimeError(f"could not bind any free port near {requested}")
+    port = server.server_address[1]
+    if port != requested:
+        sys.stderr.write(f"[burnmeter] port {requested} was busy → using {port} instead\n")
+
+    # Per-process token → /api/health echoes it → the single-instance guard can
+    # recognise THIS exact instance (not merely "a" Burnmeter on the port).
+    _INSTANCE_TOKEN = uuid.uuid4().hex
     _pidfile = Path.home() / ".burnmeter" / "server.json"
     try:
         _pidfile.parent.mkdir(parents=True, exist_ok=True)
         _pidfile.write_text(
-            json.dumps({"pid": os.getpid(), "port": port, "host": host}),
+            json.dumps({"pid": os.getpid(), "port": port, "host": host,
+                        "token": _INSTANCE_TOKEN, "version": __version__}),
             encoding="utf-8")
     except Exception:
         _pidfile = None
+
     sys.stderr.write(f"[burnmeter] v{__version__} → http://{host}:{port}\n")
     sys.stderr.write(f"[burnmeter] reading (claude): {projects_dir}\n")
     sys.stderr.write(f"[burnmeter] reading (codex):  {codex_root} (exists={codex_root.exists()})\n")
@@ -488,55 +631,53 @@ def serve(host: str = "127.0.0.1", port: int = 7654,
     for er in (codex_extra_roots or []):
         sys.stderr.write(f"[burnmeter] + codex extra:  {er} (exists={er.exists()})\n")
 
-    # Startup warm: pre-build both caches off the request path so the first
-    # source-switch after a (re)boot is instant instead of blocking ~30s on the
-    # cold codex build. Uses the real HTTP path → warms the exact (source, None)
-    # keys the dashboard requests. Daemon thread; failures are non-fatal.
-    def _warm():
-        import urllib.request
-        time.sleep(1.0)   # let the listener bind
-        for path in ("/api/report", "/api/report?source=codex"):
-            try:
-                urllib.request.urlopen(f"http://{host}:{port}{path}", timeout=620).read()
-            except Exception:
-                pass
-    threading.Thread(target=_warm, daemon=True).start()
-
-    # CLI UX: open the dashboard in the user's browser once the listener is up.
     view_host = "127.0.0.1" if host in ("0.0.0.0", "") else host
     url = f"http://{view_host}:{port}"
+    handle = _ServerHandle(server, host, port, url, _pidfile,
+                           ("/api/report", "/api/report?source=codex"))
+    # Normal interpreter exit also cleans up (does NOT run on SIGKILL/taskkill —
+    # the guard's self-heal covers those).
+    atexit.register(handle.close)
+    return handle
+
+
+def serve(host: str = "127.0.0.1", port: int = 7654,
+          projects_dir: Optional[Path] = None,
+          ttl_seconds: int = 15,
+          extra_roots: Optional[list[Path]] = None,
+          codex_dir: Optional[Path] = None,
+          codex_extra_roots: Optional[list[Path]] = None,
+          codex_since_days: int = 90,
+          open_browser: bool = False) -> None:
+    """Blocking console server (terminal / CI / power users). Always binds its
+    OWN instance — no single-instance guard here, preserving the documented
+    two-terminals-two-ports workflow. The tray path (run_tray) is the one that
+    de-dupes via _already_running()."""
+    try:
+        h = setup_server(host, port, projects_dir, ttl_seconds, extra_roots,
+                         codex_dir, codex_extra_roots, codex_since_days)
+    except RuntimeError as e:
+        sys.stderr.write(f"[burnmeter] ERROR: {e}\n")
+        return
+
+    h.start_warm()
     if open_browser:
-        def _open_browser():
-            import webbrowser
-            time.sleep(1.2)
-            try:
-                webbrowser.open(url)
-            except Exception:
-                pass
-        threading.Thread(target=_open_browser, daemon=True).start()
+        _open_browser_async(h.url)
 
     # A clear, clickable link in the terminal — most terminals linkify http://… .
     # Printed to stdout (not the [burnmeter] stderr log) so it stands out, and it
     # always shows the REAL bound port even when 7654 was busy and we fell back.
     opening = "  (opening in your browser…)" if open_browser else ""
-    sys.stdout.write(f"\n  ➜  Burnmeter is running:  {url}{opening}\n")
+    sys.stdout.write(f"\n  ➜  Burnmeter is running:  {h.url}{opening}\n")
     sys.stdout.write("     Leave this window open. Press Ctrl+C to stop (or run: burnmeter stop).\n\n")
     sys.stdout.flush()
 
     try:
-        server.serve_forever()
+        h.server.serve_forever()
     except KeyboardInterrupt:
         sys.stderr.write("\n[burnmeter] shutting down\n")
     finally:
-        try:
-            server.server_close()
-        except Exception:
-            pass
-        if _pidfile:
-            try:
-                _pidfile.unlink()
-            except Exception:
-                pass
+        h.close()
 
 
 def main(argv=None):

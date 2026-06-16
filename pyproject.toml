@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "burnmeter"
-version = "0.1.11"
+version = "0.1.12"
 description = "Local-first dashboard for AI coding agent token usage & cost (Claude Code + OpenAI Codex)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -28,10 +28,13 @@ classifiers = [
   "Topic :: Utilities",
 ]
 
-# Pro cross-device sync (E2E encryption) is the ONLY optional dependency, opt-in via
-# `pip install burnmeter[sync]`. The free local core stays dependency-free.
+# Optional extras keep the free local core dependency-free; opt in as needed.
+#   [sync] — Pro cross-device sync (E2E encryption).
+#   [tray] — system-tray launcher (no console window). Pillow>=10.3 has cp313
+#            wheels and avoids a source-build trap on Python 3.13.
 [project.optional-dependencies]
 sync = ["cryptography>=42"]
+tray = ["pystray>=0.19.4", "Pillow>=10.3"]
 
 [project.urls]
 Homepage = "https://github.com/cihanatak/BurnMeter"
