@@ -1044,6 +1044,10 @@ function initModularGrid() {
   const gs = document.createElement("div");
   gs.className = "grid-stack";
   cards.forEach(card => {
+    // The welcome banner is NOT a grid widget — it stays a plain full-width banner
+    // ABOVE the grid (a direct child of <main>). As a GridStack item it would
+    // reserve a 4-row slot even while display:none'd → an empty band at the top.
+    if (card.dataset.card === "welcome") return;
     const item = document.createElement("div");
     item.className = "grid-stack-item";
     item.setAttribute("gs-w", colW(card));
@@ -1127,7 +1131,19 @@ function wireAlerts() {
   });
 }
 
+// Scale the whole UI up on physically large screens. We key off PHYSICAL pixels
+// (CSS viewport × devicePixelRatio), not CSS width, so a 2K/4K monitor running
+// Windows display scaling (e.g. 150% → ~1707 CSS px) still zooms — the CSS-width
+// media-query tiers alone missed exactly that case (the "2K too small" report).
+function applyZoom() {
+  const phys = (window.innerWidth || 0) * (window.devicePixelRatio || 1);
+  const z = phys >= 3400 ? 1.55 : phys >= 2400 ? 1.30 : phys >= 2000 ? 1.12 : 1;
+  try { document.body.style.zoom = z; } catch (e) {}
+}
+
 function start() {
+  applyZoom();
+  window.addEventListener("resize", applyZoom);
   $("refresh").addEventListener("click", () => refresh(true));
   wireAlerts();
   $("export-csv")?.addEventListener("click", () => {

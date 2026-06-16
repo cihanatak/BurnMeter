@@ -448,8 +448,9 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
   margin-left:2px; cursor:pointer; transition:.15s; }
 .update-pill:hover{ background:rgba(43,217,107,.2); color:var(--good); }
 
-/* first-run welcome banner — shown only while history is thin (dismissible) */
-.welcome-card{ display:flex; align-items:center; gap:16px;
+/* first-run welcome banner — a plain banner ABOVE the grid (NOT a grid widget, so
+   it takes zero space when display:none'd); shown only while history is thin. */
+.welcome-card{ display:flex; align-items:center; gap:16px; margin-bottom:var(--gap);
   background:linear-gradient(100deg, var(--brand-soft), transparent 70%);
   border:1px solid var(--brand); }
 .welcome-card .wc-icon{ font-size:30px; line-height:1; flex-shrink:0; }
