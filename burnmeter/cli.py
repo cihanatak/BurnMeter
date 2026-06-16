@@ -563,6 +563,49 @@ def cmd_sync_relay(args):
     return 0
 
 
+def cmd_relay_account(args):
+    """Pro: relay müşteri hesaplarını yönet (create/list/revoke). /admin ekranının
+    okuduğu kimlik katmanı — relay'in accounts.json'ı üzerinde doğrudan çalışır
+    (relay storage'ının olduğu makinede çalıştır). İleride ödeme webhook'u da aynı
+    create_account()'u çağıracak."""
+    from . import sync_relay as R
+    storage = Path(args.storage).expanduser() if args.storage else (Path.home() / ".burnmeter-relay")
+    act = args.action
+
+    if act == "create":
+        if not args.email:
+            print(red("--email gerekli")); return 1
+        rec = R.create_account(storage, email=args.email, plan=args.plan,
+                               device_limit=args.device_limit, name=args.name or "",
+                               source="cli")
+        print(green(f"✓ hesap oluşturuldu · {rec['email']} · plan {bold(rec['plan'])} · "
+                    f"cihaz limiti {rec['device_limit']}"))
+        print(bold(f"  token: {rec['token']}"))
+        print(dim("  müşteri bunu kullanır:  burnmeter sync login --relay <url> --token <token>"))
+        return 0
+
+    if act == "list":
+        accs = R.list_accounts(storage)
+        if not accs:
+            print(dim(f"hesap yok ({R._accounts_path(storage)})")); return 0
+        _print_header(f"hesaplar ({len(accs)})")
+        for a in accs:
+            print(f"  {bold(a.get('email') or '?')} · {a.get('plan')} · {a.get('status')} · "
+                  f"cihaz {a.get('device_count')}/{a.get('device_limit')} · "
+                  f"id {a.get('id')} · {dim((a.get('token_prefix') or '') + '…')}")
+        print(dim("  (tam token yalnızca oluşturma anında gösterilir; iptal için --id veya --token)"))
+        return 0
+
+    if act == "revoke":
+        ref = args.id or args.token
+        if not ref:
+            print(red("--id veya --token gerekli")); return 1
+        ok = R.set_account_status(storage, ref, "canceled")
+        print(green("✓ iptal edildi") if ok else red("hesap bulunamadı"))
+        return 0 if ok else 1
+    return 0
+
+
 def cmd_sync(args):
     """Pro: cihazlar arası E2E-şifreli sync (login/push/pull/status)."""
     from . import sync as syncmod
@@ -812,6 +855,20 @@ def main(argv=None):
     p_relay.add_argument("--port", type=int, default=8899)
     p_relay.add_argument("--storage", default=None, help="ciphertext blob deposu (default ~/.burnmeter-relay)")
 
+    p_acct = sub.add_parser("relay-account",
+                            help="Pro: relay müşteri hesapları (create/list/revoke) — /admin'in okuduğu kayıt")
+    p_acct.add_argument("action", choices=["create", "list", "revoke"])
+    p_acct.add_argument("--email", help="müşteri e-postası (create)")
+    p_acct.add_argument("--name", help="müşteri adı (create, opsiyonel)")
+    p_acct.add_argument("--plan", default="pro",
+                        choices=["pro", "team", "supporter", "license", "free"])
+    p_acct.add_argument("--device-limit", type=int, default=None,
+                        help="cihaz limiti (verilmezse plana göre otomatik)")
+    p_acct.add_argument("--token", help="revoke için ham hesap token'ı")
+    p_acct.add_argument("--id", help="revoke için hesap id'si (list'te görünür)")
+    p_acct.add_argument("--storage", default=None,
+                        help="relay storage (default ~/.burnmeter-relay)")
+
     p_alerts = sub.add_parser("alerts", help="local pre-limit uyarıları (webhook/Slack/e-posta)")
     p_alerts.add_argument("action", choices=["status", "test", "check", "on", "off"])
     p_alerts.add_argument("--source", default="claude", choices=["claude", "codex"],
@@ -835,6 +892,7 @@ def main(argv=None):
         "statusline": cmd_statusline,
         "sync": cmd_sync,
         "sync-relay": cmd_sync_relay,
+        "relay-account": cmd_relay_account,
         "alerts": cmd_alerts,
         "desktop": cmd_desktop,
     }

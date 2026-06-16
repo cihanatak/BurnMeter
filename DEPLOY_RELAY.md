@@ -33,31 +33,39 @@ pipx install burnmeter            # or: pip install burnmeter  (sync relay needs
 # (the relay is pure stdlib; the [sync] extra/cryptography is only for CLIENTS)
 ```
 
-## 2. Storage + plan-store
+## 2. Storage
 
 ```bash
 install -d -o burnmeter -g burnmeter -m 700 /var/lib/burnmeter-relay
-install -d -m 750 /etc/burnmeter
-echo '{}' > /etc/burnmeter/plans.json        # token -> {plan, device_limit}
-chmod 640 /etc/burnmeter/plans.json
 ```
 
-- **Self-host:** leave billing off (next step) and you can ignore `plans.json`.
-- **Hosted:** `plans.json` is the allowlist. Hot-reloaded by mtime — edit it and the
-  relay picks it up live, no restart.
+The relay manages `accounts.json` (customer records: email, plan, status, **hashed**
+token) inside the storage dir — you don't pre-create it. Keep the dir user-only
+(`700`): it holds customer emails. Raw tokens are **never** stored (only their hash),
+so a leak of `accounts.json` can't impersonate a customer.
+
+- **Self-host:** do nothing here — every token is Pro by default.
+- **Hosted:** provision customers in §5 (the `/admin` console or the CLI).
 
 ## 3. systemd unit + env
 
 `/etc/burnmeter/relay.env` (chmod 600 — may hold the future webhook secret):
 
 ```ini
-BURNMETER_RELAY_BILLING=1
-BURNMETER_RELAY_PLANS=/etc/burnmeter/plans.json
-BURNMETER_RELAY_RATE=60
-BURNMETER_RELAY_RATE_REFILL=1
+# Authoritative accounts mode: enables the /admin console AND makes accounts.json the
+# source of truth (unknown tokens get no sync). Generate a long random admin key:
+#   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+BURNMETER_RELAY_ADMIN_TOKEN=paste-a-long-random-key-here
+# Behind a reverse proxy every request shares the proxy's IP, so raise the IP-keyed
+# rate caps (per-token limits are unaffected):
+BURNMETER_RELAY_RATE=240
+BURNMETER_RELAY_RATE_REFILL=4
+# Legacy alternative (anonymous token->plan allowlist instead of accounts):
+#   BURNMETER_RELAY_BILLING=1
+#   BURNMETER_RELAY_PLANS=/etc/burnmeter/plans.json
 ```
 
-> Self-hosters: omit `BURNMETER_RELAY_BILLING` entirely → every token is Pro.
+> Self-hosters: omit `BURNMETER_RELAY_ADMIN_TOKEN` entirely → no `/admin`, every token is Pro.
 
 `/etc/systemd/system/burnmeter-relay.service`:
 
@@ -102,25 +110,29 @@ curl https://sync.burnmeter.dev/health     # -> {"ok": true, "service": "burnmet
 
 ## 5. Provision a Pro customer (manual — payment-last)
 
-Until the Lemon Squeezy webhook is wired, provisioning is one line.
+Two ways, both provider-agnostic. The future payment webhook (§8) calls the SAME
+core, so nothing here is throwaway.
+
+**A) The `/admin` console.** Open `https://sync.burnmeter.dev/admin`, paste your
+`BURNMETER_RELAY_ADMIN_TOKEN`, enter email + plan, **Create**. The full account token
+is shown **once** — copy it and email it to the customer. The table lists every
+customer (email, plan, status, devices, last sync) with Revoke / Reactivate.
+
+**B) The CLI** (on the relay box):
 
 ```bash
-# mint a high-entropy account key
-python3 -c "import secrets; print(secrets.token_urlsafe(24))"
-# -> e.g. 7sN2...   (this is the customer's Pro key)
+sudo -u burnmeter burnmeter relay-account create \
+    --email customer@example.com --plan pro \
+    --storage /var/lib/burnmeter-relay
+#   ↳ prints: token: bm_xxxxxxxx…   (email this to the customer — shown once)
+sudo -u burnmeter burnmeter relay-account list   --storage /var/lib/burnmeter-relay
+sudo -u burnmeter burnmeter relay-account revoke --id <id> --storage /var/lib/burnmeter-relay
 ```
 
-Add it to the allowlist (the relay hot-reloads):
+Unknown / revoked tokens get `device_limit 0` → no sync (HTTP 402). The raw token is
+shown only at creation and is never stored in recoverable form (only its hash).
 
-```json
-{
-  "7sN2_customerKeyHere": { "plan": "pro", "device_limit": 10 }
-}
-```
-
-Email the key to the customer. Unknown keys get `device_limit: 0` → no sync (HTTP 402).
-
-> **Seat = person, not device.** For a Team org, set `device_limit` to roughly
+> **Seat = person, not device.** For a Team org, set `--device-limit` to roughly
 > 2× the seat count (people often run 2 machines).
 
 ## 6. Client side (what the customer runs on EACH machine)
@@ -148,8 +160,15 @@ burnmeter serve          # auto-pushes every ~5 min; the dashboard's "Cihazlar"
 
 ## 8. Later: automate billing (payment phase)
 
-Replace manual `plans.json` edits with a tiny **private** webhook service: a Lemon
-Squeezy `order_created`/`subscription_*` webhook (verify the HMAC signature) writes
-`{ key: { plan, device_limit } }` into `plans.json`. The relay hot-reloads it. That
-webhook + the key-issuance flow is the **only closed-source piece**; this relay stays
-public AGPL.
+Replace manual provisioning with a small webhook that fires on a paid order and calls
+the **same** core the `/admin` console and `relay-account create` use:
+`burnmeter.sync_relay.create_account(storage, email=..., plan="pro", source="<provider>")`
+(or POST `/admin/api/accounts` with the admin token). Verify the provider's webhook
+signature first. The relay hot-reloads `accounts.json`. That webhook + key delivery is
+the **only closed-source piece**; this relay stays public AGPL.
+
+> **Provider (TBD by Cihan).** For a Turkey-based seller, Lemon Squeezy's bank payout
+> to TR is unconfirmed and PayPal doesn't operate there. The realistic Merchant-of-
+> Record options are **Polar.sh** (pays TRY to a Turkish bank, native license keys +
+> webhooks) or **Paddle** ($15 SWIFT). Whichever is chosen, it only needs to call
+> `create_account` on purchase and flip status on cancel/refund.
