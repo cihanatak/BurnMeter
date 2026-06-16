@@ -330,7 +330,19 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
             path = url.path
 
             if path in ("/", "/index.html"):
-                _file_response(self, STATIC_DIR / "dashboard.html", "text/html; charset=utf-8")
+                # Serve dashboard.html with the cache-bust token (?v=__BMVER__) set to
+                # the running version → the browser ALWAYS re-fetches css/js after an
+                # update (no more stale assets from a forgotten manual ?v bump).
+                try:
+                    html = (STATIC_DIR / "dashboard.html").read_text(encoding="utf-8").replace("__BMVER__", __version__)
+                    body = html.encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                except Exception:
+                    _file_response(self, STATIC_DIR / "dashboard.html", "text/html; charset=utf-8")
                 return
 
             if path == "/static/dashboard.js":
