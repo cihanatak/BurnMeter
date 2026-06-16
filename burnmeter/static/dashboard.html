@@ -55,7 +55,7 @@
       <svg id="speedo-svg" viewBox="0 0 400 272" preserveAspectRatio="xMidYMid meet"></svg>
       <div style="flex:1;min-width:0">
         <div class="speedo-zone-txt" id="speedo-zone">…</div>
-        <div class="hero-detail" id="hero-detail" style="font-size:12.5px">…</div>
+        <div class="hero-detail" id="hero-detail" style="font-size:13.5px;line-height:1.55">…</div>
         <div class="speedo-breakdown" id="speedo-breakdown"></div>
       </div>
     </div>
@@ -72,7 +72,7 @@
   <section class="card col-3" data-card="kpi"><div class="kpi-label" id="kpi4-l">…</div><div class="kpi-value" id="kpi4-v">—</div><div class="kpi-sub" id="kpi4-s"></div><div class="kpi-spark"><canvas id="kpi4-spark"></canvas></div></section>
 
   <!-- ROW 3 — LIVE NOW (most fresh): currently running model + recent activity -->
-  <section class="card col-5" data-card="active-model">
+  <section class="card col-6" data-card="active-model">
     <div class="card-title">Live active model <span class="sub">running now</span>
       <span class="picker" id="active-window-picker">
         <button data-w="live" class="active">● Live</button><button data-w="1">1m</button><button data-w="5">5m</button><button data-w="15">15m</button>
@@ -80,7 +80,7 @@
     </div>
     <div id="active-model-body"></div>
   </section>
-  <section class="card col-7" data-card="recent">
+  <section class="card col-6" data-card="recent">
     <div class="card-title">Recent activity · one row per prompt <span class="sub" id="recent-sub">tokens, weighted by cost</span></div>
     <div class="scroll"><table class="tbl" id="recent-tbl">
       <thead><tr><th>when</th><th>project</th><th>model</th><th class="num">tokens</th><th class="num">$ (est.)</th><th class="num">cache hit</th></tr></thead>
@@ -94,7 +94,7 @@
   </section>
 
   <!-- ROW — Pro cross-device sync: summaries of synced devices (E2E encrypted) -->
-  <section class="card col-6" data-card="sync-devices">
+  <section class="card col-12" data-card="sync-devices">
     <div class="card-title">Devices <span class="sub">Pro sync · end-to-end encrypted · our servers never see your data</span></div>
     <div id="sync-devices-body"></div>
   </section>
