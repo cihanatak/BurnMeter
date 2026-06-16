@@ -93,7 +93,9 @@ def run_tray(host: str = "127.0.0.1", port: int = 7654, projects_dir=None,
         raise TrayUnavailable("no display (headless Linux)")
 
     # If a Burnmeter is already running, just open it — never bind a 2nd server.
-    if _already_running(host, port, open_browser=open_browser):
+    # On a relaunch (reuse_addr) match the EXACT port: a pidfile pointing at a
+    # different port must not abort rebinding the port the user's tab is on.
+    if _already_running(host, port, open_browser=open_browser, strict_port=reuse_addr):
         return 0
 
     # Build the icon + import pystray BEFORE binding, so a missing/broken
@@ -106,7 +108,7 @@ def run_tray(host: str = "127.0.0.1", port: int = 7654, projects_dir=None,
 
     h = setup_server(host, port, projects_dir, ttl_seconds, extra_roots,
                      codex_dir, codex_extra_roots, codex_since_days,
-                     reuse_addr=reuse_addr)
+                     reuse_addr=reuse_addr, strict_port=reuse_addr)
 
     srv_thread = threading.Thread(target=h.server.serve_forever, daemon=True)
     started = False

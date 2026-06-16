@@ -549,7 +549,8 @@ def _pid_alive(pid: int) -> bool:
         return True
 
 
-def _already_running(host: str, port: int, open_browser: bool = False) -> bool:
+def _already_running(host: str, port: int, open_browser: bool = False,
+                     strict_port: bool = False) -> bool:
     """True iff THIS machine's Burnmeter (per the pidfile) is already serving.
 
     Identity-bound, not "any Burnmeter on that port": we require the recorded
@@ -557,7 +558,16 @@ def _already_running(host: str, port: int, open_browser: bool = False) -> bool:
     defending against a reused PID, a foreign app squatting the port, and a
     different Burnmeter instance. If the pidfile exists but the probe fails
     (dead / foreign / nobody), we DELETE the stale pidfile so the next launch is
-    clean and fast, and return False (caller binds fresh)."""
+    clean and fast, and return False (caller binds fresh).
+
+    strict_port (the auto-update RELAUNCH path): the user's open tab is pinned to
+    the EXACT requested port, so a pidfile that names a DIFFERENT port is
+    irrelevant — return False and let the caller rebind the requested port. The
+    old default ("any Burnmeter the pidfile knows about is 'already running'")
+    silently aborted the relaunch when the pidfile pointed elsewhere (e.g. a
+    prior restart that landed on 7655, or a leftover test instance) → the user's
+    tab on the original port then had nothing to reach ("couldn't reach the
+    local server")."""
     import urllib.request
     pf = Path.home() / ".burnmeter" / "server.json"
     if not pf.exists():
@@ -568,6 +578,12 @@ def _already_running(host: str, port: int, open_browser: bool = False) -> bool:
         rhost = info.get("host", host)
         rtoken = info.get("token")
     except Exception:
+        return False
+
+    # Relaunch: a pidfile for some OTHER port must not block rebinding the port
+    # the user's tab is pinned to. (Don't unlink it — it may be a legitimately
+    # live, separate instance on a different port.)
+    if strict_port and rport != port:
         return False
 
     probe_host = "127.0.0.1" if rhost in ("0.0.0.0", "") else rhost
@@ -650,11 +666,18 @@ def setup_server(host: str = "127.0.0.1", port: int = 7654,
                  codex_dir: Optional[Path] = None,
                  codex_extra_roots: Optional[list[Path]] = None,
                  codex_since_days: int = 90,
-                 reuse_addr: bool = False) -> "_ServerHandle":
+                 reuse_addr: bool = False,
+                 strict_port: bool = False) -> "_ServerHandle":
     """Build caches, bind the port (with fallback), write the pidfile (incl. a
     per-process instance token), log the reading paths. Returns a bound
     _ServerHandle. Does NOT serve_forever, open the browser, or start the warm
-    thread — the caller drives those. Raises RuntimeError if no port binds."""
+    thread — the caller drives those. Raises RuntimeError if no port binds.
+
+    strict_port (auto-update RELAUNCH): bind ONLY the requested port — never fall
+    back to port+1/ephemeral. The user's tab is pinned to the original port, so
+    "landing on 7655" would strand it. The just-exited instance can leave the
+    port briefly unavailable (still closing, or TIME_WAIT), so retry the SAME
+    port for a few seconds instead of moving."""
     global _INSTANCE_TOKEN
     projects_dir = Path(projects_dir) if projects_dir else CLAUDE_PROJECTS_DIR
     # Claude now has a per-file cache (parser.py) → builds are fast (~5-8s warm,
@@ -712,14 +735,24 @@ def setup_server(host: str = "127.0.0.1", port: int = 7654,
     handler = make_handler(cache, codex_cache)
     server = None
     requested = port
-    for cand in [port, *range(port + 1, port + 11), 0]:
-        try:
-            server = _Server((host, cand), handler)
+    # Relaunch pins the exact port (no port-hopping); a fresh launch may hop to a
+    # free neighbour so a busy 7654 never crashes the first run.
+    candidates = [port] if strict_port else [port, *range(port + 1, port + 11), 0]
+    attempts = 16 if strict_port else 1          # ~8s of 0.5s retries for TIME_WAIT
+    for attempt in range(attempts):
+        for cand in candidates:
+            try:
+                server = _Server((host, cand), handler)
+                break
+            except OSError:
+                continue
+        if server is not None:
             break
-        except OSError:
-            continue
+        if strict_port:                          # same port still settling — wait, retry
+            time.sleep(0.5)
     if server is None:
-        raise RuntimeError(f"could not bind any free port near {requested}")
+        where = f"port {requested}" if strict_port else f"any free port near {requested}"
+        raise RuntimeError(f"could not bind {where}")
     port = server.server_address[1]
     if port != requested:
         sys.stderr.write(f"[burnmeter] port {requested} was busy → using {port} instead\n")
@@ -770,7 +803,7 @@ def serve(host: str = "127.0.0.1", port: int = 7654,
     try:
         h = setup_server(host, port, projects_dir, ttl_seconds, extra_roots,
                          codex_dir, codex_extra_roots, codex_since_days,
-                         reuse_addr=reuse_addr)
+                         reuse_addr=reuse_addr, strict_port=reuse_addr)
     except RuntimeError as e:
         sys.stderr.write(f"[burnmeter] ERROR: {e}\n")
         return
