@@ -19,7 +19,7 @@ free tier is table stakes, and the paid tier must earn its price on services.
 - CSV/JSON export
 - Config-file alert rules (self-hosted)
 
-## Pro — ~$7/mo or $60/yr (launch: $99 one-time "lifetime/supporter")
+## Pro — ~$6/mo or $60/yr (launch: $99 one-time "lifetime/supporter")
 *For the individual power user across multiple machines.*
 - **Hosted sync** — E2E-encrypted usage history across all your machines; we run the
   relay so you don't have to. The relay is open-source and **self-hostable for $0** —
@@ -30,7 +30,7 @@ free tier is table stakes, and the paid tier must earn its price on services.
   you even when the dashboard tab is closed
 - Priority support + early access
 
-*Anchoring: Obsidian Sync $4, Raycast Pro $8 → $7 sits right between.*
+*Anchoring: Obsidian Sync $4, Raycast Pro $8 → $6 sits right between.*
 
 ## Team — ~$12/seat/mo (min 3 seats)
 *For the eng manager who expenses $200 Max/Pro seats and needs oversight.*
