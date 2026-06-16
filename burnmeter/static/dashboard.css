@@ -187,8 +187,14 @@ main.gs-active { display:block; }
 .am-seen.live { color:#2BD96B !important; font-weight:600; }
 .am-name { font-weight:600; display:flex; align-items:center; flex-wrap:wrap; gap:4px 7px; min-width:0; color:var(--text-2); }
 .am-name .am-modelname { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.am-proj { flex-basis:100%; font:500 11px/1 var(--font-mono); color:var(--text-4);
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* "where it's running" line — readable: project (sans, brighter) + a device chip */
+.am-proj { flex-basis:100%; display:flex; align-items:center; gap:6px; margin-top:3px;
+  font:600 12.5px/1.2 var(--font-sans); color:var(--text-3);
+  overflow:hidden; white-space:nowrap; }
+.am-proj-icon { font-size:11px; opacity:.8; flex-shrink:0; }
+.am-dev { flex-shrink:0; font:700 10.5px/1 var(--font-sans); letter-spacing:.03em;
+  color:var(--text-2); background:var(--bg-inset); border:1px solid var(--border-default);
+  border-radius:5px; padding:2px 6px; }
 .am-row .badge { height:16px; padding:0 6px; font-size:10.5px; flex-shrink:0; }
 .am-top .am-name { color:var(--text-1); }
 .am-tpm, .am-rate { font-variant-numeric:tabular-nums; color:var(--text-2); }

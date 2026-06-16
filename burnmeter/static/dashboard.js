@@ -173,7 +173,7 @@ function deviceName(dev) {
 function liveWhere(m) {
   const dev = deviceName(m.device);
   const proj = m.project ? esc(m.project) : "unknown project";
-  return `<span class="am-proj">▸ ${proj}${dev ? ` · ${dev}` : ""}</span>`;
+  return `<span class="am-proj"><span class="am-proj-icon">📂</span>${proj}${dev ? `<span class="am-dev">${esc(dev)}</span>` : ""}</span>`;
 }
 
 // ---------- in-dashboard update check ----------
