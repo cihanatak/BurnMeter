@@ -164,6 +164,18 @@ function deviceBadge(dev) {
   return d ? `<span class="badge ${d}">${esc(d)}</span>` : "";
 }
 
+// "where is this model running" line for the LIVE card — project + device, always
+// shown (the device badge is hidden on single-device, but here the user explicitly
+// wants to see which project and which PC).
+function deviceName(dev) {
+  return ({ pc: "PC", mac: "Mac", linux: "Linux" }[String(dev || "").toLowerCase()] || dev || "");
+}
+function liveWhere(m) {
+  const dev = deviceName(m.device);
+  const proj = m.project ? esc(m.project) : "unknown project";
+  return `<span class="am-proj">▸ ${proj}${dev ? ` · ${dev}` : ""}</span>`;
+}
+
 // ---------- in-dashboard update check ----------
 // Users install via `pip install git+…` and otherwise have no way to know a new version
 // shipped. On load we check the version on GitHub (a single GET to a public file — no
@@ -397,7 +409,7 @@ function renderActiveModel(rep) {
     const s = m.seconds_since_last ?? 9e9, live = s < 120;
     return `<div class="am-row${i === 0 ? " am-top" : ""}" data-ls="${m.last_seen || ""}">
       <span class="am-dot${live ? " live" : ""}"></span>
-      <span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span>${deviceBadge(m.device)}${m.project ? `<span class="am-proj">▸ ${esc(m.project)}</span>` : ""}</span>
+      <span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span>${liveWhere(m)}</span>
       <span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/min</span></span>
       <span class="am-msg dim">${m.messages || 0} msg</span>
       <span class="am-rate num">${fmtMoney(m.cost_per_hour || 0)}<span class="dim">/hr</span></span>
@@ -459,7 +471,7 @@ function paintCombinedActive(side, rep) {
   if (w === "live") models = models.filter(m => (m.seconds_since_last ?? 9e9) < 120);
   box.innerHTML = models.length ? models.map(m => {
     const s = m.seconds_since_last ?? 9e9, live = s < 120;
-    return `<div class="am-row" data-ls="${m.last_seen || ""}"><span class="am-dot${live ? " live" : ""}"></span><span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span>${deviceBadge(m.device)}${m.project ? `<span class="am-proj">▸ ${esc(m.project)}</span>` : ""}</span><span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/min</span></span><span class="am-seen${live ? " live" : ""} dim">${seenLabel(s)}</span></div>`;
+    return `<div class="am-row" data-ls="${m.last_seen || ""}"><span class="am-dot${live ? " live" : ""}"></span><span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span>${liveWhere(m)}</span><span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/min</span></span><span class="am-seen${live ? " live" : ""} dim">${seenLabel(s)}</span></div>`;
   }).join("") : `<div class="dim" style="padding:6px 0">${w === "live" ? "no model running now" : `no active model in the last ${w}m`}</div>`;
 }
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "burnmeter"
-version = "0.1.24"
+version = "0.1.25"
 description = "Local-first dashboard for AI coding agent token usage & cost (Claude Code + OpenAI Codex)"
 readme = "README.md"
 requires-python = ">=3.10"
