@@ -397,7 +397,7 @@ function renderActiveModel(rep) {
     const s = m.seconds_since_last ?? 9e9, live = s < 120;
     return `<div class="am-row${i === 0 ? " am-top" : ""}" data-ls="${m.last_seen || ""}">
       <span class="am-dot${live ? " live" : ""}"></span>
-      <span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span>${deviceBadge(m.device)}</span>
+      <span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span>${deviceBadge(m.device)}${m.project ? `<span class="am-proj">▸ ${esc(m.project)}</span>` : ""}</span>
       <span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/min</span></span>
       <span class="am-msg dim">${m.messages || 0} msg</span>
       <span class="am-rate num">${fmtMoney(m.cost_per_hour || 0)}<span class="dim">/hr</span></span>
@@ -459,7 +459,7 @@ function paintCombinedActive(side, rep) {
   if (w === "live") models = models.filter(m => (m.seconds_since_last ?? 9e9) < 120);
   box.innerHTML = models.length ? models.map(m => {
     const s = m.seconds_since_last ?? 9e9, live = s < 120;
-    return `<div class="am-row" data-ls="${m.last_seen || ""}"><span class="am-dot${live ? " live" : ""}"></span><span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span>${deviceBadge(m.device)}</span><span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/min</span></span><span class="am-seen${live ? " live" : ""} dim">${seenLabel(s)}</span></div>`;
+    return `<div class="am-row" data-ls="${m.last_seen || ""}"><span class="am-dot${live ? " live" : ""}"></span><span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span>${deviceBadge(m.device)}${m.project ? `<span class="am-proj">▸ ${esc(m.project)}</span>` : ""}</span><span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/min</span></span><span class="am-seen${live ? " live" : ""} dim">${seenLabel(s)}</span></div>`;
   }).join("") : `<div class="dim" style="padding:6px 0">${w === "live" ? "no model running now" : `no active model in the last ${w}m`}</div>`;
 }
 
@@ -612,13 +612,20 @@ function renderSpeedometer(rep, isCodex) {
   // efficiency headline (fuel_efficiency) + demoted note (öbür limit / eşik kaynağı)
   const fe = rep.fuel_efficiency?.headline || {};
   const noteHtml = `<div class="dim" style="font-size:10.5px;margin-top:5px;color:var(--text-4)">${esc(g.note)}</div>`;
-  $("hero-detail").innerHTML = `<strong>${esc(fe.label || "")}</strong>${fe.detail ? " — " + esc(fe.detail) : ""}${noteHtml}`;
+  // Market-normal reference numbers for the user's plan, so the "market normal" the
+  // gauge mentions is actually visible as $/hr (typical/busy/heavy).
+  const mz = rep.market_zones;
+  const planName = mz ? ({ pro: "Pro", max5: "Max 5×", max20: "Max 20×" }[mz.plan] || mz.plan) : "";
+  const marketHtml = mz
+    ? `<div class="dim" style="font-size:10.5px;margin-top:3px;color:var(--text-4)">Market-normal (${planName}): typical ${fmtMoney(mz.typical)} · busy ${fmtMoney(mz.busy)} · heavy ${fmtMoney(mz.heavy)} /hr</div>`
+    : "";
+  $("hero-detail").innerHTML = `<strong>${esc(fe.label || "")}</strong>${fe.detail ? " — " + esc(fe.detail) : ""}${noteHtml}${marketHtml}`;
 
   // per-model breakdown of this burn (which model is eating the $/hr)
   const bd = (fc.burn_rates_by_hours_by_model || {})[hoursStr] || [];
   const vis = bd.filter(m => !String(m.model_id).startsWith("<")).slice(0, 4);
   $("speedo-breakdown").innerHTML = vis.length
-    ? `<div class="dim" style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">who's burning this pace · est. $</div>` +
+    ? `<div class="dim" style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">what's using the budget · est. $</div>` +
       vis.map(m => `<span class="sb-row ${modelToFamily(m.model_id)}"><span class="sb-name">${esc(modelDisplay(m.model_id))}</span>
         <span class="sb-val">${fmtMoney(m.cost_per_hour)}/hr</span><span class="sb-share">${(m.share * 100).toFixed(0)}%</span></span>`).join("")
     : "";
@@ -1150,9 +1157,12 @@ function initModularGrid() {
   if (!cards.length) return;
   const colW = c => { const m = (c.className.match(/col-(\d+)/) || [])[1]; return m ? +m : 4; };
   // varsayılan yükseklikler (satır = 76px); kullanıcı resize edip kaydedebilir
-  const H = { hero: 5, "hero-aside": 5, kpi: 2, eff: 5, cache: 3, trend: 5, models: 5,
-              "active-model": 4, daily: 4, projects: 5, recent: 5, heatmap: 3, "model-table": 5, behavior: 3, tools: 3,
-              budget: 4, "sync-devices": 3 };
+  // Row heights tuned so each card FITS its content (no card scrollbars) and tall
+  // cards don't float in empty space. Cards with an inner .scroll table (recent,
+  // projects, model-table) stay tall; charts get the room they need.
+  const H = { hero: 5, "hero-aside": 5, kpi: 2, eff: 5, cache: 4, trend: 6, models: 5,
+              "active-model": 3, daily: 5, projects: 5, recent: 5, heatmap: 3, "model-table": 5, behavior: 4, tools: 4,
+              budget: 3, "sync-devices": 2 };
   const gs = document.createElement("div");
   gs.className = "grid-stack";
   cards.forEach(card => {
@@ -1184,12 +1194,12 @@ function initModularGrid() {
   }, gs);
   window.__grid = grid;
   try {
-    const saved = JSON.parse(localStorage.getItem("burnmeter_layout_v2") || "null");
+    const saved = JSON.parse(localStorage.getItem("burnmeter_layout_v3") || "null");
     // kaydet/yükle YALNIZCA tam grid'de (12 kolon). Dar ekranda GridStack otomatik reflow
     // yapar; o geçici dar düzeni kaydetmeyiz ki geniş ekran düzenini bozmasın.
     if (saved && saved.length && grid.getColumn() === 12) grid.load(saved, false);
   } catch (e) { /* bozuk kayıt → varsayılan */ }
-  const save = () => { try { if (grid.getColumn() === 12) localStorage.setItem("burnmeter_layout_v2", JSON.stringify(grid.save(false))); } catch (e) {} };
+  const save = () => { try { if (grid.getColumn() === 12) localStorage.setItem("burnmeter_layout_v3", JSON.stringify(grid.save(false))); } catch (e) {} };
   grid.on("change", save);
   // resize sonrası grafikleri yeni boyuta sığdır
   grid.on("resizestop", () => { Object.values(window.__charts || {}).forEach(ch => { try { ch.resize(); } catch (e) {} }); });
@@ -1320,7 +1330,7 @@ function start() {
   });
   initModularGrid();
   const rl = $("reset-layout");
-  if (rl) rl.addEventListener("click", () => { localStorage.removeItem("burnmeter_layout_v2"); location.reload(); });
+  if (rl) rl.addEventListener("click", () => { localStorage.removeItem("burnmeter_layout_v3"); location.reload(); });
   // First paint is cold until the local logs are parsed — on large histories that
   // first read can take a few seconds. Say so instead of showing a blank "…" gauge.
   $("last-updated").textContent = "Reading your Burnmeter logs — the first run can take a minute or two on large histories…";

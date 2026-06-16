@@ -5,10 +5,10 @@
   <title>Burnmeter — AI coding fuel gauge</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack.min.css" />
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260616i" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260616j" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack-all.js" defer></script>
-  <script src="/static/dashboard.js?v=20260616i" defer></script>
+  <script src="/static/dashboard.js?v=20260616j" defer></script>
 </head>
 <body>
 
@@ -88,13 +88,13 @@
   </section>
 
   <!-- ROW — monthly BUDGET tracking (#7): spent this month vs your set $ limit -->
-  <section class="card col-12" data-card="budget">
-    <div class="card-title">Monthly budget <span class="sub">this month vs your set $ limit · end-of-month projection · $ is an estimate</span></div>
+  <section class="card col-6" data-card="budget">
+    <div class="card-title">Monthly budget <span class="sub">spent this month vs your budget · all figures are estimates</span></div>
     <div id="budget-body"></div>
   </section>
 
   <!-- ROW — Pro cross-device sync: summaries of synced devices (E2E encrypted) -->
-  <section class="card col-12" data-card="sync-devices">
+  <section class="card col-6" data-card="sync-devices">
     <div class="card-title">Devices <span class="sub">Pro sync · end-to-end encrypted · our servers never see your data</span></div>
     <div id="sync-devices-body"></div>
   </section>

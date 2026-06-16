@@ -1380,6 +1380,7 @@ def live_active_models(records: list[UsageRecord], lookback_min: int = 15) -> di
         "cost": 0.0,
         "messages": 0,
         "last_seen": None,
+        "project": None,
     })
 
     for r in records:
@@ -1402,6 +1403,7 @@ def live_active_models(records: list[UsageRecord], lookback_min: int = 15) -> di
         m["messages"] += 1
         if m["last_seen"] is None or r.timestamp > m["last_seen"]:
             m["last_seen"] = r.timestamp
+            m["project"] = r.project_label or m["project"]   # project of the most-recent turn
 
     out = []
     elapsed_hours = elapsed_min / 60.0
@@ -1410,6 +1412,7 @@ def live_active_models(records: list[UsageRecord], lookback_min: int = 15) -> di
         out.append({
             "model_id": model_id,
             "device": device,
+            "project": stats["project"],
             "billable_tokens_recent": stats["billable_tokens"],
             "tokens_per_min": round(stats["billable_tokens"] / elapsed_min, 0) if elapsed_min else 0,
             "messages": stats["messages"],
@@ -1929,6 +1932,9 @@ def build_report(
         },
         "forecast": forecast(records, daily),
         "burn_rate_zones": burn_rate_zones(window_baseline(windows), plan_guess.get("guess")),
+        # Raw market-normal baseline for the user's plan, so the gauge can SHOW the
+        # market numbers next to the user's own (not just say "started market-normal").
+        "market_zones": {**_market_zones(plan_guess.get("guess")), "plan": (plan_guess.get("guess") or "pro")},
         "live_active_models_by_window": {
             "1":    live_active_models(records, lookback_min=1),
             "5":    live_active_models(records, lookback_min=5),

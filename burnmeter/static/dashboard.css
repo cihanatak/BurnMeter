@@ -41,7 +41,7 @@
   /* ---- Spacing ---- */
   --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s8:32px; --s10:40px;
   --radius-sm:6px; --radius-md:10px; --radius-lg:14px; --radius-full:9999px;
-  --gap:16px; --pad:20px; --pad-lg:24px; --maxw:min(94vw, 1700px); --page-pad:28px;
+  --gap:16px; --pad:20px; --pad-lg:24px; --maxw:min(96vw, 2100px); --page-pad:24px;
 
   /* ---- Fonts ---- */
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -156,11 +156,11 @@ header {
 main.gs-active { display:block; }
 .grid-stack { background:transparent; }
 .grid-stack-item-content { inset:0; }
-.grid-stack-item-content > .card { height:100%; margin:0; overflow:auto; }
+.grid-stack-item-content > .card { height:100%; margin:0; overflow:hidden; }   /* no card-level scrollbars; tables use their own .scroll, charts flex to fit */
 /* grafik/hero kartları: içerik kartı doldursun (resize'da büyüsün) */
 .gs-active [data-card="trend"], .gs-active [data-card="daily"],
 .gs-active [data-card="models"], .gs-active .card-hero {
-  overflow:auto; display:flex; flex-direction:column; }   /* (B) küçültünce clip değil SCROLL → veri kaybı yok */
+  overflow:hidden; display:flex; flex-direction:column; }   /* chart/hero cards: content flexes to fill, no scrollbar */
 .gs-active [data-card="trend"] .chart-wrap, .gs-active [data-card="daily"] .chart-wrap {
   flex:1 1 auto; height:auto; min-height:120px; }
 .gs-active [data-card="models"] .donut-wrap { flex:1 1 auto; min-height:120px; }
@@ -185,8 +185,10 @@ main.gs-active { display:block; }
   margin-right:5px; vertical-align:0; box-shadow:0 0 7px rgba(43,217,107,.85);
   animation:am-pulse 1.2s ease-in-out infinite; }
 .am-seen.live { color:#2BD96B !important; font-weight:600; }
-.am-name { font-weight:600; display:flex; align-items:center; gap:7px; min-width:0; color:var(--text-2); }
+.am-name { font-weight:600; display:flex; align-items:center; flex-wrap:wrap; gap:4px 7px; min-width:0; color:var(--text-2); }
 .am-name .am-modelname { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.am-proj { flex-basis:100%; font:500 11px/1 var(--font-mono); color:var(--text-4);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .am-row .badge { height:16px; padding:0 6px; font-size:10.5px; flex-shrink:0; }
 .am-top .am-name { color:var(--text-1); }
 .am-tpm, .am-rate { font-variant-numeric:tabular-nums; color:var(--text-2); }
