@@ -607,7 +607,7 @@ function renderBudget(rep, isCodex) {
          <div class="budget-set">
            <span class="budget-cur">$</span>
            <input id="budget-input" type="number" min="0" step="10" placeholder="200" value="${budget > 0 ? budget : ""}" inputmode="decimal" />
-           <button id="budget-save">kaydet</button>
+           <button id="budget-save">Save</button>
            ${budget > 0 ? `<button id="budget-cancel" class="budget-ghost">cancel</button><button id="budget-clear" class="budget-ghost">clear</button>` : ""}
          </div>
          <div class="dim" style="font-size:11px">${src} · so far this month: ~${fmtMoney0(soFar)}</div>
@@ -644,14 +644,14 @@ function renderBudget(rep, isCodex) {
     ? `<span style="color:var(--bad);font-weight:600">⚠ ~${fmtMoney0(over)} overage projected</span>`
     : `<span style="color:var(--good);font-weight:600">✓ within budget — ~${fmtMoney0(budget - projEom)} headroom left</span>`;
   const projMark = (projPct > pct && projPct <= 100)
-    ? `<span class="budget-proj" style="left:${projPct.toFixed(1)}%" title="ay sonu tahmini ~${fmtMoney0(projEom)}"></span>` : "";
+    ? `<span class="budget-proj" style="left:${projPct.toFixed(1)}%" title="end-of-month estimate ~${fmtMoney0(projEom)}"></span>` : "";
 
   body.innerHTML =
     `<div class="budget-grid">
        <div class="budget-nums">
          <div><span class="num" style="font-size:30px;font-weight:600;color:var(--text-1)">~${fmtMoney0(soFar)}</span>
            <span class="dim" style="font-size:13px"> / ${fmtMoney0(budget)}</span></div>
-         <div class="dim" style="font-size:11px;margin-top:2px">bu ay harcanan · %${pct.toFixed(0)}</div>
+         <div class="dim" style="font-size:11px;margin-top:2px">spent this month · ${pct.toFixed(0)}%</div>
        </div>
        <div class="budget-barwrap">
          <div class="meter-track" style="height:12px;position:relative;overflow:visible">
@@ -660,7 +660,7 @@ function renderBudget(rep, isCodex) {
          </div>
          <div style="display:flex;justify-content:space-between;font-size:11px;margin-top:7px" class="dim">
            <span>$0</span>
-           <span>ay sonu tahmini: ~${fmtMoney0(projEom)} (%${projPct.toFixed(0)})</span>
+           <span>end-of-month est: ~${fmtMoney0(projEom)} (${projPct.toFixed(0)}%)</span>
            <span>${fmtMoney0(budget)}</span>
          </div>
        </div>
@@ -728,7 +728,7 @@ async function renderSyncDevices() {
       `<span class="sync-rtok num">${fmtInt(t.tokens || 0)}</span></div>`
     ).join("") + `</div>` : "";
     return `<div class="sync-dev${me ? ' me' : ''}">
-      <div class="sync-dev-head"><span class="sync-dot live"></span><b>${esc(d.label || "?")}</b>${me ? '<span class="sync-badge">bu cihaz</span>' : ''}<span class="sync-ago dim">${ago(d._updated_at)}</span></div>
+      <div class="sync-dev-head"><span class="sync-dot live"></span><b>${esc(d.label || "?")}</b>${me ? '<span class="sync-badge">this device</span>' : ''}<span class="sync-ago dim">${ago(d._updated_at)}</span></div>
       ${rows}${recentHtml}</div>`;
   }).join("") + `</div>`;
 }
@@ -931,7 +931,7 @@ function tooltipCfg() {
 function chartOpts({ yMoney }) {
   return {
     responsive: true, maintainAspectRatio: false, animation: false,
-    plugins: { legend: { display: false }, tooltip: { ...tooltipCfg(), callbacks: yMoney ? { label: (c) => fmtMoney(c.parsed.y) + "/sa" } : {} } },
+    plugins: { legend: { display: false }, tooltip: { ...tooltipCfg(), callbacks: yMoney ? { label: (c) => fmtMoney(c.parsed.y) + "/hr" } : {} } },
     scales: {
       x: { grid: { display: false }, border: { display: false }, ticks: { color: "#62666D", font: { size: 10, family: "'Geist Mono',monospace" }, maxTicksLimit: 8 } },
       y: { grid: { color: "rgba(255,255,255,0.05)" }, border: { display: false }, ticks: { color: "#62666D", font: { size: 10, family: "'Geist Mono',monospace" }, maxTicksLimit: 5, callback: (v) => yMoney ? "$" + v : v } }
