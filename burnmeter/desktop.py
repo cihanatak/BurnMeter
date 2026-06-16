@@ -90,15 +90,30 @@ def ensure_shortcut(port: int = 7654, desktop_dir=None):
         return None, False
 
 
+def _pythonw(py: str) -> str:
+    """Return the windowless interpreter (pythonw.exe) next to `py` if present,
+    so a desktop double-click launches Burnmeter WITHOUT a lingering console
+    window. Falls back to `py` (a visible console) when pythonw isn't found —
+    a console is the safe default since it surfaces errors."""
+    try:
+        cand = Path(py).with_name("pythonw.exe")
+        if cand.exists():
+            return str(cand)
+    except Exception:
+        pass
+    return py
+
+
 def _win(desktop: Path, py: str, port: int) -> Path:
     lnk = desktop / "Burnmeter.lnk"
+    pyw = _pythonw(py)            # silent (no console) for the double-click path
 
     def q(s) -> str:               # single-quote-safe for a PowerShell literal
         return str(s).replace("'", "''")
 
     ps = (
         f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{q(lnk)}');"
-        f"$s.TargetPath='{q(py)}';"
+        f"$s.TargetPath='{q(pyw)}';"
         f"$s.Arguments='-m burnmeter serve';"
         f"$s.WorkingDirectory='{q(Path.home())}';"
         f"$s.Description='Burnmeter - AI coding usage dashboard';"

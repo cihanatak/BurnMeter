@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import threading
 import time
@@ -469,6 +470,16 @@ def serve(host: str = "127.0.0.1", port: int = 7654,
     if bound != port:
         sys.stderr.write(f"[burnmeter] port {port} was busy → using {bound} instead\n")
     port = bound
+    # Pidfile so `burnmeter stop` can find a backgrounded server — e.g. one started
+    # by a desktop double-click via pythonw.exe, which has no console to Ctrl+C.
+    _pidfile = Path.home() / ".burnmeter" / "server.json"
+    try:
+        _pidfile.parent.mkdir(parents=True, exist_ok=True)
+        _pidfile.write_text(
+            json.dumps({"pid": os.getpid(), "port": port, "host": host}),
+            encoding="utf-8")
+    except Exception:
+        _pidfile = None
     sys.stderr.write(f"[burnmeter] v{__version__} → http://{host}:{port}\n")
     sys.stderr.write(f"[burnmeter] reading (claude): {projects_dir}\n")
     sys.stderr.write(f"[burnmeter] reading (codex):  {codex_root} (exists={codex_root.exists()})\n")
@@ -509,14 +520,23 @@ def serve(host: str = "127.0.0.1", port: int = 7654,
     # always shows the REAL bound port even when 7654 was busy and we fell back.
     opening = "  (opening in your browser…)" if open_browser else ""
     sys.stdout.write(f"\n  ➜  Burnmeter is running:  {url}{opening}\n")
-    sys.stdout.write("     Leave this window open. Press Ctrl+C to stop.\n\n")
+    sys.stdout.write("     Leave this window open. Press Ctrl+C to stop (or run: burnmeter stop).\n\n")
     sys.stdout.flush()
 
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         sys.stderr.write("\n[burnmeter] shutting down\n")
-        server.server_close()
+    finally:
+        try:
+            server.server_close()
+        except Exception:
+            pass
+        if _pidfile:
+            try:
+                _pidfile.unlink()
+            except Exception:
+                pass
 
 
 def main(argv=None):

@@ -10,6 +10,9 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
+import json
+import os
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -264,6 +267,49 @@ def cmd_serve(args):
     return 0
 
 
+def cmd_stop(args):
+    """Stop a backgrounded Burnmeter server.
+
+    The dashboard shortcut launches via pythonw.exe (no console), so there is no
+    window to Ctrl+C. `serve` writes ~/.burnmeter/server.json {pid, port}; this
+    reads it and terminates that process, then cleans the pidfile up."""
+    pf = Path.home() / ".burnmeter" / "server.json"
+    if not pf.exists():
+        print("No running Burnmeter server found (no pidfile).")
+        return 1
+    try:
+        info = json.loads(pf.read_text(encoding="utf-8"))
+        pid = int(info["pid"])
+    except Exception:
+        print("Pidfile is unreadable — nothing to stop. Removing it.")
+        try:
+            pf.unlink()
+        except Exception:
+            pass
+        return 1
+    killed = False
+    try:
+        if sys.platform == "win32":
+            r = subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"],
+                               capture_output=True, text=True)
+            killed = r.returncode == 0
+        else:
+            import signal
+            os.kill(pid, signal.SIGTERM)
+            killed = True
+    except Exception as e:
+        print(f"Could not stop pid {pid}: {e}")
+    try:
+        pf.unlink()
+    except Exception:
+        pass
+    if killed:
+        print(green(f"✓ Stopped Burnmeter (pid {pid}, port {info.get('port', '?')})."))
+        return 0
+    print(f"Burnmeter (pid {pid}) was not running — cleaned up the stale pidfile.")
+    return 0
+
+
 def cmd_desktop(args):
     """Create a 'Burnmeter' desktop shortcut (double-click → dashboard opens)."""
     from . import desktop
@@ -451,11 +497,22 @@ def cmd_alerts(args):
 
 
 def main(argv=None):
-    # Windows: the console's locale codepage (e.g. cp1254 on Turkish) can't encode
-    # the box-drawing / emoji / Turkish output below and raises UnicodeEncodeError,
-    # crashing every CLI command. Force UTF-8 on the text streams so output is
-    # locale-independent (sibling to the git-log decode fix in analytics.py).
-    for _stream in (sys.stdout, sys.stderr):
+    # Stream hygiene for two Windows realities:
+    #   1. pythonw.exe (the windowless desktop-shortcut launch) gives None for
+    #      sys.stdout/stderr — any write() then crashes the server before it binds.
+    #      Point None streams at a sink so the silent launch path can't crash.
+    #   2. The console's locale codepage (cp1254 on Turkish) can't encode the
+    #      box-drawing / emoji / Turkish output below → UnicodeEncodeError crashes
+    #      every CLI command. Force UTF-8 so output is locale-independent (sibling to
+    #      the git-log decode fix in analytics.py).
+    for _name in ("stdout", "stderr"):
+        _stream = getattr(sys, _name, None)
+        if _stream is None:
+            try:
+                setattr(sys, _name, open(os.devnull, "w", encoding="utf-8"))
+            except Exception:
+                pass
+            continue
         try:
             _stream.reconfigure(encoding="utf-8")
         except (AttributeError, ValueError):
@@ -495,6 +552,9 @@ def main(argv=None):
     p_serve.add_argument("--codex-days", type=int, default=90,
                          help="how many recent days of Codex history to scan "
                               "(default 90; 0 = all-time — slow on a huge ~/.codex)")
+
+    sub.add_parser("stop",
+                   help="stop a backgrounded dashboard (the windowless desktop-shortcut one)")
 
     p_sl = sub.add_parser("statusline",
                           help="tek satır canlı durum (Claude Code statusLine.command için)")
@@ -537,6 +597,7 @@ def main(argv=None):
         "models": cmd_models,
         "sessions": cmd_sessions,
         "serve": cmd_serve,
+        "stop": cmd_stop,
         "statusline": cmd_statusline,
         "sync": cmd_sync,
         "sync-relay": cmd_sync_relay,
