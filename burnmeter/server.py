@@ -291,13 +291,17 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 import subprocess
                 from ._proc import NO_WINDOW
                 try:
+                    # --force-reinstall --no-cache-dir: plain `--upgrade git+URL`
+                    # leaves the install STALE (pip wheel cache / version-satisfied),
+                    # so the new code never lands. These flags force a fresh pull.
                     r = subprocess.run(
-                        [sys.executable, "-m", "pip", "install", "--upgrade",
+                        [sys.executable, "-m", "pip", "install",
+                         "--force-reinstall", "--no-cache-dir",
                          "git+https://github.com/cihanatak/BurnMeter"],
                         capture_output=True, text=True, timeout=600,
                         creationflags=NO_WINDOW)
                     ok = r.returncode == 0
-                    msg = ("Updated. Restart Burnmeter to apply."
+                    msg = ("Updated. Quit Burnmeter and open it again to apply."
                            if ok else (r.stderr or r.stdout or "pip failed")[-300:])
                 except Exception as e:
                     ok, msg = False, str(e)

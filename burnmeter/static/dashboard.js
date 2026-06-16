@@ -210,7 +210,7 @@ async function doDashboardUpdate(latest) {
     } else {
       el.textContent = orig; el.dataset.busy = "";
       alert("Update failed:\n" + (d.message || ("HTTP " + r.status))
-            + "\n\nUpdate manually:\npip install --upgrade git+https://github.com/cihanatak/BurnMeter");
+            + "\n\nUpdate manually:\npip install --force-reinstall --no-cache-dir git+https://github.com/cihanatak/BurnMeter");
     }
   } catch (e) {
     el.textContent = orig; el.dataset.busy = "";

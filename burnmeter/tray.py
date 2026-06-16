@@ -140,8 +140,12 @@ def run_tray(host: str = "127.0.0.1", port: int = 7654, projects_dir=None,
             from ._proc import NO_WINDOW
             _notify(icon, "Updating Burnmeter — this can take a minute…", "Updating")
             try:
+                # --force-reinstall --no-cache-dir: plain `--upgrade git+URL` leaves
+                # the install STALE (pip cache / version-satisfied) → new code never
+                # lands. These flags force a fresh pull.
                 r = subprocess.run(
-                    [sys.executable, "-m", "pip", "install", "--upgrade",
+                    [sys.executable, "-m", "pip", "install",
+                     "--force-reinstall", "--no-cache-dir",
                      "git+https://github.com/cihanatak/BurnMeter"],
                     capture_output=True, text=True, timeout=600, creationflags=NO_WINDOW)
                 ok = r.returncode == 0
@@ -149,10 +153,11 @@ def run_tray(host: str = "127.0.0.1", port: int = 7654, projects_dir=None,
                 ok = False
             if ok:
                 _notify(icon, f"Updated to v{update['latest']}. Right-click the tray icon "
-                              f"→ Quit, then start Burnmeter again to apply.", "Update complete")
+                              f"→ Quit, then open Burnmeter again to apply.", "Update complete")
             else:
                 _notify(icon, "Update failed. From a terminal:\n"
-                              "pip install --upgrade git+https://github.com/cihanatak/BurnMeter",
+                              "pip install --force-reinstall --no-cache-dir "
+                              "git+https://github.com/cihanatak/BurnMeter",
                         "Update failed")
 
         def _update_text(item):
