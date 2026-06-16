@@ -297,10 +297,56 @@ def cmd_serve(args):
     return 0
 
 
+def _tray_passthrough_args(args) -> list:
+    """Rebuild the CLI flags so a detached re-spawn keeps the same options."""
+    out = ["--host", str(args.host), "--port", str(args.port), "--ttl", str(args.ttl)]
+    if getattr(args, "no_browser", False):
+        out.append("--no-browser")
+    if getattr(args, "no_shortcut", False):
+        out.append("--no-shortcut")
+    for p in (getattr(args, "extra_projects_dir", []) or []):
+        out += ["--extra-projects-dir", str(p)]
+    if getattr(args, "codex_dir", None):
+        out += ["--codex-dir", str(args.codex_dir)]
+    for p in (getattr(args, "codex_extra_dir", []) or []):
+        out += ["--codex-extra-dir", str(p)]
+    out += ["--codex-days", str(getattr(args, "codex_days", 90))]
+    return out
+
+
+def _maybe_detach_tray(args) -> bool:
+    """Windows: when `burnmeter tray` is launched FROM a console, re-spawn it as a
+    windowless, fully detached process and return True (caller exits) — so the
+    dashboard SURVIVES closing that terminal. Returns False when already detached,
+    when there's no console (the desktop icon already runs pythonw/windowless), or
+    on non-Windows / any failure (then the tray just runs in-process)."""
+    if sys.platform != "win32":
+        return False
+    if os.environ.get("BURNMETER_TRAY_DETACHED") == "1" or _is_windowless():
+        return False
+    try:
+        from . import desktop
+        pyw = desktop._pythonw(sys.executable)
+        flags = 0x00000008 | 0x00000200 | 0x08000000  # DETACHED | NEW_GROUP | NO_WINDOW
+        subprocess.Popen(
+            [pyw, "-m", "burnmeter", "tray", *_tray_passthrough_args(args)],
+            env=dict(os.environ, BURNMETER_TRAY_DETACHED="1", PYTHONUTF8="1"),
+            creationflags=flags, close_fds=True, cwd=str(Path.home()))
+    except Exception:
+        return False
+    print(green("✓ Burnmeter is starting in the system tray."))
+    print(dim("  You can close this window — the dashboard keeps running."))
+    print(dim("  Stop it from the tray icon (right-click → Quit) or run: burnmeter stop"))
+    return True
+
+
 def cmd_tray(args):
     """Run Burnmeter in the system tray (recommended desktop launch). Falls back
     to console mode — never a silent dead double-click — if the optional tray
     dependency is missing or the tray can't run here."""
+    # Launched from a terminal? Detach so it survives that window closing.
+    if _maybe_detach_tray(args):
+        return 0
     _ensure_shortcut_once(args)
     kwargs = _common_kwargs(args)
     open_browser = not getattr(args, "no_browser", False)

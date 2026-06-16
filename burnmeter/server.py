@@ -669,7 +669,8 @@ def serve(host: str = "127.0.0.1", port: int = 7654,
     # always shows the REAL bound port even when 7654 was busy and we fell back.
     opening = "  (opening in your browser…)" if open_browser else ""
     sys.stdout.write(f"\n  ➜  Burnmeter is running:  {h.url}{opening}\n")
-    sys.stdout.write("     Leave this window open. Press Ctrl+C to stop (or run: burnmeter stop).\n\n")
+    sys.stdout.write("     Leave this window open. Press Ctrl+C to stop (or run: burnmeter stop).\n")
+    sys.stdout.write("     Tip: `burnmeter tray` runs it in the background — keeps going after you close this window.\n\n")
     sys.stdout.flush()
 
     try:
