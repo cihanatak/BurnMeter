@@ -252,7 +252,7 @@ def cmd_serve(args):
         except Exception:
             pass
     # serve() prints the clear, clickable link with the REAL bound port (it may
-    # fall back from 8765 if that port is busy), so we only show a starting note here.
+    # fall back from 7654 if that port is busy), so we only show a starting note here.
     print("Starting Burnmeter…")
     serve(host=args.host, port=args.port,
           projects_dir=Path(args.projects_dir), ttl_seconds=args.ttl,
@@ -479,7 +479,7 @@ def main(argv=None):
 
     p_serve = sub.add_parser("serve", help="start the local web dashboard")
     p_serve.add_argument("--host", default="127.0.0.1")
-    p_serve.add_argument("--port", type=int, default=8765)
+    p_serve.add_argument("--port", type=int, default=7654)
     p_serve.add_argument("--ttl", type=int, default=15)
     p_serve.add_argument("--no-browser", action="store_true",
                          help="dashboard'ı tarayıcıda otomatik açma")
@@ -514,7 +514,7 @@ def main(argv=None):
     p_sync.add_argument("--codex-dir", default=None, help="Codex sessions kökü (push)")
 
     p_desktop = sub.add_parser("desktop", help="masaüstüne 'Burnmeter' kısayolu ekle")
-    p_desktop.add_argument("--port", type=int, default=8765)
+    p_desktop.add_argument("--port", type=int, default=7654)
 
     p_relay = sub.add_parser("sync-relay", help="Pro: self-host edilebilir sync relay sunucusu")
     p_relay.add_argument("--host", default="127.0.0.1")

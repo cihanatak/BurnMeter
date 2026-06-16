@@ -54,7 +54,7 @@ def _desktop_dir(override=None) -> Path:
     return Path.home() / "Desktop"
 
 
-def create_shortcut(port: int = 8765, desktop_dir=None) -> Path:
+def create_shortcut(port: int = 7654, desktop_dir=None) -> Path:
     """Create the shortcut for the current OS and return its path."""
     desktop = _desktop_dir(desktop_dir)
     desktop.mkdir(parents=True, exist_ok=True)
@@ -75,7 +75,7 @@ def _shortcut_target(desktop_dir=None) -> Path:
     return d / "Burnmeter.desktop"
 
 
-def ensure_shortcut(port: int = 8765, desktop_dir=None):
+def ensure_shortcut(port: int = 7654, desktop_dir=None):
     """Create the desktop shortcut only if it isn't already there.
     Returns (path, created: bool). Never raises — best-effort UX."""
     target = _shortcut_target(desktop_dir)

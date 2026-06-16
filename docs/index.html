@@ -209,7 +209,7 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
     <div class="step"><div class="n">2</div><h3>Run</h3>
       <p><code>burnmeter serve</code> — auto-detects <code>~/.claude</code> &amp; <code>~/.codex</code>, drops a <b>Burnmeter</b> shortcut on your desktop, and opens the dashboard in your browser.</p></div>
     <div class="step"><div class="n">3</div><h3>Open</h3>
-      <p>It opens at <code>localhost:8765</code> on its own. If your browser doesn't pop up, click the link Burnmeter prints in the terminal — and if <code>8765</code> is already taken, it picks the next free port automatically. After that, just double-click the desktop icon.</p></div>
+      <p>It opens at <code>localhost:7654</code> on its own. If your browser doesn't pop up, click the link Burnmeter prints in the terminal — and if <code>7654</code> is already taken, it picks the next free port automatically. After that, just double-click the desktop icon.</p></div>
   </div>
 </div></section>
 
@@ -298,11 +298,11 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
 </div></footer>
 
 <script>
-  // Local-only behaviour: when the landing is served by the running dashboard (port 8765 / localhost),
+  // Local-only behaviour: when the landing is served by the running dashboard (port 7654 / localhost),
   // reveal the in-app "Dashboard" links and point the logo at /landing (the local homepage).
   // On a public web deploy these stay hidden and the logo points at "/" (site root = homepage).
   (function () {
-    var local = location.port === '8765' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    var local = location.port === '7654' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
     if (local) {
       ['nav-dashboard', 'foot-dashboard'].forEach(function (id) {
         var el = document.getElementById(id); if (el) el.style.display = '';

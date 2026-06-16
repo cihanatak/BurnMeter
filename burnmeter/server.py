@@ -398,7 +398,7 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
     return Handler
 
 
-def serve(host: str = "127.0.0.1", port: int = 8765,
+def serve(host: str = "127.0.0.1", port: int = 7654,
           projects_dir: Optional[Path] = None,
           ttl_seconds: int = 15,
           extra_roots: Optional[list[Path]] = None,
@@ -443,7 +443,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765,
         )
 
     # Bind the requested port, falling back to the next free one — then an
-    # ephemeral port — if it's already taken, so a busy 8765 never crashes the
+    # ephemeral port — if it's already taken, so a busy 7654 never crashes the
     # user's first run. make_handler() is called once (it starts daemon threads);
     # only the bind is retried.
     class _Server(ThreadingHTTPServer):
@@ -506,7 +506,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765,
 
     # A clear, clickable link in the terminal — most terminals linkify http://… .
     # Printed to stdout (not the [burnmeter] stderr log) so it stands out, and it
-    # always shows the REAL bound port even when 8765 was busy and we fell back.
+    # always shows the REAL bound port even when 7654 was busy and we fell back.
     opening = "  (opening in your browser…)" if open_browser else ""
     sys.stdout.write(f"\n  ➜  Burnmeter is running:  {url}{opening}\n")
     sys.stdout.write("     Leave this window open. Press Ctrl+C to stop.\n\n")
@@ -522,7 +522,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765,
 def main(argv=None):
     p = argparse.ArgumentParser(prog="burnmeter-serve")
     p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--port", type=int, default=7654)
     p.add_argument("--projects-dir", default=str(CLAUDE_PROJECTS_DIR))
     p.add_argument("--extra-projects-dir", action="append", default=[],
                    help="ek JSONL dizinleri (örn. PC'den Syncthing'le mirror'lanmış "
