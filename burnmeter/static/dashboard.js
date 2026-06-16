@@ -174,23 +174,51 @@ function _verCmp(a, b) {
   for (let i = 0; i < 3; i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d > 0 ? 1 : -1; }
   return 0;
 }
-async function checkForUpdate(current) {
-  if (!current || current === "?" || window.__updateChecked) return;
+// Always-present "Check for updates" affordance (matches the tray's item). The
+// pill shows "↻ Check for updates" by default; an auto- or manual check flips it to
+// a green "↑ Update to vX" when newer, or flashes "✓ Up to date" on a manual check.
+function _showCheckAffordance(current) {
+  const el = $("update-link"); if (!el) return;
+  el.className = "update-pill";
+  el.textContent = "↻ Check for updates";
+  el.title = "Check GitHub for a newer Burnmeter version";
+  el.style.display = "";
+  el.onclick = (ev) => { ev.preventDefault(); checkForUpdate(current, true); };
+}
+function _showUpdateAvailable(latest, current) {
+  const el = $("update-link"); if (!el) return;
+  el.className = "update-pill has-update";
+  el.textContent = `↑ Update to v${latest}`;
+  el.href = "https://github.com/cihanatak/BurnMeter";
+  el.title = `New version v${latest} is available (you have v${current}). Click to install.`;
+  el.style.display = "";
+  el.onclick = (ev) => { ev.preventDefault(); doDashboardUpdate(latest); };
+}
+function _flashPill(msg, current) {
+  const el = $("update-link"); if (!el) return;
+  el.className = "update-pill";
+  el.textContent = msg;
+  el.onclick = (ev) => ev.preventDefault();
+  setTimeout(() => _showCheckAffordance(current), 2200);
+}
+async function checkForUpdate(current, manual = false) {
+  if (!current || current === "?") return;
+  if (!manual && window.__updateChecked) return;   // auto: once per load (periodic resets it)
   window.__updateChecked = true;
+  const el = $("update-link");
+  if (manual && el) { el.className = "update-pill"; el.textContent = "↻ Checking…"; el.onclick = (ev) => ev.preventDefault(); }
   try {
     const r = await fetch("https://raw.githubusercontent.com/cihanatak/BurnMeter/main/burnmeter/__init__.py", { cache: "no-store" });
-    if (!r.ok) return;
+    if (!r.ok) throw new Error("http " + r.status);
     const m = (await r.text()).match(/__version__\s*=\s*["']([\d.]+)["']/);
-    if (!m || _verCmp(m[1], current) <= 0) return;
-    const el = $("update-link");
-    if (!el) return;
-    const latest = m[1];
-    el.textContent = `↑ Update to v${latest}`;
-    el.href = "https://github.com/cihanatak/BurnMeter";
-    el.title = `New version v${latest} is available (you have v${current}). Click to install.`;
-    el.style.display = "";
-    el.onclick = (ev) => { ev.preventDefault(); doDashboardUpdate(latest); };
-  } catch (e) { /* offline / blocked → silently skip (local-first) */ }
+    const latest = m && m[1];
+    if (latest && _verCmp(latest, current) > 0) _showUpdateAvailable(latest, current);
+    else if (manual) _flashPill(`✓ Up to date (v${current})`, current);
+    else _showCheckAffordance(current);
+  } catch (e) {
+    if (manual) _flashPill("Check failed — offline?", current);
+    /* auto: leave the affordance as-is (local-first, fail silent) */
+  }
 }
 
 // One-click update straight from the dashboard: POST to the local server, which
@@ -248,7 +276,7 @@ function render(rep) {
   $("brand-logo").textContent = isCodex ? "⌬" : "◔";
   document.title = "Burnmeter — AI coding fuel gauge";
   $("version").textContent = "v" + (rep._meta?.version || "?");
-  checkForUpdate(rep._meta?.version);
+  { const v = rep._meta?.version; if (v) { _showCheckAffordance(v); checkForUpdate(v); } }
   $("data-source").textContent = `${rep._meta?.files_scanned ?? "?"} files · ${fmtInt(rep.record_count || 0)} records`;
 
   renderWelcome(rep);
@@ -387,7 +415,7 @@ function renderCombined(cl, cx) {
   $("app-name").textContent = "Burnmeter"; $("brand-logo").textContent = "◫";
   document.title = "Burnmeter — Claude + Codex";
   $("version").textContent = "v" + (cl._meta?.version || cx._meta?.version || "?");
-  checkForUpdate(cl._meta?.version || cx._meta?.version);
+  { const v = cl._meta?.version || cx._meta?.version; if (v) { _showCheckAffordance(v); checkForUpdate(v); } }
   window.__multiDevice = new Set([...Object.keys(cl.by_device || {}), ...Object.keys(cx.by_device || {})]).size > 1;
   $("data-source").textContent = `Claude ${fmtInt(cl.record_count || 0)} · Codex ${fmtInt(cx.record_count || 0)} records`;
   $("last-updated").textContent = "now";
