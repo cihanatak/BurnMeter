@@ -397,6 +397,73 @@ def cmd_relaunch(args):
         return 0
 
 
+def cmd_update(args):
+    """Internal: the ROBUST one-click updater. Runs detached so the server isn't
+    executing pip on its OWN package files (on Windows that file-in-use conflict made
+    `pip --force-reinstall` hang → the /api/update request never returned → the
+    dashboard showed a false 'couldn't reach'). Sequence: STOP the running server →
+    wait for it down → reinstall (package now free) → spawn `_relaunch` (new code,
+    same port)."""
+    import time, signal, urllib.request
+    from ._proc import NO_WINDOW
+    host, port = args.host, args.port
+    hurl = f"http://{host}:{port}/api/health"
+    # 1. stop the server ON THIS PORT so it releases the package files. Target by
+    # PORT (not the single shared pidfile) so we can never kill a DIFFERENT instance.
+    def _pids_on_port(p):
+        pids = set()
+        try:
+            if sys.platform == "win32":
+                out = subprocess.run(["netstat", "-ano"], capture_output=True, text=True,
+                                     creationflags=NO_WINDOW).stdout
+                for ln in out.splitlines():
+                    if f":{p} " in ln and "LISTENING" in ln.upper():
+                        t = ln.split()
+                        if t and t[-1].isdigit():
+                            pids.add(int(t[-1]))
+            else:
+                out = subprocess.run(["lsof", "-ti", f"tcp:{p}", "-sTCP:LISTEN"],
+                                     capture_output=True, text=True).stdout
+                pids = {int(x) for x in out.split() if x.strip().isdigit()}
+        except Exception:
+            pass
+        return pids
+    for pid in _pids_on_port(port):
+        try:
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"],
+                               capture_output=True, creationflags=NO_WINDOW)
+            else:
+                os.kill(pid, signal.SIGTERM)
+        except Exception:
+            pass
+    # 2. wait until it's actually down
+    for _ in range(40):
+        try:
+            urllib.request.urlopen(hurl, timeout=1).read(); time.sleep(0.5)
+        except Exception:
+            break
+    time.sleep(1.0)
+    # 3. reinstall — now nothing is using the package, so pip can replace it cleanly
+    try:
+        subprocess.run([sys.executable, "-m", "pip", "install", "--force-reinstall",
+                        "--no-cache-dir", "git+https://github.com/cihanatak/BurnMeter"],
+                       capture_output=True, text=True, timeout=600, creationflags=NO_WINDOW)
+    except Exception:
+        pass
+    # 4. relaunch the freshly-installed code on the SAME port (new process → new code)
+    try:
+        from . import desktop
+        flags = (0x00000008 | 0x00000200 | NO_WINDOW) if sys.platform == "win32" else 0
+        subprocess.Popen([desktop._pythonw(sys.executable), "-m", "burnmeter", "_relaunch",
+                          "--host", str(host), "--port", str(port)],
+                         creationflags=flags, close_fds=True, cwd=str(Path.home()),
+                         start_new_session=(sys.platform != "win32"))
+    except Exception:
+        pass
+    return 0
+
+
 def cmd_stop(args):
     """Stop a backgrounded Burnmeter server.
 
@@ -713,6 +780,10 @@ def main(argv=None):
     p_relaunch.add_argument("--port", type=int, default=7654)
     p_relaunch.add_argument("--no-browser", action="store_true")
 
+    p_update = sub.add_parser("_update", help=argparse.SUPPRESS)   # internal (robust updater)
+    p_update.add_argument("--host", default="127.0.0.1")
+    p_update.add_argument("--port", type=int, default=7654)
+
     sub.add_parser("stop",
                    help="stop a backgrounded dashboard (the tray / windowless one)")
 
@@ -759,6 +830,7 @@ def main(argv=None):
         "serve": cmd_serve,
         "tray": cmd_tray,
         "_relaunch": cmd_relaunch,
+        "_update": cmd_update,
         "stop": cmd_stop,
         "statusline": cmd_statusline,
         "sync": cmd_sync,

@@ -262,11 +262,12 @@ async function doDashboardUpdate(latest) {
   }
 }
 
-// After a one-click update the server restarts itself on the same port. Wait for
-// it to go down and come back, then reload THIS tab onto the new version.
+// After a one-click update an external updater stops the server, reinstalls, and
+// relaunches on the same port (~30-90s incl. pip). Wait for it to go down and come
+// back, then reload THIS tab onto the new version.
 async function waitForRestartAndReload(latest) {
   let downSeen = false;
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 150; i++) {          // ~150s — pip clone+build can be slow
     await new Promise(r => setTimeout(r, 1000));
     try {
       const r = await fetch("/api/health", { cache: "no-store" });
@@ -274,7 +275,7 @@ async function waitForRestartAndReload(latest) {
         const d = await r.json().catch(() => ({}));
         if (downSeen || d.version === latest) { location.reload(); return; }
       }
-    } catch (e) { downSeen = true; }   // server is down → mid-restart
+    } catch (e) { downSeen = true; }   // server is down → mid-update
   }
   const el = $("update-link"); if (el) el.textContent = `✓ Updated to v${latest} — reload`;
 }

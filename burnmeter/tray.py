@@ -138,31 +138,18 @@ def run_tray(host: str = "127.0.0.1", port: int = 7654, projects_dir=None,
                 _notify(icon, f"You're on the latest version (v{__version__}).")
 
         def _do_update(icon):
-            import subprocess
-            from ._proc import NO_WINDOW
-            _notify(icon, "Updating Burnmeter — this can take a minute…", "Updating")
-            try:
-                # --force-reinstall --no-cache-dir: plain `--upgrade git+URL` leaves
-                # the install STALE (pip cache / version-satisfied) → new code never
-                # lands. These flags force a fresh pull.
-                r = subprocess.run(
-                    [sys.executable, "-m", "pip", "install",
-                     "--force-reinstall", "--no-cache-dir",
-                     "git+https://github.com/cihanatak/BurnMeter"],
-                    capture_output=True, text=True, timeout=600, creationflags=NO_WINDOW)
-                ok = r.returncode == 0
-            except Exception:
-                ok = False
-            if ok:
-                _notify(icon, f"Updated to v{update['latest']} — restarting Burnmeter…", "Updating")
-                from .server import trigger_restart
-                time.sleep(0.8)          # let the notification surface first
-                trigger_restart(h.host, h.port)   # spawns relauncher + quits this one
-            else:
-                _notify(icon, "Update failed. From a terminal:\n"
+            # Hand off to the DETACHED updater: it stops THIS tray, reinstalls (the
+            # package is no longer in use → pip can't hang), then relaunches the new
+            # code. We must NOT pip from here — the tray runs from site-packages, and
+            # replacing in-use package files on Windows hangs.
+            _notify(icon, "Updating Burnmeter — it will restart in a moment…", "Updating")
+            from .server import _spawn_update
+            time.sleep(0.8)              # let the notification surface
+            if not _spawn_update(h.host, h.port):
+                _notify(icon, "Couldn't start the updater. From a terminal:\n"
                               "pip install --force-reinstall --no-cache-dir "
-                              "git+https://github.com/cihanatak/BurnMeter",
-                        "Update failed")
+                              "git+https://github.com/cihanatak/BurnMeter", "Update failed")
+            # the detached _update will taskkill this tray + relaunch the new version
 
         def _update_text(item):
             v = update["latest"]

@@ -293,34 +293,18 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 if self.headers.get("X-Burnmeter-Update") != "1":
                     _json_response(self, 403, {"ok": False, "message": "forbidden"})
                     return
-                import subprocess
-                from ._proc import NO_WINDOW
-                try:
-                    # --force-reinstall --no-cache-dir: plain `--upgrade git+URL`
-                    # leaves the install STALE (pip wheel cache / version-satisfied),
-                    # so the new code never lands. These flags force a fresh pull.
-                    r = subprocess.run(
-                        [sys.executable, "-m", "pip", "install",
-                         "--force-reinstall", "--no-cache-dir",
-                         "git+https://github.com/cihanatak/BurnMeter"],
-                        capture_output=True, text=True, timeout=600,
-                        creationflags=NO_WINDOW)
-                    ok = r.returncode == 0
-                    msg = ("Updated — restarting Burnmeter…"
-                           if ok else (r.stderr or r.stdout or "pip failed")[-300:])
-                except Exception as e:
-                    ok, msg = False, str(e)
-                _json_response(self, 200 if ok else 500, {"ok": ok, "message": msg})
-                if ok:
-                    # Auto-restart so the user doesn't have to quit/reopen. Done
-                    # AFTER the response flushes (brief delay), off the request path.
-                    host, port = self.server.server_address[0], self.server.server_address[1]
-                    def _restart_later():
-                        time.sleep(0.8)
-                        # The dashboard tab polls /api/health and reloads itself,
-                        # so don't pop a duplicate browser tab.
-                        trigger_restart(host, port, open_browser=False)
-                    threading.Thread(target=_restart_later, daemon=True).start()
+                # Return INSTANTLY, then a DETACHED updater stops this server, runs
+                # pip, and relaunches. We must NOT run pip inside this request: the
+                # server runs FROM site-packages, and pip --force-reinstall replacing
+                # those in-use files (Windows) hangs → the long request never returns
+                # → the dashboard shows a false "couldn't reach". The dashboard polls
+                # /api/health and reloads when the new version is up.
+                host, port = self.server.server_address[0], self.server.server_address[1]
+                _json_response(self, 200, {"ok": True, "message": "Updating — Burnmeter will restart…"})
+                def _go():
+                    time.sleep(0.6)        # let the response flush first
+                    _spawn_update(host, port)
+                threading.Thread(target=_go, daemon=True).start()
                 return
             _json_response(self, 404, {"ok": False, "message": "not found"})
 
@@ -504,6 +488,27 @@ def _spawn_relaunch(host: str, port: int, open_browser: bool = True) -> bool:
         else:
             kw["start_new_session"] = True
         subprocess.Popen(argv, **kw)
+        return True
+    except Exception:
+        return False
+
+
+def _spawn_update(host: str, port: int) -> bool:
+    """Spawn the DETACHED robust updater (`burnmeter _update`): it stops this server,
+    reinstalls (package no longer in use), then relaunches. Survives this server
+    exiting. Returns True on spawn."""
+    import subprocess
+    from ._proc import NO_WINDOW
+    from . import desktop
+    try:
+        kw = {"close_fds": True, "cwd": str(Path.home())}
+        if sys.platform == "win32":
+            kw["creationflags"] = 0x00000008 | 0x00000200 | NO_WINDOW  # DETACHED|NEWGROUP|NO_WINDOW
+        else:
+            kw["start_new_session"] = True
+        subprocess.Popen(
+            [desktop._pythonw(sys.executable), "-m", "burnmeter", "_update",
+             "--host", str(host), "--port", str(port)], **kw)
         return True
     except Exception:
         return False
