@@ -428,10 +428,18 @@ def cmd_update(args):
         except Exception:
             pass
         return pids
+    my_pid = os.getpid()
     for pid in _pids_on_port(port):
+        if pid == my_pid:
+            continue                        # never kill ourselves
         try:
             if sys.platform == "win32":
-                subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"],
+                # NO /T (tree kill): THIS _update process is a CHILD of the server we
+                # are killing (the server's /api/update handler spawned us). /T would
+                # reap the whole tree — including this process — so we'd die before
+                # pip/relaunch and the server would never come back (the "stuck on
+                # restarting…" bug). Kill ONLY the listener; the port frees on exit.
+                subprocess.run(["taskkill", "/PID", str(pid), "/F"],
                                capture_output=True, creationflags=NO_WINDOW)
             else:
                 os.kill(pid, signal.SIGTERM)
@@ -444,13 +452,15 @@ def cmd_update(args):
         except Exception:
             break
     time.sleep(1.0)
-    # 3. reinstall — now nothing is using the package, so pip can replace it cleanly
-    try:
-        subprocess.run([sys.executable, "-m", "pip", "install", "--force-reinstall",
-                        "--no-cache-dir", "git+https://github.com/cihanatak/BurnMeter"],
-                       capture_output=True, text=True, timeout=600, creationflags=NO_WINDOW)
-    except Exception:
-        pass
+    # 3. reinstall — now nothing is using the package, so pip can replace it cleanly.
+    #    (BURNMETER_UPDATE_SKIP_PIP=1 skips this — used to test the restart path.)
+    if os.environ.get("BURNMETER_UPDATE_SKIP_PIP") != "1":
+        try:
+            subprocess.run([sys.executable, "-m", "pip", "install", "--force-reinstall",
+                            "--no-cache-dir", "git+https://github.com/cihanatak/BurnMeter"],
+                           capture_output=True, text=True, timeout=600, creationflags=NO_WINDOW)
+        except Exception:
+            pass
     # 4. relaunch the freshly-installed code on the SAME port (new process → new code)
     try:
         from . import desktop
