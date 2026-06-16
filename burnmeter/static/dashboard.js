@@ -824,7 +824,7 @@ async function renderSyncDevices() {
            <div style="font-size:14.5px;font-weight:600;color:var(--text-1);margin-bottom:5px">All your machines in one view <span style="color:var(--brand)">✦ Pro</span></div>
            <div class="dim" style="font-size:12.5px;line-height:1.6">Sync your Claude Code + Codex usage across every device — end-to-end encrypted, the relay only ever sees ciphertext, your raw logs never leave your machine.</div>
          </div>
-         <a href="/pricing" target="_blank" rel="noopener" class="get-pro-btn">Get Pro →</a>
+         <a href="https://burnmeter.dev/#pricing" target="_blank" rel="noopener" class="get-pro-btn">Get Pro →</a>
        </div>`;
     return;
   }
