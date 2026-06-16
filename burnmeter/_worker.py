@@ -38,7 +38,8 @@ def main() -> int:
         from .codex_parser import load_codex_records, CODEX_SESSIONS_DIR
         root = Path(cfg["codex_dir"]) if cfg.get("codex_dir") else CODEX_SESSIONS_DIR
         extra = [Path(p) for p in (cfg.get("codex_extra_roots") or [])]
-        records, stats, intents = load_codex_records(root, extra_roots=extra)
+        records, stats, intents = load_codex_records(
+            root, extra_roots=extra, since_days=int(cfg.get("codex_since_days", 90)))
         errors = []
     else:
         from .parser import load_records, CLAUDE_PROJECTS_DIR

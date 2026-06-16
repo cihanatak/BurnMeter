@@ -62,7 +62,7 @@ class _Cache:
             proc = subprocess.run(
                 [sys.executable, "-m", "burnmeter._worker"],
                 input=json.dumps(self.worker_config or {}),
-                capture_output=True, text=True, timeout=180,
+                capture_output=True, text=True, timeout=600,
             )
             if proc.returncode != 0:
                 sys.stderr.write(f"[burnmeter] worker rc={proc.returncode}: {proc.stderr[:300]}\n")
@@ -404,6 +404,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765,
           extra_roots: Optional[list[Path]] = None,
           codex_dir: Optional[Path] = None,
           codex_extra_roots: Optional[list[Path]] = None,
+          codex_since_days: int = 90,
           open_browser: bool = False) -> None:
     projects_dir = Path(projects_dir) if projects_dir else CLAUDE_PROJECTS_DIR
     # Claude now has a per-file cache (parser.py) → builds are fast (~5-8s warm,
@@ -426,11 +427,12 @@ def serve(host: str = "127.0.0.1", port: int = 8765,
         codex_root,
         ttl_seconds=max(ttl_seconds, 120),   # ~30s build → bg-refresh, az churn
         extra_roots=codex_extra_roots,
-        loader=lambda: load_codex_records(codex_root, extra_roots=codex_extra_roots) + ([],),
+        loader=lambda: load_codex_records(codex_root, extra_roots=codex_extra_roots, since_days=codex_since_days) + ([],),
         worker_config={
             "source": "codex",
             "codex_dir": str(codex_root),
             "codex_extra_roots": [str(r) for r in (codex_extra_roots or [])],
+            "codex_since_days": codex_since_days,
         },
     )
 
@@ -484,7 +486,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765,
         time.sleep(1.0)   # let the listener bind
         for path in ("/api/report", "/api/report?source=codex"):
             try:
-                urllib.request.urlopen(f"http://{host}:{port}{path}", timeout=200).read()
+                urllib.request.urlopen(f"http://{host}:{port}{path}", timeout=620).read()
             except Exception:
                 pass
     threading.Thread(target=_warm, daemon=True).start()

@@ -237,6 +237,7 @@ def _compact_to_usages(meta: dict, turns: list, device: str):
 def load_codex_records(
     root: Path = CODEX_SESSIONS_DIR,
     extra_roots: Optional[list[Path]] = None,
+    since_days: int = 90,
 ) -> tuple[list[UsageRecord], dict, dict[str, str]]:
     """Load Codex usage records with an incremental (path,mtime,size) cache.
 
@@ -265,17 +266,25 @@ def load_codex_records(
             "source": "codex",
         }, user_intents
 
+    import time
+    cutoff_ts = (time.time() - since_days * 86400) if since_days and since_days > 0 else 0.0
     for scan_root, device in roots:
         if not scan_root.exists():
             continue
         for path in iter_codex_files(scan_root):
-            files += 1
             key = str(path)
             try:
                 st = path.stat()
                 sig = [st.st_mtime, st.st_size]
             except OSError:
                 continue
+            # Recent-window cap: skip sessions older than `since_days` so a huge
+            # ~/.codex history (50 GB+) doesn't blow past the build-worker timeout
+            # (180s → blank forever). since_days<=0 = all-time. mtime is the right
+            # signal — the active file keeps a fresh mtime; old sessions fall out.
+            if cutoff_ts and st.st_mtime < cutoff_ts:
+                continue
+            files += 1
             cached = cache.get(key)
             if cached and cached.get("v") == _PARSE_VERSION and "meta" in cached:
                 old_sig = cached.get("sig") or [0, 0]

@@ -1127,7 +1127,7 @@ function start() {
   if (rl) rl.addEventListener("click", () => { localStorage.removeItem("burnmeter_layout_v2"); location.reload(); });
   // First paint is cold until the local logs are parsed — on large histories that
   // first read can take a few seconds. Say so instead of showing a blank "…" gauge.
-  $("last-updated").textContent = "Reading your Burnmeter logs — first load can take a few seconds…";
+  $("last-updated").textContent = "Reading your Burnmeter logs — the first run can take a minute or two on large histories…";
   refresh(false);
   setInterval(() => refresh(false), 10000);
   setInterval(updateLiveStamp, 1000);

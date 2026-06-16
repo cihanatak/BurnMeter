@@ -259,6 +259,7 @@ def cmd_serve(args):
           extra_roots=extras,
           codex_dir=codex_dir,
           codex_extra_roots=codex_extras,
+          codex_since_days=getattr(args, "codex_days", 90),
           open_browser=not getattr(args, "no_browser", False))
     return 0
 
@@ -491,6 +492,9 @@ def main(argv=None):
                          help="Codex sessions kökü (default ~/.codex/sessions)")
     p_serve.add_argument("--codex-extra-dir", action="append", default=[],
                          help="ek Codex sessions dizinleri (PC mirror'ı vb.).")
+    p_serve.add_argument("--codex-days", type=int, default=90,
+                         help="how many recent days of Codex history to scan "
+                              "(default 90; 0 = all-time — slow on a huge ~/.codex)")
 
     p_sl = sub.add_parser("statusline",
                           help="tek satır canlı durum (Claude Code statusLine.command için)")
