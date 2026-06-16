@@ -5,10 +5,10 @@
   <title>Burnmeter — AI coding fuel gauge</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack.min.css" />
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260531z" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260616a" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack-all.js" defer></script>
-  <script src="/static/dashboard.js?v=20260531z" defer></script>
+  <script src="/static/dashboard.js?v=20260616a" defer></script>
 </head>
 <body>
 
@@ -38,6 +38,9 @@
 </header>
 
 <main>
+
+  <!-- FIRST-RUN welcome (shown only while history is thin; dismissible) -->
+  <section class="card col-12 welcome-card" id="welcome-card" data-card="welcome" style="display:none"></section>
 
   <!-- ROW 1 — HERO: burn-rate SPEEDOMETER (car gauge) + binding-constraint aside -->
   <section class="card card-hero col-8" data-card="hero">

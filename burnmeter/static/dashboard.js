@@ -206,6 +206,7 @@ function render(rep) {
   checkForUpdate(rep._meta?.version);
   $("data-source").textContent = `${rep._meta?.files_scanned ?? "?"} files · ${fmtInt(rep.record_count || 0)} records`;
 
+  renderWelcome(rep);
   renderSpeedometer(rep, isCodex);
   renderHeroAside(rep, isCodex);
   renderKPIs(rep, isCodex);
@@ -224,6 +225,42 @@ function render(rep) {
   renderTools(rep);
   renderActiveModel(rep);
   checkAlerts(rep, isCodex);
+}
+
+// ---------- first-run WELCOME (onboarding) ----------
+// New users land on ~18 mostly-empty panels with no idea why. While history is
+// thin, show a friendly banner ON TOP (no panels removed) that either tells a
+// zero-data user how to get data, or explains that the gauges are market-normal
+// (still "calibrating") until there's enough personal history. Dismissible once.
+function renderWelcome(rep) {
+  const el = $("welcome-card"); if (!el) return;
+  const n = rep.record_count || 0;
+  const dismissed = localStorage.getItem("burnmeter_welcome_dismissed") === "1";
+  if (n >= 200 || dismissed) { el.style.display = "none"; return; }
+  const tool = (rep._meta?.source || "claude") === "codex" ? "Codex" : "Claude Code";
+  let lead, body;
+  if (n === 0) {
+    lead = "No usage data yet — let's fix that";
+    body = `Burnmeter reads your local <b>${tool}</b> logs — nothing leaves your machine. `
+         + `Start a ${tool} session and your tokens, cost and burn rate appear here automatically. `
+         + `This page refreshes on its own, so you can just leave it open.`;
+  } else {
+    lead = "Welcome — you're just getting started";
+    body = `Burnmeter has seen <b>${fmtInt(n)}</b> ${tool} ${n === 1 ? "record" : "records"} so far. `
+         + `The gauges use <b>market-normal</b> thresholds while they calibrate — once there's enough `
+         + `of your own history they switch to your personal baseline, so early readings are a sensible `
+         + `reference, not a verdict on your habits.`;
+  }
+  el.innerHTML =
+    `<div class="wc-icon">🔥</div>`
+    + `<div class="wc-text"><div class="wc-lead">${lead}</div><div class="wc-body">${body}</div></div>`
+    + `<button class="wc-dismiss" id="wc-dismiss" title="hide this">Got it ✕</button>`;
+  el.style.display = "";
+  const btn = $("wc-dismiss");
+  if (btn) btn.onclick = () => {
+    localStorage.setItem("burnmeter_welcome_dismissed", "1");
+    el.style.display = "none";
+  };
 }
 
 // ---------- live ACTIVE MODEL (canlı çalışan model · 15dk/1sa/5sa) ----------
