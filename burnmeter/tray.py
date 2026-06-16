@@ -34,6 +34,33 @@ class TrayUnavailable(Exception):
     mode — it should NEVER be a silent dead double-click."""
 
 
+_UPDATE_URL = "https://raw.githubusercontent.com/cihanatak/BurnMeter/main/burnmeter/__init__.py"
+
+
+def latest_version(timeout: float = 4.0):
+    """Fetch the latest released __version__ from the public GitHub repo. Returns
+    a version string, or None on ANY failure (offline / private repo / parse) —
+    fail-silent so a 'check for updates' never shows a false positive."""
+    import urllib.request, re
+    try:
+        with urllib.request.urlopen(_UPDATE_URL, timeout=timeout) as r:
+            txt = r.read().decode("utf-8", "replace")
+        m = re.search(r"__version__\s*=\s*['\"]([0-9][0-9.]*)['\"]", txt)
+        return m.group(1) if m else None
+    except Exception:
+        return None
+
+
+def _newer(latest: str, current: str) -> bool:
+    """True if `latest` is a strictly higher numeric semver than `current`."""
+    def parts(v):
+        return tuple(int(x) for x in str(v).split(".") if x.isdigit())
+    try:
+        return parts(latest) > parts(current)
+    except Exception:
+        return False
+
+
 def _make_image():
     """PIL-generated 64x64 flame-in-a-disc icon — no asset file is shipped.
     (PIL imported here, not at module scope, so the base package needs no deps.)"""
@@ -86,6 +113,35 @@ def run_tray(host: str = "127.0.0.1", port: int = 7654, projects_dir=None,
         started = True
         h.start_warm()
 
+        update = {"latest": None}     # set to a version string when one is available
+
+        def _notify(icon, msg, title="Burnmeter"):
+            try:
+                icon.notify(msg, title)       # balloon; not all backends support it
+            except Exception:
+                pass
+
+        def _do_check(icon, manual=False):
+            v = latest_version()
+            if v and _newer(v, __version__):
+                update["latest"] = v
+                try:
+                    icon.update_menu()        # flip the menu label to "Update available"
+                except Exception:
+                    pass
+                _notify(icon, f"Burnmeter v{v} is available.\n"
+                              f"Update:  pip install git+https://github.com/cihanatak/BurnMeter",
+                        "Update available")
+            elif manual:
+                _notify(icon, f"You're on the latest version (v{__version__}).")
+
+        def _update_text(item):
+            v = update["latest"]
+            return f"⬆ Update available: v{v}" if v else "Check for updates"
+
+        def _on_check(icon, item):
+            threading.Thread(target=lambda: _do_check(icon, manual=True), daemon=True).start()
+
         def _on_ready(icon):
             # pystray calls setup() on its loop thread once the icon is actually
             # registered → open the browser HERE, not before run() (avoids racing
@@ -93,6 +149,14 @@ def run_tray(host: str = "127.0.0.1", port: int = 7654, projects_dir=None,
             icon.visible = True
             if open_browser:
                 _open_browser_async(h.url)
+            # Background update watch: check once now, then every 6h. Fail-silent;
+            # only notifies when a newer version is actually published.
+            def _auto():
+                import time as _t
+                while True:
+                    _do_check(icon, manual=False)
+                    _t.sleep(6 * 3600)
+            threading.Thread(target=_auto, daemon=True).start()
 
         def _on_open(icon, item):
             _open_browser_async(h.url)
@@ -102,6 +166,7 @@ def run_tray(host: str = "127.0.0.1", port: int = 7654, projects_dir=None,
 
         menu = pystray.Menu(
             pystray.MenuItem("Open dashboard", _on_open, default=True),
+            pystray.MenuItem(_update_text, _on_check),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Quit Burnmeter", _on_quit),
         )
