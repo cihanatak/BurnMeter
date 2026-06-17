@@ -10,6 +10,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import burnmeter.sync_relay as R
+from burnmeter.sync import derive_auth_secret   # mirror the real client derivation
 
 
 # ---------- pure helpers ----------
@@ -90,78 +91,144 @@ def test_device_id_whitelist():
     assert not R._DEV_RE.match("x" * 65)
 
 
-# ---------- accounts (identity layer) ----------
-def test_accounts_create_and_plan(tmp_path, monkeypatch):
+# ---------- accounts: email + password (zero-knowledge) ----------
+def _auth(email, password):
+    return derive_auth_secret(email, password)
+
+
+def test_create_then_activate_then_plan(tmp_path, monkeypatch):
     monkeypatch.delenv("BURNMETER_RELAY_BILLING", raising=False)
-    monkeypatch.setenv("BURNMETER_RELAY_ADMIN_TOKEN", "x")   # authoritative accounts mode
-    rec = R.create_account(tmp_path, email="a@b.com", plan="pro", device_limit=3)
-    assert rec["token"].startswith("bm_")                    # raw token returned ONCE
-    assert rec["plan"] == "pro" and rec["status"] == "active" and rec["device_limit"] == 3
-    # _plan_for resolves via the accounts store (by token HASH) when storage is given
-    p = R._plan_for(rec["token"], tmp_path)
-    assert p == {"plan": "pro", "device_limit": 3, "status": "active"}
-    # unknown token in AUTHORITATIVE mode = no sync
-    assert R._plan_for("bm_stranger", tmp_path)["device_limit"] == 0
-    # storage=None keeps the legacy self-host behaviour (back-compat)
+    monkeypatch.setenv("BURNMETER_RELAY_ADMIN_TOKEN", "x")     # authoritative accounts mode
+    rec = R.create_account(tmp_path, email="A@B.com", plan="pro", device_limit=3)
+    assert rec["activation_code"] and rec["activated"] is False
+    assert "token" not in rec and "token_hash" not in rec      # no token model anymore
+    bearer = _auth("a@b.com", "hunter2")                       # email normalised to lower
+    # before activation the password-derived bearer doesn't work (authoritative => 0)
+    assert R._plan_for(bearer, tmp_path)["device_limit"] == 0
+    res = R.activate_account(tmp_path, "a@b.com", rec["activation_code"], bearer)
+    assert res["ok"] and res["plan"] == "pro" and res["device_limit"] == 3
+    assert R._plan_for(bearer, tmp_path) == {"plan": "pro", "device_limit": 3, "status": "active"}
+    # wrong code rejected (generic message)
+    R.create_account(tmp_path, email="c@d.com", plan="pro")
+    assert R.activate_account(tmp_path, "c@d.com", "WRONG-CODE", _auth("c@d.com", "p"))["ok"] is False
+    # re-activating the SAME device/password is idempotent → ok; a DIFFERENT password on
+    # an already-activated account is rejected (generic)
+    assert R.activate_account(tmp_path, "a@b.com", "x", bearer)["ok"] is True
+    assert R.activate_account(tmp_path, "a@b.com", "x", _auth("a@b.com", "different"))["ok"] is False
+    # storage=None keeps legacy self-host (back-compat)
     assert R._plan_for("anytoken1234567")["plan"] == "pro"
 
 
-def test_token_not_persisted_plaintext(tmp_path):
-    rec = R.create_account(tmp_path, email="a@b.com", plan="pro")
+def test_recreate_activated_account_preserves_it(tmp_path, monkeypatch):
+    # webhook retry / operator re-create for an ALREADY-ACTIVATED email must NOT wipe the
+    # account (that would lock the paying customer out + orphan their ciphertext).
+    monkeypatch.setenv("BURNMETER_RELAY_ADMIN_TOKEN", "x")
+    rec = R.create_account(tmp_path, email="keep@x.com", plan="pro")
+    bearer = _auth("keep@x.com", "pw-strong-1")
+    R.activate_account(tmp_path, "keep@x.com", rec["activation_code"], bearer)
+    again = R.create_account(tmp_path, email="keep@x.com", plan="team")   # e.g. plan change/renewal
+    assert again.get("activation_code") is None                          # no new code (still activated)
+    p = R._plan_for(bearer, tmp_path)
+    assert p["status"] == "active" and p["plan"] == "team"               # works + plan updated in place
+    assert len(R.list_accounts(tmp_path)) == 1
+
+
+def test_selfhost_login_bootstrap(tmp_path, monkeypatch):
+    # no accounts + non-strict relay → login bootstraps Pro (the free self-host path)
+    monkeypatch.delenv("BURNMETER_RELAY_ADMIN_TOKEN", raising=False)
+    monkeypatch.delenv("BURNMETER_RELAY_ACCOUNTS", raising=False)
+    monkeypatch.delenv("BURNMETER_RELAY_BILLING", raising=False)
+    res = R.login_account(tmp_path, "me@self.host", _auth("me@self.host", "whatever-pw"))
+    assert res["ok"] is True and res.get("selfhost") is True
+
+
+def test_pepper_protects_verifier(tmp_path, monkeypatch):
+    # with a pepper, the stored verifier is an HMAC (not the plain hash) → a file-only
+    # leak of accounts.json can't be brute-forced without the env pepper.
+    monkeypatch.setenv("BURNMETER_RELAY_ADMIN_TOKEN", "x")
+    monkeypatch.setenv("BURNMETER_RELAY_PEPPER", "super-secret-pepper")
+    rec = R.create_account(tmp_path, email="p@x.com", plan="pro")
+    bearer = _auth("p@x.com", "pw-strong-2")
+    R.activate_account(tmp_path, "p@x.com", rec["activation_code"], bearer)
     raw = R._accounts_path(tmp_path).read_text(encoding="utf-8")
-    assert rec["token"] not in raw                 # raw token NEVER written to disk
-    assert R._hash_token(rec["token"]) in raw      # only its hash is stored
+    assert "hmac:" in raw and R._hash_token(bearer) not in raw          # peppered, not plain
+    assert R.login_account(tmp_path, "p@x.com", bearer)["ok"] is True   # login still works
+
+
+def test_login_verifies_password(tmp_path, monkeypatch):
+    monkeypatch.setenv("BURNMETER_RELAY_ADMIN_TOKEN", "x")
+    rec = R.create_account(tmp_path, email="u@x.com", plan="pro")
+    good = _auth("u@x.com", "correct horse")
+    R.activate_account(tmp_path, "u@x.com", rec["activation_code"], good)
+    assert R.login_account(tmp_path, "u@x.com", good)["ok"] is True
+    assert R.login_account(tmp_path, "u@x.com", _auth("u@x.com", "wrong"))["ok"] is False
+    assert R.login_account(tmp_path, "nobody@x.com", good)["ok"] is False
+    R.create_account(tmp_path, email="fresh@x.com", plan="pro")   # not activated yet
+    assert R.login_account(tmp_path, "fresh@x.com", _auth("fresh@x.com", "p"))["ok"] is False
+
+
+def test_password_not_persisted(tmp_path, monkeypatch):
+    monkeypatch.delenv("BURNMETER_RELAY_PEPPER", raising=False)   # this test asserts the plain-hash fallback
+    rec = R.create_account(tmp_path, email="a@b.com", plan="pro")
+    bearer = _auth("a@b.com", "s3cret-pw")
+    R.activate_account(tmp_path, "a@b.com", rec["activation_code"], bearer)
+    raw = R._accounts_path(tmp_path).read_text(encoding="utf-8")
+    assert "s3cret-pw" not in raw            # password never on disk
+    assert bearer not in raw                  # nor the raw auth_secret
+    assert R._hash_token(bearer) in raw       # only its hash
+
+
+def test_status_gates_sync(tmp_path, monkeypatch):
+    monkeypatch.setenv("BURNMETER_RELAY_ADMIN_TOKEN", "x")
+    rec = R.create_account(tmp_path, email="x@y.com", plan="pro")
+    bearer = _auth("x@y.com", "pw")
+    R.activate_account(tmp_path, "x@y.com", rec["activation_code"], bearer)
+    assert R.set_account_status(tmp_path, rec["id"], "canceled") is True
+    assert R._plan_for(bearer, tmp_path)["device_limit"] == 0
+    assert R.set_account_status(tmp_path, "no-such-id", "canceled") is False
+    assert R.set_account_status(tmp_path, "x@y.com", "active") is True     # by email
+    assert R._plan_for(bearer, tmp_path)["device_limit"] == R._default_limit("pro")
 
 
 def test_accounts_additive_without_admin(tmp_path, monkeypatch):
-    # accounts exist but operator did NOT opt into hosted/admin mode → unknown tokens
-    # fall through to self-host (no accidental fleet lockout).
     monkeypatch.delenv("BURNMETER_RELAY_BILLING", raising=False)
     monkeypatch.delenv("BURNMETER_RELAY_ADMIN_TOKEN", raising=False)
     monkeypatch.delenv("BURNMETER_RELAY_ACCOUNTS", raising=False)
     R.create_account(tmp_path, email="a@b.com", plan="pro")
-    assert R._plan_for("bm_stranger_token", tmp_path)["plan"] == "pro"   # additive, not denied
+    # unknown bearer, additive mode → falls through to self-host (not denied)
+    assert R._plan_for(_auth("stranger@x.com", "p"), tmp_path)["plan"] == "pro"
 
 
-def test_accounts_status_gates_sync(tmp_path):
-    rec = R.create_account(tmp_path, email="x@y.com", plan="pro")
-    assert R.set_account_status(tmp_path, rec["token"], "canceled") is True   # by raw token
-    p = R._plan_for(rec["token"], tmp_path)
-    assert p["device_limit"] == 0 and p["status"] == "canceled"
-    assert R.set_account_status(tmp_path, "bm_nope", "canceled") is False
-    # reactivate by id also works
-    assert R.set_account_status(tmp_path, rec["id"], "active") is True
-    assert R._plan_for(rec["token"], tmp_path)["device_limit"] == R._default_limit("pro")
-
-
-def test_accounts_bad_device_limit_no_500(tmp_path):
-    # garbage device_limit must NOT crash; falls back to the plan default
+def test_bad_device_limit_no_500(tmp_path):
     rec = R.create_account(tmp_path, email="g@b.com", plan="pro", device_limit="abc")
     assert rec["device_limit"] == R._default_limit("pro")
 
 
-def test_accounts_list_enriched(tmp_path):
-    rec = R.create_account(tmp_path, email="z@z.com", plan="team")
+def test_one_account_per_email(tmp_path):
+    R.create_account(tmp_path, email="dup@x.com", plan="pro")
+    R.create_account(tmp_path, email="DUP@x.com", plan="team")   # same email (case-insensitive)
+    lst = R.list_accounts(tmp_path)
+    assert len(lst) == 1 and lst[0]["plan"] == "team"            # re-create refreshes
+
+
+def test_list_enriched_no_secrets(tmp_path):
+    R.create_account(tmp_path, email="z@z.com", plan="team")
     lst = R.list_accounts(tmp_path)
     assert len(lst) == 1 and lst[0]["email"] == "z@z.com"
-    assert lst[0]["device_count"] == 0 and "last_seen" in lst[0]
-    # the live secret is NEVER exposed in the listing
-    assert "token" not in lst[0] and "token_hash" not in lst[0] and "dir_hash" not in lst[0]
-    assert lst[0]["token_prefix"].startswith("bm_") and lst[0]["id"]
+    assert lst[0]["activated"] is False and lst[0]["device_count"] == 0 and "last_seen" in lst[0]
+    for secret in ("token", "token_hash", "dir_hash", "activation_code"):
+        assert secret not in lst[0]
 
 
 def test_concurrent_creates_no_lost_update(tmp_path):
-    # 40 concurrent creates under ThreadingHTTPServer-style threading must not drop a
-    # paying customer (the write-lock + fresh-reload guards the read-modify-write).
     import concurrent.futures as cf
     with cf.ThreadPoolExecutor(max_workers=8) as ex:
-        recs = list(ex.map(lambda i: R.create_account(tmp_path, email=f"u{i}@x.com"),
-                           range(40)))
+        recs = list(ex.map(lambda i: R.create_account(tmp_path, email=f"u{i}@x.com"), range(40)))
     assert len({r["id"] for r in recs}) == 40
     assert len(R.list_accounts(tmp_path)) == 40
 
 
-def test_admin_http(tmp_path, monkeypatch):
+def test_admin_and_auth_http(tmp_path, monkeypatch):
     monkeypatch.delenv("BURNMETER_RELAY_BILLING", raising=False)
     monkeypatch.setattr(R, "RATE_CAPACITY", 1000)
     R._buckets.clear()
@@ -171,27 +238,37 @@ def test_admin_http(tmp_path, monkeypatch):
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
         base = f"http://127.0.0.1:{port}"
-        assert _req("GET", base + "/admin")[0] == 200             # console served (admin enabled)
-        assert _req("GET", base + "/admin/api/accounts")[0] == 401  # API needs the admin token
-        code, body = _req("GET", base + "/admin/api/accounts", "admin-secret-xyz")
-        assert code == 200 and json.loads(body)["accounts"] == []
-        # create an account
+        assert _req("GET", base + "/admin")[0] == 200
+        assert _req("GET", base + "/admin/api/accounts")[0] == 401
+        # operator creates the account → gets an activation code (NOT a token)
         code, body = _req("POST", base + "/admin/api/accounts", "admin-secret-xyz",
                           json.dumps({"email": "new@cust.com", "plan": "pro"}).encode())
         assert code == 201
         rec = json.loads(body)
-        assert rec["email"] == "new@cust.com" and rec["token"].startswith("bm_") and rec["id"]
-        # listed, and the listing does NOT carry the raw token
-        code, body = _req("GET", base + "/admin/api/accounts", "admin-secret-xyz")
-        accts = json.loads(body)["accounts"]
-        assert len(accts) == 1 and "token" not in accts[0]
-        # that token now syncs (authoritative accounts-mode, active)
-        assert _req("PUT", base + "/v1/snap/devA", rec["token"], b"ciphertext")[0] == 201
-        # revoke BY ID -> sync blocked (402)
+        acode = rec["activation_code"]
+        assert acode and "token" not in rec
+        accts = json.loads(_req("GET", base + "/admin/api/accounts", "admin-secret-xyz")[1])["accounts"]
+        assert len(accts) == 1 and accts[0]["activated"] is False and "token" not in accts[0]
+        # customer activates (email + code + password-derived auth_secret)
+        bearer = _auth("new@cust.com", "my-strong-pw")
+        st, ab = _req("POST", base + "/v1/activate", None,
+                      json.dumps({"email": "new@cust.com", "code": acode, "auth_secret": bearer}).encode())
+        assert st == 200 and json.loads(ab)["ok"] is True
+        # sync now works with the password-derived bearer
+        assert _req("PUT", base + "/v1/snap/devA", bearer, b"ciphertext")[0] == 201
+        # second device: login with email+password (no code)
+        st, lb = _req("POST", base + "/v1/login", None,
+                      json.dumps({"email": "new@cust.com", "auth_secret": bearer}).encode())
+        assert st == 200 and json.loads(lb)["ok"] is True
+        # wrong password → 401
+        st, _b = _req("POST", base + "/v1/login", None,
+                      json.dumps({"email": "new@cust.com", "auth_secret": _auth("new@cust.com", "WRONG")}).encode())
+        assert st == 401
+        # admin revoke by id → sync blocked
         assert _req("POST", base + "/admin/api/account/status", "admin-secret-xyz",
                     json.dumps({"id": rec["id"], "status": "canceled"}).encode())[0] == 200
-        assert _req("PUT", base + "/v1/snap/devB", rec["token"], b"ciphertext")[0] == 402
-        # malformed create body -> 400, not 500
+        assert _req("PUT", base + "/v1/snap/devB", bearer, b"ciphertext")[0] == 402
+        # malformed admin create → 400 not 500
         assert _req("POST", base + "/admin/api/accounts", "admin-secret-xyz", b"{not json")[0] == 400
     finally:
         httpd.shutdown()

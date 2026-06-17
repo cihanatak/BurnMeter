@@ -37,9 +37,11 @@ def _start_relay(storage, free_tokens=""):
     return httpd, f"http://127.0.0.1:{port}"
 
 
-def _cfg(relay_url, token="acct-token-xyz", passphrase="correct horse battery"):
+def _cfg(relay_url, token="acct-token-xyz", password="correct horse battery", email="a@b.com"):
+    # enc_key is now derived from email+password (zero-knowledge); no passphrase field
     return {"relay_url": relay_url, "account_token": token,
-            "passphrase": passphrase, "device_id": "devAAA", "label": "MacBook"}
+            "enc_key": sync.derive_enc_key(email, password).decode("ascii"),
+            "device_id": "devAAA", "label": "MacBook"}
 
 
 def test_crypto_roundtrip_and_ciphertext():
@@ -51,11 +53,11 @@ def test_crypto_roundtrip_and_ciphertext():
     assert sync.decrypt_snapshot(blob, cfg) == snap
 
 
-def test_wrong_passphrase_cannot_decrypt():
+def test_wrong_password_cannot_decrypt():
     snap = {"v": 1, "sources": {}}
-    blob = sync.encrypt_snapshot(snap, _cfg("http://x", passphrase="right one"))
+    blob = sync.encrypt_snapshot(snap, _cfg("http://x", password="right one"))
     with pytest.raises(Exception):
-        sync.decrypt_snapshot(blob, _cfg("http://x", passphrase="WRONG one"))
+        sync.decrypt_snapshot(blob, _cfg("http://x", password="WRONG one"))
 
 
 def test_relay_push_pull_roundtrip_and_zero_knowledge():

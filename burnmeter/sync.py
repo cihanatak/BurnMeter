@@ -15,6 +15,7 @@ import base64
 import hashlib
 import json
 import socket
+import unicodedata
 import urllib.error
 import urllib.request
 import uuid
@@ -47,17 +48,40 @@ def save_config(cfg: dict) -> None:
 
 def is_configured(cfg: Optional[dict] = None) -> bool:
     c = cfg if cfg is not None else load_config()
-    return bool(c.get("relay_url") and c.get("account_token") and c.get("passphrase"))
+    return bool(c.get("relay_url") and c.get("account_token") and c.get("enc_key"))
 
 
-# ---------- E2E crypto ----------
-def _derive_key(passphrase: str, account_token: str) -> bytes:
-    """32-byte key from passphrase, salted deterministically by account so every
-    device with the same passphrase + account derives the SAME key (can decrypt
-    each other). scrypt is stdlib + slow enough to blunt offline guessing."""
-    salt = hashlib.sha256(("burnmeter-sync-v1:" + account_token).encode()).digest()[:16]
-    raw = hashlib.scrypt(passphrase.encode("utf-8"), salt=salt, n=2 ** 14, r=8, p=1, dklen=32)
-    return base64.urlsafe_b64encode(raw)   # Fernet wants a urlsafe-b64 32-byte key
+# ---------- E2E crypto + password-derived auth (zero-knowledge) ----------
+# scrypt n=2**17 (~128 MiB) — a deliberately expensive, memory-hard derivation so that
+# even if the relay's account file is stolen, brute-forcing a password offline is slow.
+# Login derivation happens rarely (per device sign-in), so the ~0.2-0.4s cost is fine.
+_SCRYPT_N = 2 ** 17
+_SCRYPT_MAXMEM = 256 * 1024 * 1024
+
+
+def _norm_email(email: str) -> str:
+    # MUST match the relay's _normalize_email (NFKC + strip + lower) or derived keys won't match.
+    return unicodedata.normalize("NFKC", (email or "")).strip().lower()
+
+
+def _scrypt(password: str, salt: bytes) -> bytes:
+    return hashlib.scrypt(password.encode("utf-8"), salt=salt, n=_SCRYPT_N, r=8, p=1,
+                          dklen=32, maxmem=_SCRYPT_MAXMEM)
+
+
+def derive_auth_secret(email: str, password: str) -> str:
+    """The sync BEARER + login credential, derived from the password. The relay only
+    ever stores its HASH (peppered) — never the password. Salt from email so every
+    device derives the same value."""
+    salt = hashlib.sha256(("burnmeter-auth-v1:" + _norm_email(email)).encode()).digest()
+    return base64.urlsafe_b64encode(_scrypt(password, salt)).decode("ascii")
+
+
+def derive_enc_key(email: str, password: str) -> bytes:
+    """The E2E key (Fernet). NEVER leaves the machine; a DIFFERENT salt label from the
+    auth secret, so the relay (which receives the auth secret) cannot derive it."""
+    salt = hashlib.sha256(("burnmeter-enc-v1:" + _norm_email(email)).encode()).digest()
+    return base64.urlsafe_b64encode(_scrypt(password, salt))
 
 
 def _fernet(cfg: dict):
@@ -69,7 +93,10 @@ def _fernet(cfg: dict):
             "    pip install burnmeter[sync]\n"
             "(The free Burnmeter core stays dependency-free; only sync needs it.)"
         ) from e
-    return Fernet(_derive_key(cfg["passphrase"], cfg["account_token"]))
+    key = cfg.get("enc_key")
+    if not key:
+        raise RuntimeError("Pro not connected — run `burnmeter sync login` first.")
+    return Fernet(key.encode("ascii") if isinstance(key, str) else key)
 
 
 def encrypt_snapshot(snapshot: dict, cfg: dict) -> bytes:
@@ -218,3 +245,49 @@ def ensure_device_id(cfg: dict) -> dict:
     if not cfg.get("label"):
         cfg["label"] = socket.gethostname()
     return cfg
+
+
+# ---------- email + password connect (activate / sign in) ----------
+def _post(relay_url: str, path: str, payload: dict, timeout: int = 20):
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(relay_url.rstrip("/") + path, data=data, method="POST")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read().decode("utf-8"))
+        except Exception:
+            return e.code, {"error": f"HTTP {e.code}"}
+    except Exception as e:
+        return 0, {"error": str(e)}
+
+
+def connect(relay_url: str, email: str, password: str, code: Optional[str] = None,
+            label: Optional[str] = None) -> dict:
+    """Activate (with a one-time code) or sign in (without). Derives the secrets LOCALLY,
+    authenticates to the relay, and stores config. The password is never stored or sent —
+    only the derived auth_secret goes to the relay (over TLS in production)."""
+    if len((password or "")) < 10:
+        return {"ok": False, "error": "password must be at least 10 characters "
+                                      "(it's the only thing protecting your encrypted data)"}
+    email = _norm_email(email)
+    auth_secret = derive_auth_secret(email, password)
+    enc_key = derive_enc_key(email, password).decode("ascii")
+    if code:
+        path, body = "/v1/activate", {"email": email, "code": code, "auth_secret": auth_secret}
+    else:
+        path, body = "/v1/login", {"email": email, "auth_secret": auth_secret}
+    status, resp = _post(relay_url, path, body)
+    if not resp.get("ok"):
+        return {"ok": False, "error": resp.get("error", f"HTTP {status}")}
+    cfg = load_config()
+    cfg.update({"relay_url": relay_url.rstrip("/"), "email": email,
+                "account_token": auth_secret, "enc_key": enc_key})
+    if label:
+        cfg["label"] = label
+    ensure_device_id(cfg)
+    save_config(cfg)
+    return {"ok": True, "plan": resp.get("plan"), "device_limit": resp.get("device_limit"),
+            "device_id": cfg["device_id"]}

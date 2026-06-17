@@ -590,8 +590,10 @@ def cmd_relay_account(args):
                                source="cli")
         print(green(f"✓ hesap oluşturuldu · {rec['email']} · plan {bold(rec['plan'])} · "
                     f"cihaz limiti {rec['device_limit']}"))
-        print(bold(f"  token: {rec['token']}"))
-        print(dim("  müşteri bunu kullanır:  burnmeter sync login --relay <url> --token <token>"))
+        print(bold(f"  aktivasyon kodu: {rec['activation_code']}"))
+        print(dim("  müşteriye email'i + bu kodu ver. İlk cihazda:"))
+        print(dim(f"    burnmeter sync activate --relay <url> --email {rec['email']} --code {rec['activation_code']}"))
+        print(dim("  (şifresini seçer; sonraki cihazlarda sadece: sync login --email ... )"))
         return 0
 
     if act == "list":
@@ -600,10 +602,9 @@ def cmd_relay_account(args):
             print(dim(f"hesap yok ({R._accounts_path(storage)})")); return 0
         _print_header(f"hesaplar ({len(accs)})")
         for a in accs:
+            act_lbl = green("aktif") if a.get("activated") else dim("aktive değil")
             print(f"  {bold(a.get('email') or '?')} · {a.get('plan')} · {a.get('status')} · "
-                  f"cihaz {a.get('device_count')}/{a.get('device_limit')} · "
-                  f"id {a.get('id')} · {dim((a.get('token_prefix') or '') + '…')}")
-        print(dim("  (tam token yalnızca oluşturma anında gösterilir; iptal için --id veya --token)"))
+                  f"{act_lbl} · cihaz {a.get('device_count')}/{a.get('device_limit')} · id {dim(a.get('id'))}")
         return 0
 
     if act == "revoke":
@@ -617,34 +618,37 @@ def cmd_relay_account(args):
 
 
 def cmd_sync(args):
-    """Pro: cihazlar arası E2E-şifreli sync (login/push/pull/status)."""
+    """Pro: cihazlar arası E2E-şifreli sync. İlk cihaz: `activate` (email + kod + şifre);
+    sonraki cihazlar: `login` (email + şifre). Sonra push/pull/status."""
     from . import sync as syncmod
     act = args.action
     cfg = syncmod.load_config()
 
-    if act == "login":
-        if args.relay:
-            cfg["relay_url"] = args.relay
-        if args.token:
-            cfg["account_token"] = args.token
-        if args.label:
-            cfg["label"] = args.label
-        pw = args.passphrase
+    if act in ("activate", "login"):
+        relay = args.relay or cfg.get("relay_url")
+        if not relay:
+            print(red("--relay <url> gerekli")); return 1
+        if not args.email:
+            print(red("--email gerekli")); return 1
+        if act == "activate" and not args.code:
+            print(red("--code gerekli (ilk cihaz için tek-kullanımlık aktivasyon kodu)")); return 1
+        import getpass
+        pw = args.password or getpass.getpass("Şifre (tüm cihazlarında aynı olacak): ")
         if not pw:
-            import getpass
-            pw = getpass.getpass("E2E passphrase (tüm cihazlarında aynı olmalı): ")
-        if pw:
-            cfg["passphrase"] = pw
-        syncmod.ensure_device_id(cfg)
-        if not syncmod.is_configured(cfg):
-            print(red("eksik: --relay, --token ve bir passphrase gerekli")); return 1
-        syncmod.save_config(cfg)
-        print(green(f"✓ sync kuruldu · cihaz {cfg['device_id']} ({cfg['label']}) · relay {cfg['relay_url']}"))
-        print(dim("  E2E: relay yalnızca ciphertext görür; passphrase makineni terk etmez."))
+            print(red("şifre gerekli")); return 1
+        res = syncmod.connect(relay, args.email, pw,
+                              code=(args.code if act == "activate" else None),
+                              label=args.label)
+        if not res.get("ok"):
+            print(red(f"{act} hata: {res.get('error')}")); return 1
+        print(green(f"✓ bağlandı · {args.email} · plan {bold(res.get('plan','?'))} · "
+                    f"cihaz {res.get('device_id')}"))
+        print(dim("  E2E: şifren makineni terk etmez; relay yalnızca ciphertext görür."))
         return 0
 
     if not syncmod.is_configured(cfg):
-        print(red("önce kur: burnmeter sync login --relay <url> --token <token>")); return 1
+        print(red("önce bağlan: burnmeter sync activate --relay <url> --email <e> --code <kod>  "
+                  "(ya da login)")); return 1
 
     if act == "push":
         from .codex_parser import CODEX_SESSIONS_DIR
@@ -666,7 +670,7 @@ def cmd_sync(args):
         _print_header(f"bağlı cihazlar ({len(devs)})")
         for d in devs:
             if d.get("_undecryptable"):
-                print(yellow(f"  {d.get('device_id','?')} · çözülemedi (passphrase farklı?)")); continue
+                print(yellow(f"  {d.get('device_id','?')} · çözülemedi (şifre farklı?)")); continue
             bits = [f"{s}: ay ~{_fmt_money(v.get('month_so_far', 0))} · {_fmt_int(v.get('record_count', 0))} kayıt"
                     for s, v in (d.get("sources") or {}).items()]
             print(f"  {bold(d.get('label', '?'))} ({d.get('device_id')}) · {' · '.join(bits) or 'veri yok'}")
@@ -850,11 +854,12 @@ def main(argv=None):
                       help="Codex sessions kökü (default ~/.codex/sessions)")
 
     p_sync = sub.add_parser("sync", help="Pro: cihazlar arası sync (E2E şifreli)")
-    p_sync.add_argument("action", choices=["login", "push", "pull", "status"])
-    p_sync.add_argument("--relay", help="relay URL (login)")
-    p_sync.add_argument("--token", help="hesap token'ı (login)")
-    p_sync.add_argument("--passphrase", help="E2E passphrase (login; verilmezse sorulur)")
-    p_sync.add_argument("--label", help="bu cihazın etiketi (login; default hostname)")
+    p_sync.add_argument("action", choices=["activate", "login", "push", "pull", "status"])
+    p_sync.add_argument("--relay", help="relay URL (activate/login)")
+    p_sync.add_argument("--email", help="hesap e-postan (activate/login)")
+    p_sync.add_argument("--password", help="şifren (verilmezse güvenli şekilde sorulur)")
+    p_sync.add_argument("--code", help="tek-kullanımlık aktivasyon kodu (activate)")
+    p_sync.add_argument("--label", help="bu cihazın etiketi (default hostname)")
     p_sync.add_argument("--codex-dir", default=None, help="Codex sessions kökü (push)")
 
     p_desktop = sub.add_parser("desktop", help="masaüstüne 'Burnmeter' kısayolu ekle")

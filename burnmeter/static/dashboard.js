@@ -888,12 +888,18 @@ async function renderSyncDevices() {
   } catch (e) { return; }   // server eski olabilir → sessizce geç
   if (!data.configured) {
     body.innerHTML =
-      `<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;max-width:820px">
-         <div style="flex:1;min-width:280px">
-           <div style="font-size:14.5px;font-weight:600;color:var(--text-1);margin-bottom:5px">All your machines in one view <span style="color:var(--brand)">✦ Pro</span></div>
-           <div class="dim" style="font-size:12.5px;line-height:1.6">Sync your Claude Code + Codex usage across every device — end-to-end encrypted, so only summaries sync and your raw logs never leave your machine.</div>
+      `<div style="max-width:580px">
+         <div style="font-size:14.5px;font-weight:600;color:var(--text-1);margin-bottom:4px">Connect Pro <span style="color:var(--brand)">✦</span></div>
+         <div class="dim" style="font-size:12.5px;line-height:1.55;margin-bottom:12px">See all your machines in one view — end-to-end encrypted (only summaries sync; your raw logs never leave your machine). Sign in with your <b>email + password</b>. First device? Also enter your one-time <b>activation code</b>.</div>
+         <div class="pro-form">
+           <input id="pro-relay" placeholder="relay URL (e.g. https://sync.burnmeter.dev)" value="${esc(localStorage.getItem('bm_pro_relay') || '')}">
+           <input id="pro-email" type="email" placeholder="email" value="${esc(localStorage.getItem('bm_pro_email') || '')}">
+           <input id="pro-pass" type="password" placeholder="password">
+           <input id="pro-code" placeholder="activation code (first device only)">
+           <button id="pro-connect" class="get-pro-btn" onclick="connectPro()">Connect</button>
+           <span id="pro-msg" class="dim" style="font-size:12px"></span>
          </div>
-         <a href="https://burnmeter.dev/#pricing" target="_blank" rel="noopener" class="get-pro-btn">Get Pro →</a>
+         <div class="dim" style="font-size:11.5px;margin-top:10px">No account yet? <a href="https://burnmeter.dev/#pricing" target="_blank" rel="noopener" style="color:var(--brand)">Get Pro →</a></div>
        </div>`;
     return;
   }
@@ -935,6 +941,31 @@ async function renderSyncDevices() {
       ${rows}${recentHtml}</div>`;
   }).join("") + `</div>`;
 }
+
+// Connect THIS device to Pro from the dashboard (email + password). The password is
+// POSTed only to the LOCAL server (127.0.0.1), which derives the keys and talks to the
+// relay; it is never stored. First device also passes the one-time activation code.
+async function connectPro() {
+  const relay = $("pro-relay").value.trim(), email = $("pro-email").value.trim();
+  const password = $("pro-pass").value, code = $("pro-code").value.trim();
+  const msg = $("pro-msg"), btn = $("pro-connect");
+  if (!relay || !email || !password) { msg.style.color = "var(--warn)"; msg.textContent = "relay, email and password required"; return; }
+  btn.disabled = true; msg.style.color = ""; msg.textContent = "connecting…";
+  try {
+    const r = await fetch("/api/pro/connect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Burnmeter-Pro": "1" },
+      body: JSON.stringify({ relay_url: relay, email, password, code: code || undefined }),
+    });
+    const d = await r.json();
+    if (!d.ok) { msg.style.color = "var(--warn)"; msg.textContent = d.error || "failed"; btn.disabled = false; return; }
+    localStorage.setItem("bm_pro_relay", relay);
+    localStorage.setItem("bm_pro_email", email);
+    msg.style.color = "var(--good)"; msg.textContent = "✓ connected";
+    renderSyncDevices();   // re-render → now shows the Devices list
+  } catch (e) { msg.style.color = "var(--warn)"; msg.textContent = String(e); btn.disabled = false; }
+}
+window.connectPro = connectPro;
 
 // ---------- trend chart ----------
 const MA_COLORS = { 7: "#8b97ff", 25: "#3fd9e8", 50: "#ffc05a", 100: "#ff8a8e" };

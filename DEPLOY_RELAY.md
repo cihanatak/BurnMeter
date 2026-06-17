@@ -56,6 +56,11 @@ so a leak of `accounts.json` can't impersonate a customer.
 # source of truth (unknown tokens get no sync). Generate a long random admin key:
 #   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 BURNMETER_RELAY_ADMIN_TOKEN=paste-a-long-random-key-here
+# PEPPER: a second long random secret. The relay stores HMAC(pepper, auth_secret) as the
+# account verifier, so a stolen accounts.json ALONE can't be brute-forced — an attacker
+# would also need this pepper. Keep it ONLY here (env / systemd EnvironmentFile), never in
+# the storage dir or a backup. Generate: python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+BURNMETER_RELAY_PEPPER=paste-another-long-random-key-here
 # Behind a reverse proxy every request shares the proxy's IP, so raise the IP-keyed
 # rate caps (per-token limits are unaffected):
 BURNMETER_RELAY_RATE=240
@@ -152,9 +157,20 @@ burnmeter serve          # auto-pushes every ~5 min; the dashboard's "Cihazlar"
 0 3 * * *  restic -r <repo> backup /var/lib/burnmeter-relay
 ```
 
-- **Rate limiting** is per-token (and per-IP for `/health`). Behind Caddy the per-IP
-  key sees the proxy IP, so **token keying is the real protection**; if you need true
-  per-client IP limits, have Caddy pass `X-Forwarded-For` and extend the relay to read it.
+- **Privacy model (be honest in marketing):** the relay only ever stores **ciphertext**
+  of usage + account metadata (email, plan). It **cannot read your usage** — the E2E key
+  is derived from the customer's password on their device and never sent. Caveat to state
+  plainly: against a *breached* relay (someone steals accounts.json **and** the pepper),
+  usage secrecy is then "as strong as the customer's password" — which is why the client
+  enforces a 10+ char password and uses a slow, memory-hard KDF (scrypt n=2¹⁷). The
+  pepper means a file-only leak is not enough.
+- **Known hardening TODO (pre-scale):** per-account random salt (vs the current
+  email-derived salt) and per-email login/activation attempt caps. The activation code is
+  ~60 bits + one-time; login is throttled per-IP (see below).
+- **Rate limiting** is per-token (and per-IP for `/health`, `/v1/login`, `/v1/activate`).
+  Behind Caddy the per-IP key sees the proxy IP, so it becomes one shared bucket — raise
+  the caps and, if you need true per-client limits, have Caddy pass `X-Forwarded-For` and
+  extend the relay to read it. **Token keying is the real protection** for sync.
 - The relay holds **ciphertext only** — a compromise leaks encrypted blobs, not usage.
 - Treat account keys as bearer secrets. `device_limit` and plan come from `plans.json`.
 

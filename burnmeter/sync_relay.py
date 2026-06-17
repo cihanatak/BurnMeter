@@ -31,6 +31,7 @@ import os
 import re
 import secrets
 import sys
+import unicodedata
 import threading
 import time
 from datetime import datetime, timezone
@@ -148,6 +149,17 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(("burnmeter-acct-tok:" + token).encode()).hexdigest()
 
 
+def _verifier(auth_secret: str) -> str:
+    """Server-side verifier stored in accounts.json. With a PEPPER (BURNMETER_RELAY_PEPPER,
+    an env secret kept OUTSIDE the data dir) a stolen accounts.json alone is useless — an
+    attacker would also need the pepper to crack passwords offline. Without a pepper
+    (self-host default) it falls back to the plain hash. Set the pepper on a hosted relay."""
+    pepper = os.environ.get("BURNMETER_RELAY_PEPPER")
+    if pepper:
+        return "hmac:" + hmac.new(pepper.encode(), auth_secret.encode(), hashlib.sha256).hexdigest()
+    return _hash_token(auth_secret)
+
+
 def _accounts_strict() -> bool:
     """Accounts store is AUTHORITATIVE (unknown token => denied) only when the operator
     explicitly runs a hosted/admin relay. Otherwise it's ADDITIVE over the self-host
@@ -158,8 +170,10 @@ def _accounts_strict() -> bool:
 
 
 def _load_accounts(storage) -> dict:
-    """Return {token_hash: account_record}, hot-reloaded by (mtime_ns, size). Thread-
-    safe. Returns the cached dict by reference — callers MUST treat it read-only."""
+    """Return {account_id: account_record}, hot-reloaded by (mtime_ns, size). Thread-
+    safe. Returns the cached dict by reference — callers MUST treat it read-only.
+    Keyed by id (always present) — an account exists BEFORE it has an auth hash
+    (i.e. before the customer activates with a password)."""
     path = _accounts_path(storage)
     try:
         st = path.stat()
@@ -172,9 +186,9 @@ def _load_accounts(storage) -> dict:
             try:
                 raw = json.loads(path.read_text(encoding="utf-8"))
                 for rec in raw.get("accounts", []):
-                    th = rec.get("token_hash")
-                    if th:
-                        data[th] = rec
+                    rid = rec.get("id")
+                    if rid:
+                        data[rid] = rec
             except (OSError, json.JSONDecodeError):
                 data = {}
             _accounts_cache.update({"path": str(path), "id": ident, "data": data})
@@ -212,22 +226,53 @@ def _write_accounts(storage, accounts: dict) -> None:
         _accounts_cache["id"] = None
 
 
+_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"   # no I/O/0/1 confusion
+
+
+def _gen_activation_code() -> str:
+    """Short, unambiguous, one-time code: XXXX-XXXX-XXXX (~60 bits — infeasible to guess
+    online even with a shared rate-limit bucket)."""
+    return "-".join("".join(secrets.choice(_CODE_ALPHABET) for _ in range(4))
+                    for _ in range(3))
+
+
+def _normalize_email(e) -> str:
+    # NFKC so the operator-entered and customer-entered forms ALWAYS converge — the
+    # client derives its scrypt salt from this same normalization, so any mismatch would
+    # silently break login.
+    return unicodedata.normalize("NFKC", (e or "")).strip().lower()
+
+
+def _find_email_key(accounts: dict, email: str):
+    email = _normalize_email(email)
+    for k, rec in accounts.items():
+        if _normalize_email(rec.get("email")) == email:
+            return k
+    return None
+
+
+def _by_auth_hash(accounts: dict, h: str):
+    for rec in accounts.values():
+        if rec.get("token_hash") == h:
+            return rec
+    return None
+
+
 def create_account(storage, email: str, plan: str = "pro", device_limit=None,
-                   name: str = "", source: str = "manual", note: str = "",
-                   token=None) -> dict:
-    """Mint (or upsert) a customer account. The future payment webhook calls THIS.
-    The raw token is NEVER persisted — only its hash — so a leak of accounts.json
-    can't impersonate customers. Returns the stored record PLUS the raw token, which
-    the caller must surface ONCE (it cannot be recovered later)."""
+                   name: str = "", source: str = "manual", note: str = "") -> dict:
+    """Create a customer account (email + plan). The customer ACTIVATES it on their
+    first device with the returned one-time `activation_code` + a password they choose;
+    after that they sign in with email + password on every device. No long token is
+    ever shown. The future payment webhook calls THIS on a paid order.
+
+    One account per email (re-create just refreshes the code). Returns the public
+    record PLUS the one-time activation_code — surface it ONCE."""
     plan = plan if plan in _VALID_PLANS else "pro"
-    raw = token or ("bm_" + secrets.token_urlsafe(24))
-    th = _hash_token(raw)
+    email = _normalize_email(email)
+    code = _gen_activation_code()
     rec = {
-        "id": th[:16],                      # non-secret handle (for /admin + revoke)
-        "token_hash": th,                   # lookup key; raw token never stored
-        "token_prefix": raw[:10],           # display hint only
-        "dir_hash": _account_dir_hash(raw), # where this account's ciphertext lives
-        "email": (email or "").strip(),
+        "id": secrets.token_hex(8),         # non-secret stable handle
+        "email": email,
         "name": (name or "").strip(),
         "plan": plan,
         "status": "active",
@@ -235,25 +280,104 @@ def create_account(storage, email: str, plan: str = "pro", device_limit=None,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "source": source,
         "note": note or "",
+        # set at activation (email + password):
+        "activation_code": code,
+        "token_hash": None,                 # = sha256(password-derived auth_secret)
+        "dir_hash": None,                   # where this account's ciphertext lives
+        "activated_at": None,
     }
     with _accounts_write_lock:
-        accounts = dict(_load_accounts(storage))   # fresh, under the write lock
-        accounts[th] = rec
+        accounts = dict(_load_accounts(storage))
+        prev = _find_email_key(accounts, email)
+        if prev:
+            old = dict(accounts[prev])
+            if old.get("token_hash"):
+                # ALREADY ACTIVATED → update in place (idempotent for webhook retries /
+                # renewals). NEVER reset auth/dir/activation — that would lock the paying
+                # customer out of every device and orphan their ciphertext.
+                old["plan"] = plan
+                old["device_limit"] = rec["device_limit"]
+                old["status"] = "active"
+                if name:
+                    old["name"] = rec["name"]
+                if note:
+                    old["note"] = rec["note"]
+                accounts[prev] = old
+                _write_accounts(storage, accounts)
+                return {**_public_record(old), "activation_code": None,
+                        "message": "already activated — updated in place"}
+            accounts.pop(prev, None)        # not yet activated → replace (refresh the code)
+        accounts[rec["id"]] = rec
         _write_accounts(storage, accounts)
-    return {**rec, "token": raw}
+    return {**_public_record(rec), "activation_code": code}
+
+
+def activate_account(storage, email: str, code: str, auth_secret: str) -> dict:
+    """First-device claim: verify the one-time code, then bind the account to the
+    password-derived auth_secret (stored only as a hash) and switch to email+password
+    login. Returns {ok, plan, device_limit} or {ok: False, error}."""
+    email = _normalize_email(email)
+    # ONE generic failure for every reject path → no account-existence / lifecycle leak.
+    generic = {"ok": False, "error": "invalid email or activation code"}
+    with _accounts_write_lock:
+        accounts = dict(_load_accounts(storage))
+        key = _find_email_key(accounts, email)
+        if not key:
+            return generic
+        rec = dict(accounts[key])
+        if rec.get("token_hash"):
+            # Already activated: if it's the SAME credentials (a 2nd device that used
+            # activate instead of login), treat as success — else generic.
+            if rec.get("status") == "active" and \
+               hmac.compare_digest(rec["token_hash"], _verifier(auth_secret)):
+                return {"ok": True, "plan": rec["plan"], "device_limit": rec["device_limit"]}
+            return generic
+        if rec.get("status") != "active":
+            return generic
+        want = rec.get("activation_code") or ""
+        got = str(code or "").strip().upper()
+        if not want or not hmac.compare_digest(got, want):
+            return generic
+        rec["token_hash"] = _verifier(auth_secret)
+        rec["dir_hash"] = _account_dir_hash(auth_secret)
+        rec["activation_code"] = None
+        rec["activated_at"] = datetime.now(timezone.utc).isoformat()
+        accounts[key] = rec
+        _write_accounts(storage, accounts)
+        return {"ok": True, "plan": rec["plan"], "device_limit": rec["device_limit"]}
+
+
+def login_account(storage, email: str, auth_secret: str) -> dict:
+    """Subsequent-device sign in: verify email + password (via the auth_secret hash).
+    Returns {ok, plan, device_limit} or {ok: False, error}."""
+    email = _normalize_email(email)
+    accounts = _load_accounts(storage)
+    key = _find_email_key(accounts, email)
+    if not key:
+        # SELF-HOST (non-strict, no account record): everyone is Pro — bootstrap the
+        # device with no pre-created account so `sync-relay` + `sync login` works for $0.
+        if not _accounts_strict():
+            return {"ok": True, "plan": "pro", "device_limit": 10, "selfhost": True}
+        return {"ok": False, "error": "wrong email or password"}
+    rec = accounts[key]
+    # Verify ownership FIRST; only after a proven password do we disclose a non-active
+    # status (telling a stranger "canceled" would leak account existence).
+    if rec.get("token_hash") and hmac.compare_digest(rec["token_hash"], _verifier(auth_secret)):
+        if rec.get("status") != "active":
+            return {"ok": False, "error": f"subscription {rec.get('status')}"}
+        return {"ok": True, "plan": rec["plan"], "device_limit": rec["device_limit"]}
+    return {"ok": False, "error": "wrong email or password"}
 
 
 def _resolve_key(accounts: dict, ref: str):
-    """Map a raw token / token_hash / id to the accounts-dict key (token_hash)."""
-    if ref in accounts:                     # already a token_hash
+    """Map an id / email / raw auth_secret bearer to the accounts-dict key (id)."""
+    if ref in accounts:                     # already an id
         return ref
-    h = _hash_token(ref)                     # a raw token
-    if h in accounts:
-        return h
-    for k, rec in accounts.items():          # an id (token_hash prefix)
-        if rec.get("id") == ref:
+    h = _verifier(ref)                       # a raw auth_secret bearer
+    for k, rec in accounts.items():
+        if rec.get("token_hash") == h:
             return k
-    return None
+    return _find_email_key(accounts, ref)    # an email
 
 
 def set_account_status(storage, ref: str, status: str) -> bool:
@@ -293,11 +417,13 @@ def _device_stats(storage, dir_hash: str):
 
 
 def _public_record(rec: dict) -> dict:
-    """Admin-facing view: account metadata only — NEVER the raw token, token_hash, or
-    any decrypted usage."""
-    return {k: rec.get(k) for k in (
-        "id", "token_prefix", "email", "name", "plan", "status",
-        "device_limit", "created_at", "source", "note")}
+    """Admin-facing view: account metadata only — NEVER the auth hash, the password,
+    or any decrypted usage."""
+    out = {k: rec.get(k) for k in (
+        "id", "email", "name", "plan", "status", "device_limit",
+        "created_at", "activated_at", "source", "note")}
+    out["activated"] = bool(rec.get("token_hash"))
+    return out
 
 
 def list_accounts(storage) -> list:
@@ -319,7 +445,7 @@ def _plan_for(token: str, storage=None) -> dict:
     if storage is not None:
         accounts = _load_accounts(storage)
         if accounts:
-            acc = accounts.get(_hash_token(token))
+            acc = _by_auth_hash(accounts, _verifier(token))
             if acc:
                 status = acc.get("status", "active")
                 if status != "active":
@@ -389,7 +515,7 @@ th{color:var(--t2);font-weight:600;font-size:11px;text-transform:uppercase;lette
   <div id="created" class="muted" style="margin-top:8px"></div>
 </div>
 <div class="card">
-  <table><thead><tr><th>Email</th><th>Plan</th><th>Status</th><th>Devices</th><th>Last sync</th><th>Created</th><th>Token</th><th></th></tr></thead>
+  <table><thead><tr><th>Email</th><th>Plan</th><th>Status</th><th>Activated</th><th>Devices</th><th>Last sync</th><th>Created</th><th></th></tr></thead>
   <tbody id="rows"><tr><td colspan="8" class="muted">Enter your admin key and Connect.</td></tr></tbody></table>
 </div>
 <script>
@@ -413,10 +539,10 @@ async function load(){
       tr.appendChild(cell(a.email));
       tr.appendChild(cell(a.plan));
       const st=document.createElement('td');const sp=document.createElement('span');sp.className='pill '+(a.status||'');sp.textContent=a.status||'—';st.appendChild(sp);tr.appendChild(st);
+      tr.appendChild(cell(a.activated?'yes':'no', a.activated?'':'muted'));
       tr.appendChild(cell((a.device_count||0)+' / '+(a.device_limit||0)));
       tr.appendChild(cell(fmtDate(a.last_seen)));
       tr.appendChild(cell(fmtDate(a.created_at)));
-      tr.appendChild(cell((a.token_prefix||'')+'…','tok'));
       const act=document.createElement('td');const b=document.createElement('button');b.className='ghost';
       if(a.status==='active'){b.textContent='Revoke';b.onclick=()=>setStatus(a.id,'canceled');}
       else{b.textContent='Reactivate';b.onclick=()=>setStatus(a.id,'active');}
@@ -432,7 +558,7 @@ async function create(){
   const lim=$('c_limit').value.trim();if(lim!=='')body.device_limit=parseInt(lim,10);
   try{
     const rec=await api('/admin/api/accounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    const c=$('created');c.textContent='✓ created · token (copy it): ';const s=document.createElement('span');s.className='tok';s.textContent=rec.token;s.onclick=()=>navigator.clipboard.writeText(rec.token);c.appendChild(s);
+    const c=$('created');c.textContent='✓ created · activation code (give it to the customer with their email): ';const s=document.createElement('span');s.className='tok';s.textContent=rec.activation_code;s.onclick=()=>navigator.clipboard.writeText(rec.activation_code);c.appendChild(s);
     $('c_email').value='';$('c_name').value='';$('c_limit').value='';
     load();
   }catch(e){$('created').innerHTML='<span class="err">'+e.message+'</span>';}
@@ -619,6 +745,24 @@ def make_handler(storage: Path):
             # malformed input can never leak a stack trace or drop the connection.
             try:
                 path = self.path.split("?")[0].rstrip("/") or "/"
+                # ---- public customer auth (email + password) ----
+                if path in ("/v1/activate", "/v1/login"):
+                    if self._rate_limited("ip:" + self.address_string()):
+                        return
+                    d = self._read_json_body() or {}
+                    email, secret = d.get("email"), d.get("auth_secret")
+                    if not email or not secret:
+                        return self._json(400, {"error": "email and auth_secret required"})
+                    if not _valid_token(secret):
+                        return self._json(400, {"error": "bad auth_secret"})
+                    if path == "/v1/activate":
+                        if not d.get("code"):
+                            return self._json(400, {"error": "activation code required"})
+                        res = activate_account(storage, email, d["code"], secret)
+                        return self._json(200 if res.get("ok") else 403, res)
+                    res = login_account(storage, email, secret)
+                    return self._json(200 if res.get("ok") else 401, res)
+                # ---- admin (operator) ----
                 if path == "/admin/api/accounts":
                     if not self._admin_ok():
                         return
@@ -630,7 +774,7 @@ def make_handler(storage: Path):
                                          device_limit=data.get("device_limit"),
                                          name=data.get("name", ""), note=data.get("note", ""),
                                          source="admin")
-                    return self._json(201, rec)   # rec includes the raw token ONCE
+                    return self._json(201, rec)   # rec includes the one-time activation_code
                 if path == "/admin/api/account/status":
                     if not self._admin_ok():
                         return

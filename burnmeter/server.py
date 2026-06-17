@@ -306,6 +306,50 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                     _spawn_update(host, port)
                 threading.Thread(target=_go, daemon=True).start()
                 return
+
+            if path in ("/api/pro/connect", "/api/pro/disconnect"):
+                # Connect/disconnect THIS device to Pro from the dashboard. The password
+                # is used ONLY here on localhost to derive the secrets — never stored,
+                # never leaves the machine except as the derived auth_secret to the relay
+                # (over TLS in production). CSRF guard: a custom header that a cross-site
+                # form can't set without a preflight we never grant.
+                if self.headers.get("X-Burnmeter-Pro") != "1":
+                    _json_response(self, 403, {"ok": False, "error": "forbidden"})
+                    return
+                # Defense-in-depth vs DNS-rebinding: only the loopback dashboard may
+                # reach an endpoint that accepts a password / exposes account metadata.
+                if self.headers.get("Host", "").rsplit(":", 1)[0] not in ("127.0.0.1", "localhost", "::1"):
+                    _json_response(self, 403, {"ok": False, "error": "forbidden host"})
+                    return
+                from . import sync as _sync
+                if path == "/api/pro/disconnect":
+                    try:
+                        _sync.CONFIG_PATH.unlink()
+                    except Exception:
+                        pass
+                    sync_cache["data"] = None
+                    _json_response(self, 200, {"ok": True})
+                    return
+                try:
+                    length = int(self.headers.get("Content-Length", 0) or 0)
+                    data = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+                except Exception:
+                    _json_response(self, 400, {"ok": False, "error": "bad request"})
+                    return
+                relay = (data.get("relay_url") or "").strip()
+                email = (data.get("email") or "").strip()
+                password = data.get("password") or ""
+                code = (data.get("code") or "").strip() or None
+                if not relay or not email or not password:
+                    _json_response(self, 400, {"ok": False, "error": "relay, email and password required"})
+                    return
+                try:
+                    res = _sync.connect(relay, email, password, code=code)
+                except Exception as e:
+                    res = {"ok": False, "error": str(e)}
+                sync_cache["data"] = None      # bust the devices cache so the UI refreshes
+                _json_response(self, 200 if res.get("ok") else 400, res)
+                return
             _json_response(self, 404, {"ok": False, "message": "not found"})
 
         def do_GET(self):
@@ -387,6 +431,29 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 report["_meta"]["version"] = __version__
                 report["_meta"]["served_at"] = time.time()
                 _json_response(self, 200, report)
+                return
+
+            if path == "/api/pro/status":
+                # Is this device connected to Pro? (account metadata for the dashboard
+                # "Connect Pro" panel — never the password or any decrypted usage.)
+                if self.headers.get("Host", "").rsplit(":", 1)[0] not in ("127.0.0.1", "localhost", "::1"):
+                    _json_response(self, 403, {"error": "forbidden host"})
+                    return
+                from . import sync as _sync
+                cfg = _sync.load_config()
+                if not _sync.is_configured(cfg):
+                    _json_response(self, 200, {"configured": False})
+                    return
+                out = {"configured": True, "email": cfg.get("email"),
+                       "relay_url": cfg.get("relay_url"), "device_id": cfg.get("device_id"),
+                       "label": cfg.get("label")}
+                try:
+                    acc = _sync.account(cfg)
+                    out.update({"plan": acc.get("plan"), "device_count": acc.get("device_count"),
+                                "device_limit": acc.get("device_limit"), "status": acc.get("status")})
+                except Exception as e:
+                    out["relay_error"] = str(e)
+                _json_response(self, 200, out)
                 return
 
             if path == "/api/sync/devices":
