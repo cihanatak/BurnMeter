@@ -172,13 +172,15 @@ main.gs-active { display:block; }
    their canvas; table cards use their own .scroll.) */
 .gs-active [data-card="active-model"], .gs-active [data-card="budget"],
 .gs-active [data-card="eff"], .gs-active [data-card="behavior"],
-.gs-active [data-card="tools"], .gs-active [data-card="cache"] { display:flex; flex-direction:column; }
+.gs-active [data-card="tools"], .gs-active [data-card="cache"],
+.gs-active [data-card="sync-devices"] { display:flex; flex-direction:column; }
 .gs-active [data-card="active-model"] #active-model-body,
 .gs-active [data-card="budget"] #budget-body,
 .gs-active [data-card="eff"] #eff-body,
 .gs-active [data-card="behavior"] #behavior-body,
 .gs-active [data-card="tools"] #tools-body,
-.gs-active [data-card="cache"] #cache-body { flex:1 1 auto; min-height:0; overflow-y:auto; }
+.gs-active [data-card="cache"] #cache-body,
+.gs-active [data-card="sync-devices"] #sync-devices-body { flex:1 1 auto; min-height:0; overflow-y:auto; }
 /* (B) gs modunda tablo kartlarında iç-cap KALK → tek temiz scroll KARTIN kendisinde (nested yok) */
 .gs-active .scroll { max-height:none; overflow:visible; }
 /* sürükleme imleci + resize handle */

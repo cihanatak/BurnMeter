@@ -1209,7 +1209,7 @@ function initModularGrid() {
   // projects, model-table) stay tall; charts get the room they need.
   const H = { hero: 6, "hero-aside": 6, kpi: 2, eff: 6, cache: 4, trend: 6, models: 5,
               "active-model": 3, daily: 5, projects: 5, recent: 6, heatmap: 3, "model-table": 5, behavior: 4, tools: 4,
-              budget: 3, "sync-devices": 2 };
+              budget: 3, "sync-devices": 5 };
   const gs = document.createElement("div");
   gs.className = "grid-stack";
   cards.forEach(card => {
@@ -1241,12 +1241,12 @@ function initModularGrid() {
   }, gs);
   window.__grid = grid;
   try {
-    const saved = JSON.parse(localStorage.getItem("burnmeter_layout_v6") || "null");
+    const saved = JSON.parse(localStorage.getItem("burnmeter_layout_v7") || "null");
     // kaydet/yükle YALNIZCA tam grid'de (12 kolon). Dar ekranda GridStack otomatik reflow
     // yapar; o geçici dar düzeni kaydetmeyiz ki geniş ekran düzenini bozmasın.
     if (saved && saved.length && grid.getColumn() === 12) grid.load(saved, false);
   } catch (e) { /* bozuk kayıt → varsayılan */ }
-  const save = () => { try { if (grid.getColumn() === 12) localStorage.setItem("burnmeter_layout_v6", JSON.stringify(grid.save(false))); } catch (e) {} };
+  const save = () => { try { if (grid.getColumn() === 12) localStorage.setItem("burnmeter_layout_v7", JSON.stringify(grid.save(false))); } catch (e) {} };
   grid.on("change", save);
   // resize sonrası grafikleri yeni boyuta sığdır
   grid.on("resizestop", () => { Object.values(window.__charts || {}).forEach(ch => { try { ch.resize(); } catch (e) {} }); });
@@ -1377,7 +1377,7 @@ function start() {
   });
   initModularGrid();
   const rl = $("reset-layout");
-  if (rl) rl.addEventListener("click", () => { localStorage.removeItem("burnmeter_layout_v6"); location.reload(); });
+  if (rl) rl.addEventListener("click", () => { localStorage.removeItem("burnmeter_layout_v7"); location.reload(); });
   // First paint is cold until the local logs are parsed — on large histories that
   // first read can take a few seconds. Say so instead of showing a blank "…" gauge.
   $("last-updated").textContent = "Reading your Burnmeter logs — the first run can take a minute or two on large histories…";
