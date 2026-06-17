@@ -297,6 +297,18 @@ def cmd_serve(args):
     return 0
 
 
+def cmd_app(args):
+    """Open Burnmeter in a native desktop window (pywebview). Attaches to a
+    running instance (e.g. the tray) if present; otherwise starts its own server
+    and tears it down when the window closes. Falls back to the browser if
+    pywebview isn't installed — never a dead double-click."""
+    _ensure_shortcut_once(args)
+    from .window import run_window
+    print("Opening Burnmeter…")
+    return run_window(open_browser=not getattr(args, "no_browser", False),
+                      **_common_kwargs(args))
+
+
 def _tray_passthrough_args(args) -> list:
     """Rebuild the CLI flags so a detached re-spawn keeps the same options."""
     out = ["--host", str(args.host), "--port", str(args.port), "--ttl", str(args.ttl)]
@@ -832,6 +844,25 @@ def main(argv=None):
     p_tray.add_argument("--codex-days", type=int, default=90,
                         help="recent days of Codex history to scan (default 90; 0 = all-time)")
 
+    # app — open the dashboard in a native desktop window (pywebview). Attaches
+    # to a running server (e.g. the tray) if present; else starts its own.
+    p_app = sub.add_parser("app",
+                           help="open the dashboard in a native desktop window")
+    p_app.add_argument("--host", default="127.0.0.1")
+    p_app.add_argument("--port", type=int, default=7654)
+    p_app.add_argument("--ttl", type=int, default=15)
+    p_app.add_argument("--no-browser", action="store_true", help=argparse.SUPPRESS)
+    p_app.add_argument("--no-shortcut", action="store_true",
+                       help="don't create/upgrade the desktop shortcut")
+    p_app.add_argument("--extra-projects-dir", action="append", default=[],
+                       help="extra Claude JSONL dirs (repeat the flag for more)")
+    p_app.add_argument("--codex-dir", default=None,
+                       help="Codex sessions root (default ~/.codex/sessions)")
+    p_app.add_argument("--codex-extra-dir", action="append", default=[],
+                       help="extra Codex sessions dirs (repeat the flag for more)")
+    p_app.add_argument("--codex-days", type=int, default=90,
+                       help="recent days of Codex history to scan (default 90; 0 = all-time)")
+
     p_relaunch = sub.add_parser("_relaunch", help=argparse.SUPPRESS)   # internal (auto-restart)
     p_relaunch.add_argument("--host", default="127.0.0.1")
     p_relaunch.add_argument("--port", type=int, default=7654)
@@ -901,6 +932,7 @@ def main(argv=None):
         "sessions": cmd_sessions,
         "serve": cmd_serve,
         "tray": cmd_tray,
+        "app": cmd_app,
         "_relaunch": cmd_relaunch,
         "_update": cmd_update,
         "stop": cmd_stop,
