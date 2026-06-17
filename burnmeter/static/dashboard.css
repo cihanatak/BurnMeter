@@ -478,6 +478,9 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
   border-radius:var(--radius-md); padding:9px 11px; font:13px/1 var(--font-sans); min-width:210px; flex:1 1 210px; }
 .pro-form input:focus{ outline:none; border-color:var(--brand); }
 .pro-form .get-pro-btn{ padding:9px 18px; cursor:pointer; border:none; }
+.ghost-btn{ background:transparent; color:var(--text-2); border:1px solid var(--border-default);
+  border-radius:var(--radius-md); padding:8px 14px; font:600 13px/1 var(--font-sans); cursor:pointer; }
+.ghost-btn:hover{ color:var(--text-1); border-color:var(--border-strong); }
 
 /* "↑ Update vX" pill — shown when a newer version exists on GitHub */
 /* default = neutral "Check for updates" affordance; .has-update = green CTA */

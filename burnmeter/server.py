@@ -209,11 +209,12 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
     # reports (no re-parse). No-op if sync isn't configured / cryptography absent.
     def _sync_autopush():
         from . import sync as _sync
+        from . import firebase_sync as _fb
         while True:
             time.sleep(300)
             try:
-                cfg = _sync.load_config()
-                if not _sync.is_configured(cfg):
+                cfg = _fb.load_config()
+                if not _fb.is_configured(cfg):
                     continue
                 reports = {}
                 for s in ("claude", "codex"):
@@ -223,7 +224,9 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                         reports[s] = build_for(s, None)
                     except Exception:
                         pass
-                _sync.push_snapshot(cfg, _sync.snapshot_from_reports(cfg, reports))
+                # snapshot_from_reports (in sync.py) builds the metadata-only blob; firebase
+                # encrypts (E2E) + upserts it to Firestore. Silent no-op if unverified (403).
+                _fb.push_snapshot(cfg, _sync.snapshot_from_reports(cfg, reports))
             except Exception:
                 pass
     threading.Thread(target=_sync_autopush, daemon=True).start()
@@ -307,28 +310,26 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 threading.Thread(target=_go, daemon=True).start()
                 return
 
-            if path in ("/api/pro/connect", "/api/pro/disconnect"):
-                # Connect/disconnect THIS device to Pro from the dashboard. The password
-                # is used ONLY here on localhost to derive the secrets — never stored,
-                # never leaves the machine except as the derived auth_secret to the relay
-                # (over TLS in production). CSRF guard: a custom header that a cross-site
-                # form can't set without a preflight we never grant.
+            if path in ("/api/pro/connect", "/api/pro/disconnect", "/api/pro/resend"):
+                # Pro account actions from the dashboard, backed by Firebase Auth. The
+                # password is used ONLY here on localhost — to sign in to Firebase and to
+                # derive the E2E key — never stored, never sent anywhere except Firebase
+                # over TLS. CSRF guard (custom header a cross-site form can't set) + Host
+                # allowlist (defense-in-depth vs DNS-rebinding).
                 if self.headers.get("X-Burnmeter-Pro") != "1":
                     _json_response(self, 403, {"ok": False, "error": "forbidden"})
                     return
-                # Defense-in-depth vs DNS-rebinding: only the loopback dashboard may
-                # reach an endpoint that accepts a password / exposes account metadata.
                 if self.headers.get("Host", "").rsplit(":", 1)[0] not in ("127.0.0.1", "localhost", "::1"):
                     _json_response(self, 403, {"ok": False, "error": "forbidden host"})
                     return
-                from . import sync as _sync
+                from . import firebase_sync as _fb
+                sync_cache["data"] = None      # bust the devices cache so the UI refreshes
                 if path == "/api/pro/disconnect":
-                    try:
-                        _sync.CONFIG_PATH.unlink()
-                    except Exception:
-                        pass
-                    sync_cache["data"] = None
+                    _fb.logout()
                     _json_response(self, 200, {"ok": True})
+                    return
+                if path == "/api/pro/resend":
+                    _json_response(self, 200, _fb.resend_verification())
                     return
                 try:
                     length = int(self.headers.get("Content-Length", 0) or 0)
@@ -336,18 +337,16 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 except Exception:
                     _json_response(self, 400, {"ok": False, "error": "bad request"})
                     return
-                relay = (data.get("relay_url") or "").strip()
+                mode = (data.get("mode") or "login").strip()
                 email = (data.get("email") or "").strip()
                 password = data.get("password") or ""
-                code = (data.get("code") or "").strip() or None
-                if not relay or not email or not password:
-                    _json_response(self, 400, {"ok": False, "error": "relay, email and password required"})
+                if not email or not password:
+                    _json_response(self, 400, {"ok": False, "error": "email and password required"})
                     return
                 try:
-                    res = _sync.connect(relay, email, password, code=code)
+                    res = _fb.signup(email, password) if mode == "signup" else _fb.login(email, password)
                 except Exception as e:
                     res = {"ok": False, "error": str(e)}
-                sync_cache["data"] = None      # bust the devices cache so the UI refreshes
                 _json_response(self, 200 if res.get("ok") else 400, res)
                 return
             _json_response(self, 404, {"ok": False, "message": "not found"})
@@ -434,35 +433,33 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 return
 
             if path == "/api/pro/status":
-                # Is this device connected to Pro? (account metadata for the dashboard
-                # "Connect Pro" panel — never the password or any decrypted usage.)
+                # Is this device signed in to Pro? Account metadata for the "Connect Pro"
+                # panel — never the password or any decrypted usage.
                 if self.headers.get("Host", "").rsplit(":", 1)[0] not in ("127.0.0.1", "localhost", "::1"):
                     _json_response(self, 403, {"error": "forbidden host"})
                     return
-                from . import sync as _sync
-                cfg = _sync.load_config()
-                if not _sync.is_configured(cfg):
+                from . import firebase_sync as _fb
+                cfg = _fb.load_config()
+                if not _fb.is_configured(cfg):
                     _json_response(self, 200, {"configured": False})
                     return
                 out = {"configured": True, "email": cfg.get("email"),
-                       "relay_url": cfg.get("relay_url"), "device_id": cfg.get("device_id"),
-                       "label": cfg.get("label")}
+                       "device_id": cfg.get("device_id"), "label": cfg.get("label")}
                 try:
-                    acc = _sync.account(cfg)
-                    out.update({"plan": acc.get("plan"), "device_count": acc.get("device_count"),
-                                "device_limit": acc.get("device_limit"), "status": acc.get("status")})
+                    out["verified"] = _fb.is_verified(cfg)
+                    out.update(_fb.account(cfg))   # plan, status
                 except Exception as e:
-                    out["relay_error"] = str(e)
+                    out["error"] = str(e)
                 _json_response(self, 200, out)
                 return
 
             if path == "/api/sync/devices":
-                # Pro: remote-device snapshots, decrypted server-side (server holds the
-                # passphrase) for the LOCAL 127.0.0.1 UI. The RELAY only ever sees
-                # ciphertext — E2E intact. 20s cache so we don't hammer the relay.
-                from . import sync as _sync
-                cfg = _sync.load_config()
-                if not _sync.is_configured(cfg):
+                # Pro: remote-device snapshots, decrypted HERE (this local server holds the
+                # E2E key) for the 127.0.0.1 UI. Firestore only ever holds ciphertext — E2E
+                # intact. 20s cache so we don't hammer Firebase.
+                from . import firebase_sync as _fb
+                cfg = _fb.load_config()
+                if not _fb.is_configured(cfg):
                     _json_response(self, 200, {"configured": False, "devices": []})
                     return
                 now = time.time()
@@ -471,7 +468,7 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                     return
                 try:
                     data = {"configured": True, "this_device": cfg.get("device_id"),
-                            "devices": _sync.pull(cfg)}
+                            "devices": _fb.pull(cfg)}
                 except Exception as e:
                     data = {"configured": True, "error": str(e), "devices": []}
                 sync_cache["data"] = data

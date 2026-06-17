@@ -875,48 +875,71 @@ function renderBudget(rep, isCodex) {
   if (editBtn) editBtn.addEventListener("click", () => { _budgetEditing[src] = true; renderBudget(rep, isCodex); });
 }
 
-// ---------- Pro cross-device sync — senkron cihazların özetleri (E2E) ----------
-// Server /api/sync/devices'i (sunucu deşifre eder, lokal UI'a verir; relay yalnızca
-// ciphertext görür) çekip cihaz listesini çizer. Sync kapalıysa "aç" daveti gösterir.
+// ---------- Pro cross-device sync — Firebase account + E2E-encrypted device summaries ----
+// Account = Firebase Auth (email + password, real email verification). Usage snapshots
+// live in Firestore as CIPHERTEXT ONLY — the local server holds the E2E key and decrypts
+// for this 127.0.0.1 UI. The password is POSTed only to localhost, never stored.
+const _proHdr = { "Content-Type": "application/json", "X-Burnmeter-Pro": "1" };
+
 async function renderSyncDevices() {
   const body = $("sync-devices-body");
   if (!body) return;
+  let st;
+  try { st = await (await fetch("/api/pro/status")).json(); }
+  catch (e) { return; }   // server may be old → skip silently
+  if (!st.configured) { body.innerHTML = proAuthFormHtml(); return; }
+  if (!st.verified) { body.innerHTML = proVerifyHtml(st.email); return; }
+  // signed in + verified → show devices
   let data;
-  try {
-    const r = await fetch("/api/sync/devices");
-    data = await r.json();
-  } catch (e) { return; }   // server eski olabilir → sessizce geç
-  if (!data.configured) {
-    body.innerHTML =
-      `<div style="max-width:580px">
-         <div style="font-size:14.5px;font-weight:600;color:var(--text-1);margin-bottom:4px">Connect Pro <span style="color:var(--brand)">✦</span></div>
-         <div class="dim" style="font-size:12.5px;line-height:1.55;margin-bottom:12px">See all your machines in one view — end-to-end encrypted (only summaries sync; your raw logs never leave your machine). Sign in with your <b>email + password</b>. First device? Also enter your one-time <b>activation code</b>.</div>
-         <div class="pro-form">
-           <input id="pro-relay" placeholder="relay URL (e.g. https://sync.burnmeter.dev)" value="${esc(localStorage.getItem('bm_pro_relay') || '')}">
-           <input id="pro-email" type="email" placeholder="email" value="${esc(localStorage.getItem('bm_pro_email') || '')}">
-           <input id="pro-pass" type="password" placeholder="password">
-           <input id="pro-code" placeholder="activation code (first device only)">
-           <button id="pro-connect" class="get-pro-btn" onclick="connectPro()">Connect</button>
-           <span id="pro-msg" class="dim" style="font-size:12px"></span>
-         </div>
-         <div class="dim" style="font-size:11.5px;margin-top:10px">No account yet? <a href="https://burnmeter.dev/#pricing" target="_blank" rel="noopener" style="color:var(--brand)">Get Pro →</a></div>
-       </div>`;
-    return;
-  }
-  if (data.error) {
-    body.innerHTML = `<div class="dim" style="font-size:12px;color:var(--warn)">couldn't reach relay: ${esc(String(data.error))}</div>`;
-    return;
-  }
-  const devs = data.devices || [];
-  if (!devs.length) {
-    body.innerHTML = `<div class="dim" style="font-size:12.5px">no synced devices yet — push this device with <span style="font-family:var(--font-mono)">burnmeter sync push</span>.</div>`;
-    return;
-  }
+  try { data = await (await fetch("/api/sync/devices")).json(); }
+  catch (e) { data = { error: "server" }; }
+  body.innerHTML = proSignedInHeader(st) + proDevicesHtml(data);
+}
+
+function proAuthFormHtml() {
+  return `<div style="max-width:560px">
+    <div style="font-size:14.5px;font-weight:600;color:var(--text-1);margin-bottom:4px">Connect Pro <span style="color:var(--brand)">✦</span></div>
+    <div class="dim" style="font-size:12.5px;line-height:1.55;margin-bottom:12px">See all your machines in one view — end-to-end encrypted (only summaries sync; your raw logs never leave your machine). Create an account or sign in with your <b>email + password</b>.</div>
+    <div class="pro-form">
+      <input id="pro-email" type="email" placeholder="email" value="${esc(localStorage.getItem('bm_pro_email') || '')}">
+      <input id="pro-pass" type="password" placeholder="password (min 10 chars)">
+      <button id="pro-signup" class="get-pro-btn" onclick="proAuth('signup')">Create account</button>
+      <button id="pro-login" class="ghost-btn" onclick="proAuth('login')">Sign in</button>
+      <span id="pro-msg" class="dim" style="font-size:12px"></span>
+    </div>
+    <div class="dim" style="font-size:11.5px;margin-top:10px">New here? <b>Create account</b> → we email you a verification link. Forgot your password loses synced history (it's the encryption key). <a href="https://burnmeter.dev/#pricing" target="_blank" rel="noopener" style="color:var(--brand)">About Pro →</a></div>
+  </div>`;
+}
+
+function proVerifyHtml(email) {
+  return `<div style="max-width:560px">
+    <div style="font-size:14.5px;font-weight:600;color:var(--text-1);margin-bottom:4px">Verify your email <span style="color:var(--brand)">✦</span></div>
+    <div class="dim" style="font-size:12.5px;line-height:1.55;margin-bottom:12px">We sent a verification link to <b>${esc(email || '')}</b>. Click it, then come back and continue. (Pro sync starts working once your email is verified.)</div>
+    <div class="pro-form">
+      <button class="get-pro-btn" onclick="renderSyncDevices()">I've verified — continue</button>
+      <button class="ghost-btn" onclick="proResend()">Resend email</button>
+      <button class="ghost-btn" onclick="proSignout()">Sign out</button>
+      <span id="pro-msg" class="dim" style="font-size:12px"></span>
+    </div>
+  </div>`;
+}
+
+function proSignedInHeader(st) {
+  const plan = st.plan && st.plan !== "free" ? `· ${esc(st.plan)}` : `· <span style="color:var(--warn)">no Pro plan yet</span>`;
+  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:12px" class="dim">
+    <span style="color:var(--brand)">✦ Pro</span> signed in as <b style="color:var(--text-2)">${esc(st.email || '')}</b> ${plan}
+    <button class="ghost-btn" style="margin-left:auto" onclick="proSignout()">Sign out</button></div>`;
+}
+
+function proDevicesHtml(data) {
+  if (data && data.error) return `<div class="dim" style="font-size:12px;color:var(--warn)">couldn't reach Firebase: ${esc(String(data.error))}</div>`;
+  const devs = (data && data.devices) || [];
+  if (!devs.length) return `<div class="dim" style="font-size:12.5px">no synced devices yet — this device will push automatically within ~5 min, or run <span style="font-family:var(--font-mono)">burnmeter sync push</span>.</div>`;
   const ago = (iso) => { if (!iso) return ""; const s = (Date.now() - new Date(iso).getTime()) / 1000; return s < 60 ? "now" : s < 3600 ? Math.round(s / 60) + "m" : s < 86400 ? Math.round(s / 3600) + "h" : Math.round(s / 86400) + "d"; };
-  body.innerHTML = `<div class="sync-grid">` + devs.map(d => {
+  return `<div class="sync-grid">` + devs.map(d => {
     if (d._undecryptable) {
       return `<div class="sync-dev"><div class="sync-dev-head"><span class="sync-dot bad"></span><b>${esc(d.device_id || "?")}</b></div>
-        <div class="dim" style="font-size:11px">couldn't decrypt · passphrase may differ</div></div>`;
+        <div class="dim" style="font-size:11px">couldn't decrypt · different password?</div></div>`;
     }
     const me = d.device_id === data.this_device;
     const srcs = d.sources || {};
@@ -926,7 +949,6 @@ async function renderSyncDevices() {
         <span class="num">~${fmtMoney(v.month_so_far || 0)}</span><span class="dim">this month</span>
         <span class="num">${fmtInt(v.record_count || 0)}</span><span class="dim">records</span></div>`;
     }).join("") || `<div class="dim" style="font-size:11px">no data</div>`;
-    // cross-device recent activity — straight from each device's snapshot tail (metadata only, no raw logs)
     const recent = Object.keys(srcs)
       .flatMap(s => (srcs[s].recent || []).map(t => ({ ...t, _src: s })))
       .sort((a, b) => new Date(b.ts || 0) - new Date(a.ts || 0)).slice(0, 6);
@@ -942,30 +964,35 @@ async function renderSyncDevices() {
   }).join("") + `</div>`;
 }
 
-// Connect THIS device to Pro from the dashboard (email + password). The password is
-// POSTed only to the LOCAL server (127.0.0.1), which derives the keys and talks to the
-// relay; it is never stored. First device also passes the one-time activation code.
-async function connectPro() {
-  const relay = $("pro-relay").value.trim(), email = $("pro-email").value.trim();
-  const password = $("pro-pass").value, code = $("pro-code").value.trim();
-  const msg = $("pro-msg"), btn = $("pro-connect");
-  if (!relay || !email || !password) { msg.style.color = "var(--warn)"; msg.textContent = "relay, email and password required"; return; }
-  btn.disabled = true; msg.style.color = ""; msg.textContent = "connecting…";
+async function proAuth(mode) {
+  const email = ($("pro-email").value || "").trim(), password = $("pro-pass").value;
+  const msg = $("pro-msg"), su = $("pro-signup"), li = $("pro-login");
+  if (!email || !password) { msg.style.color = "var(--warn)"; msg.textContent = "email and password required"; return; }
+  if (su) su.disabled = true; if (li) li.disabled = true;
+  msg.style.color = ""; msg.textContent = mode === "signup" ? "creating account…" : "signing in…";
   try {
-    const r = await fetch("/api/pro/connect", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Burnmeter-Pro": "1" },
-      body: JSON.stringify({ relay_url: relay, email, password, code: code || undefined }),
-    });
-    const d = await r.json();
-    if (!d.ok) { msg.style.color = "var(--warn)"; msg.textContent = d.error || "failed"; btn.disabled = false; return; }
-    localStorage.setItem("bm_pro_relay", relay);
+    const d = await (await fetch("/api/pro/connect", { method: "POST", headers: _proHdr,
+      body: JSON.stringify({ mode, email, password }) })).json();
+    if (!d.ok) { msg.style.color = "var(--warn)"; msg.textContent = d.error || "failed"; if (su) su.disabled = false; if (li) li.disabled = false; return; }
     localStorage.setItem("bm_pro_email", email);
-    msg.style.color = "var(--good)"; msg.textContent = "✓ connected";
-    renderSyncDevices();   // re-render → now shows the Devices list
-  } catch (e) { msg.style.color = "var(--warn)"; msg.textContent = String(e); btn.disabled = false; }
+    renderSyncDevices();   // → verify state (signup / unverified) or devices (verified)
+  } catch (e) { msg.style.color = "var(--warn)"; msg.textContent = String(e); if (su) su.disabled = false; if (li) li.disabled = false; }
 }
-window.connectPro = connectPro;
+
+async function proResend() {
+  const msg = $("pro-msg");
+  try {
+    const d = await (await fetch("/api/pro/resend", { method: "POST", headers: _proHdr })).json();
+    if (msg) { msg.style.color = d.ok ? "var(--good)" : "var(--warn)"; msg.textContent = d.ok ? "✓ verification email re-sent" : (d.error || "failed"); }
+  } catch (e) { if (msg) { msg.style.color = "var(--warn)"; msg.textContent = String(e); } }
+}
+
+async function proSignout() {
+  try { await fetch("/api/pro/disconnect", { method: "POST", headers: _proHdr }); } catch (e) {}
+  renderSyncDevices();
+}
+window.proAuth = proAuth; window.proResend = proResend; window.proSignout = proSignout;
+window.renderSyncDevices = renderSyncDevices;
 
 // ---------- trend chart ----------
 const MA_COLORS = { 7: "#8b97ff", 25: "#3fd9e8", 50: "#ffc05a", 100: "#ff8a8e" };
