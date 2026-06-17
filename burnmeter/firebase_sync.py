@@ -160,26 +160,51 @@ def _is_verified_token(id_token: str) -> bool:
 def is_verified(cfg: Optional[dict] = None) -> bool:
     cfg = cfg if cfg is not None else load_config()
     tok = valid_token(cfg)
-    return _is_verified_token(tok) if tok else False
+    if not tok:
+        return False
+    v = _is_verified_token(tok)
+    if v and not cfg.get("_verified_refreshed"):
+        # Right after the user clicks the verification link, the cached ID token still
+        # carries email_verified=FALSE in its claims — Firestore rules gate on that claim,
+        # so they 403. Force ONE token refresh so the new JWT reflects the verified state.
+        valid_token(cfg, force=True)
+        cfg["_verified_refreshed"] = True
+        save_config(cfg)
+    return v
 
 
-def valid_token(cfg: dict) -> Optional[str]:
-    """A fresh idToken, refreshing via the refresh_token when expired (persisted)."""
+def valid_token(cfg: dict, force: bool = False) -> Optional[str]:
+    """A fresh idToken, refreshing via the refresh_token when expired (or force=True —
+    used after email verification to pick up the updated email_verified claim). Persisted."""
     if not cfg.get("refresh_token"):
         return None
-    if cfg.get("id_token") and time.time() < cfg.get("token_expiry", 0):
+    if not force and cfg.get("id_token") and time.time() < cfg.get("token_expiry", 0):
         return cfg["id_token"]
     st, r = _req(f"{_SECURETOKEN}/token?key={_key()}",
                  payload={"grant_type": "refresh_token", "refresh_token": cfg["refresh_token"]})
     id_token = r.get("id_token") or r.get("access_token")
     if not id_token:
-        return None
+        return cfg.get("id_token")   # keep the old one rather than nulling on a transient error
     cfg["id_token"] = id_token
     cfg["token_expiry"] = time.time() + int(r.get("expires_in", 3600)) - 60
     if r.get("refresh_token"):
         cfg["refresh_token"] = r["refresh_token"]
     save_config(cfg)
     return id_token
+
+
+def _firestore(cfg: dict, url: str, method: str = "GET", payload: Optional[dict] = None):
+    """Authed Firestore call that retries ONCE with a force-refreshed token on 401/403 —
+    handles the just-verified stale-claim case (and any transient token staleness)."""
+    tok = valid_token(cfg)
+    if not tok:
+        return 0, {"error": {"message": "not signed in"}}
+    st, r = _req(url, method=method, payload=payload, token=tok)
+    if st in (401, 403):
+        tok = valid_token(cfg, force=True)
+        if tok:
+            st, r = _req(url, method=method, payload=payload, token=tok)
+    return st, r
 
 
 def logout() -> None:
@@ -197,12 +222,9 @@ def _devices_collection(uid: str) -> str:
 
 def account(cfg: dict) -> dict:
     """Plan/status from /users/{uid} (may not exist yet → free). Read-only for the client."""
-    tok = valid_token(cfg)
-    if not tok:
-        return {"plan": "free"}
     url = (f"{_FIRESTORE}/projects/{FIREBASE['projectId']}/databases/(default)"
            f"/documents/users/{cfg['uid']}")
-    st, r = _req(url, method="GET", token=tok)
+    st, r = _firestore(cfg, url, method="GET")
     fields = (r or {}).get("fields") or {}
     plan = (fields.get("plan") or {}).get("stringValue", "free")
     status = (fields.get("status") or {}).get("stringValue", "active")
@@ -211,8 +233,7 @@ def account(cfg: dict) -> dict:
 
 def push_snapshot(cfg: dict, snapshot: dict) -> dict:
     """Encrypt the snapshot locally and upsert it at /users/{uid}/devices/{device_id}."""
-    tok = valid_token(cfg)
-    if not tok:
+    if not valid_token(cfg):
         return {"ok": False, "error": "not signed in"}
     blob = _sync.encrypt_snapshot(snapshot, cfg)   # uses cfg["enc_key"]
     doc = {"fields": {
@@ -221,7 +242,7 @@ def push_snapshot(cfg: dict, snapshot: dict) -> dict:
         "updated_at": {"timestampValue": _now_iso()},
     }}
     url = f"{_FIRESTORE}/{_devices_collection(cfg['uid'])}/{cfg['device_id']}"
-    st, r = _req(url, method="PATCH", payload=doc, token=tok)
+    st, r = _firestore(cfg, url, method="PATCH", payload=doc)
     if st in (200, 201):
         return {"ok": True, "device_id": cfg["device_id"]}
     return {"ok": False, "error": _err(r) if isinstance(r, dict) else f"HTTP {st}",
@@ -230,11 +251,10 @@ def push_snapshot(cfg: dict, snapshot: dict) -> dict:
 
 def pull(cfg: dict) -> list:
     """List + decrypt every device snapshot for this account."""
-    tok = valid_token(cfg)
-    if not tok:
+    if not valid_token(cfg):
         raise RuntimeError("not signed in")
     url = f"{_FIRESTORE}/{_devices_collection(cfg['uid'])}"
-    st, r = _req(url, method="GET", token=tok)
+    st, r = _firestore(cfg, url, method="GET")
     if st != 200:
         raise RuntimeError(f"firestore list → HTTP {st}: {_err(r) if isinstance(r, dict) else ''}")
     out = []
