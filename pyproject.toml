@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "burnmeter"
-version = "0.1.43"
+version = "0.1.44"
 description = "Local-first dashboard for AI coding agent token usage & cost (Claude Code + OpenAI Codex)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -35,7 +35,7 @@ classifiers = [
 [project.optional-dependencies]
 sync = ["cryptography>=42"]
 tray = ["pystray>=0.19.4", "Pillow>=10.3"]
-app = ["pywebview>=5.0"]
+app = ["pywebview>=5.0", "pystray>=0.19.4", "Pillow>=10.3"]
 
 [project.urls]
 Homepage = "https://github.com/cihanatak/BurnMeter"

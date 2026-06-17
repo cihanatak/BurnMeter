@@ -6,8 +6,10 @@ Cross-platform and dependency-free:
 - macOS:   an executable `Burnmeter.command`.
 - Linux:   an XDG `Burnmeter.desktop` entry.
 
-The shortcut runs `<this-python> -m burnmeter tray`, launching the system-tray
-dashboard (no console window).
+The shortcut runs `<this-python> -m burnmeter app`, opening the dashboard in a
+native desktop window (no console window). The window ensures a detached tray
+server is running and attaches to it, so closing the window leaves the dashboard
+running in the tray.
 """
 from __future__ import annotations
 
@@ -19,8 +21,8 @@ from pathlib import Path
 
 # Bump whenever the shortcut's launch command/target changes so ensure_shortcut()
 # UPGRADES an existing (older) shortcut instead of leaving it stale. v1 = `serve`
-# (pre-stamp), v2 = `tray`.
-SHORTCUT_VERSION = 2
+# (pre-stamp), v2 = `tray`, v3 = `app` (native window + background tray).
+SHORTCUT_VERSION = 3
 _STAMP = Path.home() / ".burnmeter" / "shortcut.json"
 
 
@@ -110,7 +112,7 @@ def _shortcut_target(desktop_dir=None) -> Path:
 
 def ensure_shortcut(port: int = 7654, desktop_dir=None):
     """Create the desktop shortcut if missing, or UPGRADE it when the on-disk
-    stamp is older than SHORTCUT_VERSION (e.g. a v1 'serve' shortcut → v2 'tray').
+    stamp is older than SHORTCUT_VERSION (e.g. a v2 'tray' shortcut → v3 'app').
     Returns (path, created_or_upgraded: bool). Never raises — best-effort UX."""
     target = _shortcut_target(desktop_dir)
     alt = target.with_suffix(".cmd") if sys.platform == "win32" else None
@@ -150,7 +152,7 @@ def _win(desktop: Path, py: str, port: int) -> Path:
     ps = (
         f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{q(lnk)}');"
         f"$s.TargetPath='{q(pyw)}';"
-        f"$s.Arguments='-m burnmeter tray';"
+        f"$s.Arguments='-m burnmeter app';"
         f"$s.WorkingDirectory='{q(Path.home())}';"
         f"$s.Description='Burnmeter - AI coding usage dashboard';"
         f"$s.Save()"
@@ -170,7 +172,7 @@ def _win(desktop: Path, py: str, port: int) -> Path:
         # Fallback: a .cmd batch. `start "" pythonw …` launches detached so the
         # cmd.exe console flashes and self-closes instead of lingering — the tray
         # icon is the UI, not the console.
-        cmd.write_text(f'@echo off\r\nstart "" "{pyw}" -m burnmeter tray\r\n',
+        cmd.write_text(f'@echo off\r\nstart "" "{pyw}" -m burnmeter app\r\n',
                        encoding="utf-8")
         _rm(lnk)                       # drop a stale .lnk sibling so only the .cmd remains
         return cmd
@@ -178,7 +180,7 @@ def _win(desktop: Path, py: str, port: int) -> Path:
 
 def _mac(desktop: Path, py: str, port: int) -> Path:
     f = desktop / "Burnmeter.command"
-    f.write_text(f'#!/bin/bash\nexec "{py}" -m burnmeter tray\n',
+    f.write_text(f'#!/bin/bash\nexec "{py}" -m burnmeter app\n',
                  encoding="utf-8")
     f.chmod(0o755)
     return f
@@ -191,7 +193,7 @@ def _linux(desktop: Path, py: str, port: int) -> Path:
         "Type=Application\n"
         "Name=Burnmeter\n"
         "Comment=AI coding usage dashboard\n"
-        f"Exec={py} -m burnmeter tray\n"
+        f"Exec={py} -m burnmeter app\n"
         "Terminal=false\n"
         "Categories=Development;Utility;\n",
         encoding="utf-8",

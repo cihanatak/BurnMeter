@@ -299,13 +299,14 @@ def cmd_serve(args):
 
 def cmd_app(args):
     """Open Burnmeter in a native desktop window (pywebview). Attaches to a
-    running instance (e.g. the tray) if present; otherwise starts its own server
-    and tears it down when the window closes. Falls back to the browser if
+    running instance if present; otherwise spawns a DETACHED background tray
+    server and attaches the window to it — so closing the window leaves the
+    dashboard running (quit from the tray icon). Falls back to the browser if
     pywebview isn't installed — never a dead double-click."""
     _ensure_shortcut_once(args)
     from .window import run_window
     print("Opening Burnmeter…")
-    return run_window(open_browser=not getattr(args, "no_browser", False),
+    return run_window(open_browser=False, ensure_background=True,
                       **_common_kwargs(args))
 
 
