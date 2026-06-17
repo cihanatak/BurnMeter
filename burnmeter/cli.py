@@ -469,8 +469,12 @@ def cmd_update(args):
     #    (BURNMETER_UPDATE_SKIP_PIP=1 skips this — used to test the restart path.)
     if os.environ.get("BURNMETER_UPDATE_SKIP_PIP") != "1":
         try:
+            # Pull the GUI + crypto extras so the native window (pywebview), the
+            # tray (pystray/Pillow) and Pro sync (cryptography) all work after an
+            # update — otherwise the desktop icon silently falls back to a browser.
             subprocess.run([sys.executable, "-m", "pip", "install", "--force-reinstall",
-                            "--no-cache-dir", "git+https://github.com/cihanatak/BurnMeter"],
+                            "--no-cache-dir",
+                            "burnmeter[app,sync] @ git+https://github.com/cihanatak/BurnMeter"],
                            capture_output=True, text=True, timeout=600, creationflags=NO_WINDOW)
         except Exception:
             pass
