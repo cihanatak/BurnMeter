@@ -423,29 +423,45 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
 
 /* ---------- Pro cross-device sync (cihazlar kartı) ---------- */
 .sync-grid { display:flex; flex-wrap:wrap; gap:12px; }
-.sync-dev { flex:1 1 240px; min-width:0; background:var(--bg-inset); border:1px solid var(--border-default);
-  border-radius:var(--radius-md); padding:12px 14px; }
+.sync-dev { flex:1 1 290px; min-width:0; background:var(--bg-inset); border:1px solid var(--border-default);
+  border-radius:var(--radius-lg); padding:15px 17px; transition:border-color .15s, transform .15s; }
+.sync-dev:hover { transform:translateY(-1px); }
 .sync-dev.me { border-color:var(--brand); }
-.sync-dev-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; font-size:13px; }
-.sync-dev-head b { color:var(--text-1); font-weight:600; }
-.sync-dot { width:8px; height:8px; border-radius:50%; background:var(--border-strong); flex-shrink:0; }
-.sync-dot.live { background:var(--good); }
+.sync-dev-head { display:flex; align-items:center; gap:9px; margin-bottom:12px; }
+.sync-dev-head b { color:var(--text-1); font:700 15px/1 var(--font-sans); }
+.sync-dot { width:9px; height:9px; border-radius:50%; background:var(--border-strong); flex-shrink:0; }
+.sync-dot.live { background:var(--good); box-shadow:0 0 0 3px color-mix(in srgb, var(--good) 24%, transparent); }
 .sync-dot.bad { background:var(--bad); }
-.sync-badge { font:600 10px/1 var(--font-sans); text-transform:uppercase; letter-spacing:.04em;
-  color:var(--brand); border:1px solid var(--brand); border-radius:var(--radius-full); padding:3px 6px; }
-.sync-ago { margin-left:auto; font-size:11px; font-family:var(--font-mono); }
-.sync-src { display:flex; align-items:baseline; gap:7px; font-size:12px; margin:3px 0; }
-.sync-srcname { font:600 11px/1 var(--font-mono); text-transform:uppercase; min-width:48px; }
+.sync-badge { font:800 9.5px/1 var(--font-sans); text-transform:uppercase; letter-spacing:.06em;
+  color:var(--brand); border:1px solid var(--brand); border-radius:var(--radius-full); padding:3px 7px; }
+.sync-ago { margin-left:auto; font-size:11px; font-family:var(--font-mono); color:var(--text-3); }
+.sync-src { display:grid; grid-template-columns:60px 1fr auto; gap:10px; align-items:baseline; margin:9px 0; }
+.sync-srcname { font:800 11px/1 var(--font-mono); text-transform:uppercase; letter-spacing:.03em; align-self:center; }
 .sync-srcname.fam-opus { color:var(--brand-claude); }
 .sync-srcname.fam-gpt { color:var(--brand-codex); }
-.sync-src .num { font-variant-numeric:tabular-nums; color:var(--text-1); }
-.sync-recent { margin-top:9px; padding-top:8px; border-top:1px solid var(--border-subtle); display:flex; flex-direction:column; gap:4px; }
-.sync-rrow { display:grid; grid-template-columns:38px minmax(0,1fr) auto auto; gap:8px; align-items:center; font-size:11px; }
-.sync-rago { font-variant-numeric:tabular-nums; }
+.sync-amt { font:800 18px/1 var(--font-sans); color:var(--text-1); font-variant-numeric:tabular-nums; }
+.sync-amt small { display:block; font:500 10px/1 var(--font-sans); color:var(--text-3); margin-top:5px; }
+.sync-cnt { text-align:right; font:800 15px/1 var(--font-sans); color:var(--text-2); font-variant-numeric:tabular-nums; }
+.sync-cnt small { display:block; font:500 10px/1 var(--font-sans); color:var(--text-3); margin-top:5px; }
+.sync-recent { margin-top:13px; padding-top:11px; border-top:1px solid var(--border-subtle); display:flex; flex-direction:column; gap:5px; }
+.sync-rrow { display:grid; grid-template-columns:38px minmax(0,1fr) auto auto; gap:9px; align-items:center; font-size:11.5px; }
+.sync-rago { font-variant-numeric:tabular-nums; color:var(--text-3); }
 .sync-rproj { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-2); }
-.sync-rmodel { font:600 11px/1 var(--font-mono); text-transform:uppercase; white-space:nowrap; }
+.sync-rmodel { font:700 10.5px/1 var(--font-mono); text-transform:uppercase; white-space:nowrap; }
 .sync-rmodel.fam-opus { color:var(--brand-claude); } .sync-rmodel.fam-gpt { color:var(--brand-codex); }
 .sync-rtok { font-variant-numeric:tabular-nums; color:var(--text-3); }
+
+/* Pro account bar (signed-in header) — modern badge + plan pill */
+.pro-bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:15px; }
+.pro-badge { font:800 11px/1 var(--font-sans); letter-spacing:.07em; text-transform:uppercase; color:#1a1205;
+  background:linear-gradient(95deg, var(--brand-claude), var(--brand-codex)); padding:6px 12px;
+  border-radius:var(--radius-full); box-shadow:0 6px 16px -6px rgba(94,106,210,.6); }
+.pro-who { font-size:13px; color:var(--text-2); }
+.pro-who b { color:var(--text-1); font-weight:700; }
+.pro-plan { font:800 10px/1 var(--font-sans); text-transform:uppercase; letter-spacing:.05em;
+  padding:5px 11px; border-radius:var(--radius-full); }
+.pro-plan.active { color:var(--good); background:var(--good-bg); border:1px solid color-mix(in srgb, var(--good) 45%, transparent); }
+.pro-plan.none { color:var(--warn); background:var(--warn-bg); border:1px solid color-mix(in srgb, var(--warn) 45%, transparent); }
 
 /* ---------- header Pro / pricing linki (upsell CTA) ---------- */
 #pro-link { font:700 13px/1 var(--font-sans); text-decoration:none; color:var(--brand);

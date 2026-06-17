@@ -925,11 +925,18 @@ function proVerifyHtml(email) {
 }
 
 function proSignedInHeader(st) {
-  const plan = st.plan && st.plan !== "free" ? `· ${esc(st.plan)}` : `· <span style="color:var(--warn)">no Pro plan yet</span>`;
-  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px;flex-wrap:wrap" class="dim">
-    <span style="color:var(--brand)">✦ Pro</span> signed in as <b style="color:var(--text-2)">${esc(st.email || '')}</b> ${plan}
-    <button class="ghost-btn" style="margin-left:auto" onclick="proPush(this)">Push now</button>
-    <button class="ghost-btn" onclick="proSignout()">Sign out</button></div>`;
+  const isPro = st.plan && st.plan !== "free";
+  const pill = isPro
+    ? `<span class="pro-plan active">● ${esc(st.plan)} plan</span>`
+    : `<span class="pro-plan none">no plan yet</span>`;
+  return `<div class="pro-bar">
+    <span class="pro-badge">✦ Pro</span>
+    <span class="pro-who">${esc(st.email || '')}</span>
+    ${pill}
+    <span style="margin-left:auto;display:flex;gap:8px">
+      <button class="ghost-btn" onclick="proPush(this)">Push now</button>
+      <button class="ghost-btn" onclick="proSignout()">Sign out</button>
+    </span></div>`;
 }
 
 async function proPush(btn) {
@@ -954,8 +961,8 @@ function proDevicesHtml(data) {
     const rows = Object.keys(srcs).map(s => {
       const v = srcs[s] || {};
       return `<div class="sync-src"><span class="sync-srcname ${s === 'codex' ? 'fam-gpt' : 'fam-opus'}">${esc(s)}</span>
-        <span class="num">~${fmtMoney(v.month_so_far || 0)}</span><span class="dim">this month</span>
-        <span class="num">${fmtInt(v.record_count || 0)}</span><span class="dim">records</span></div>`;
+        <span class="sync-amt">~${fmtMoney(v.month_so_far || 0)}<small>this month</small></span>
+        <span class="sync-cnt">${fmtInt(v.record_count || 0)}<small>records</small></span></div>`;
     }).join("") || `<div class="dim" style="font-size:11px">no data</div>`;
     const recent = Object.keys(srcs)
       .flatMap(s => (srcs[s].recent || []).map(t => ({ ...t, _src: s })))
