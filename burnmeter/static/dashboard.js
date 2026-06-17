@@ -926,15 +926,23 @@ function proVerifyHtml(email) {
 
 function proSignedInHeader(st) {
   const plan = st.plan && st.plan !== "free" ? `· ${esc(st.plan)}` : `· <span style="color:var(--warn)">no Pro plan yet</span>`;
-  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:12px" class="dim">
+  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px;flex-wrap:wrap" class="dim">
     <span style="color:var(--brand)">✦ Pro</span> signed in as <b style="color:var(--text-2)">${esc(st.email || '')}</b> ${plan}
-    <button class="ghost-btn" style="margin-left:auto" onclick="proSignout()">Sign out</button></div>`;
+    <button class="ghost-btn" style="margin-left:auto" onclick="proPush(this)">Push now</button>
+    <button class="ghost-btn" onclick="proSignout()">Sign out</button></div>`;
 }
+
+async function proPush(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = "Pushing…"; }
+  try { await fetch("/api/pro/push", { method: "POST", headers: _proHdr }); } catch (e) {}
+  renderSyncDevices();   // server busts the devices cache on push → fresh list
+}
+window.proPush = proPush;
 
 function proDevicesHtml(data) {
   if (data && data.error) return `<div class="dim" style="font-size:12px;color:var(--warn)">couldn't reach Firebase: ${esc(String(data.error))}</div>`;
   const devs = (data && data.devices) || [];
-  if (!devs.length) return `<div class="dim" style="font-size:12.5px">no synced devices yet — this device will push automatically within ~5 min, or run <span style="font-family:var(--font-mono)">burnmeter sync push</span>.</div>`;
+  if (!devs.length) return `<div class="dim" style="font-size:12.5px">no synced devices yet — click <b>Push now</b> above, or this device pushes automatically within ~5 min.</div>`;
   const ago = (iso) => { if (!iso) return ""; const s = (Date.now() - new Date(iso).getTime()) / 1000; return s < 60 ? "now" : s < 3600 ? Math.round(s / 60) + "m" : s < 86400 ? Math.round(s / 3600) + "h" : Math.round(s / 86400) + "d"; };
   return `<div class="sync-grid">` + devs.map(d => {
     if (d._undecryptable) {
@@ -1268,12 +1276,12 @@ function initModularGrid() {
   }, gs);
   window.__grid = grid;
   try {
-    const saved = JSON.parse(localStorage.getItem("burnmeter_layout_v7") || "null");
+    const saved = JSON.parse(localStorage.getItem("burnmeter_layout_v8") || "null");
     // kaydet/yükle YALNIZCA tam grid'de (12 kolon). Dar ekranda GridStack otomatik reflow
     // yapar; o geçici dar düzeni kaydetmeyiz ki geniş ekran düzenini bozmasın.
     if (saved && saved.length && grid.getColumn() === 12) grid.load(saved, false);
   } catch (e) { /* bozuk kayıt → varsayılan */ }
-  const save = () => { try { if (grid.getColumn() === 12) localStorage.setItem("burnmeter_layout_v7", JSON.stringify(grid.save(false))); } catch (e) {} };
+  const save = () => { try { if (grid.getColumn() === 12) localStorage.setItem("burnmeter_layout_v8", JSON.stringify(grid.save(false))); } catch (e) {} };
   grid.on("change", save);
   // resize sonrası grafikleri yeni boyuta sığdır
   grid.on("resizestop", () => { Object.values(window.__charts || {}).forEach(ch => { try { ch.resize(); } catch (e) {} }); });
@@ -1404,7 +1412,7 @@ function start() {
   });
   initModularGrid();
   const rl = $("reset-layout");
-  if (rl) rl.addEventListener("click", () => { localStorage.removeItem("burnmeter_layout_v7"); location.reload(); });
+  if (rl) rl.addEventListener("click", () => { localStorage.removeItem("burnmeter_layout_v8"); location.reload(); });
   // First paint is cold until the local logs are parsed — on large histories that
   // first read can take a few seconds. Say so instead of showing a blank "…" gauge.
   $("last-updated").textContent = "Reading your Burnmeter logs — the first run can take a minute or two on large histories…";

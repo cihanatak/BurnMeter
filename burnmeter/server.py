@@ -310,7 +310,7 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 threading.Thread(target=_go, daemon=True).start()
                 return
 
-            if path in ("/api/pro/connect", "/api/pro/disconnect", "/api/pro/resend"):
+            if path in ("/api/pro/connect", "/api/pro/disconnect", "/api/pro/resend", "/api/pro/push"):
                 # Pro account actions from the dashboard, backed by Firebase Auth. The
                 # password is used ONLY here on localhost — to sign in to Firebase and to
                 # derive the E2E key — never stored, never sent anywhere except Firebase
@@ -330,6 +330,25 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                     return
                 if path == "/api/pro/resend":
                     _json_response(self, 200, _fb.resend_verification())
+                    return
+                if path == "/api/pro/push":
+                    # Push THIS device's snapshot to Firestore now (no 5-min wait), reusing
+                    # cached reports. Encrypted client-side; Firestore holds ciphertext only.
+                    from . import sync as _sync
+                    cfg2 = _fb.load_config()
+                    if not _fb.is_configured(cfg2):
+                        _json_response(self, 400, {"ok": False, "error": "not signed in"})
+                        return
+                    reports = {}
+                    for s in ("claude", "codex"):
+                        if s == "codex" and codex_cache is None:
+                            continue
+                        try:
+                            reports[s] = build_for(s, None)
+                        except Exception:
+                            pass
+                    res = _fb.push_snapshot(cfg2, _sync.snapshot_from_reports(cfg2, reports))
+                    _json_response(self, 200 if res.get("ok") else 400, res)
                     return
                 try:
                     length = int(self.headers.get("Content-Length", 0) or 0)
