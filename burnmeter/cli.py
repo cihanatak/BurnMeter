@@ -961,7 +961,12 @@ def main(argv=None):
     p_alerts.add_argument("--fire", action="store_true",
                           help="check sırasında eşik aşılırsa gerçekten gönder")
 
-    args = parser.parse_args(argv)
+    # `burnmeter` with no subcommand → open the desktop app (matches the frozen
+    # exe's double-click). Keeps `burnmeter <cmd>` working as before.
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if not raw:
+        raw = ["app"]
+    args = parser.parse_args(raw)
 
     handlers = {
         "status": cmd_status,
