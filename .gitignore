@@ -7,6 +7,9 @@ venv/
 build/
 dist/
 
+# PyInstaller generated spec (build_exe.ps1 regenerates it)
+/Burnmeter.spec
+
 # Burnmeter runtime caches (parsed-record caches, never commit)
 *burnmeter*cache.json
 

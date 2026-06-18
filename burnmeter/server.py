@@ -25,7 +25,11 @@ from .codex_parser import CODEX_SESSIONS_DIR, load_codex_records
 from .analytics import build_report
 
 
-STATIC_DIR = Path(__file__).resolve().parent / "static"   # burnmeter/static (paket içi — pip-install'da da bulunur)
+if getattr(sys, "frozen", False):
+    # PyInstaller bundle: data is added at <_MEIPASS>/burnmeter/static.
+    STATIC_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / "burnmeter" / "static"
+else:
+    STATIC_DIR = Path(__file__).resolve().parent / "static"   # burnmeter/static (paket içi — pip-install'da da bulunur)
 LANDING_FILE = STATIC_DIR.parent.parent / "docs" / "index.html"   # repo_root/docs/index.html — web-deploy ile TEK kaynak (drift yok); pip-install'da yoksa graceful 404
 
 
@@ -62,9 +66,17 @@ class _Cache:
         """Spawn the build worker; return its report dict or None on failure."""
         import subprocess
         from ._proc import NO_WINDOW
+        # Frozen (PyInstaller) exe has no `python -m`: re-invoke the exe with a
+        # `_worker` arg, which the frozen entry routes to burnmeter._worker.main().
+        # Otherwise `sys.executable -m burnmeter._worker` would just open a 2nd
+        # app window.
+        if getattr(sys, "frozen", False):
+            worker_argv = [sys.executable, "_worker"]
+        else:
+            worker_argv = [sys.executable, "-m", "burnmeter._worker"]
         try:
             proc = subprocess.run(
-                [sys.executable, "-m", "burnmeter._worker"],
+                worker_argv,
                 input=json.dumps(self.worker_config or {}),
                 capture_output=True, text=True, timeout=1200,
                 # No console window — else under the windowless tray this child
