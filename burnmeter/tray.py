@@ -62,10 +62,28 @@ def _newer(latest: str, current: str) -> bool:
         return False
 
 
+def _asset_path(name: str):
+    """Locate a bundled asset (burnmeter/assets/<name>) in both pip and frozen
+    (PyInstaller _MEIPASS) layouts. Returns a Path or None."""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)) / "burnmeter"
+    else:
+        base = Path(__file__).resolve().parent
+    p = base / "assets" / name
+    return p if p.exists() else None
+
+
 def _make_image():
-    """PIL-generated 64x64 flame-in-a-disc icon — no asset file is shipped.
-    (PIL imported here, not at module scope, so the base package needs no deps.)"""
+    """Tray icon: the shipped burnmeter.png (the real app icon), falling back to
+    a PIL-drawn flame if the asset is missing. (PIL imported here, not at module
+    scope, so the base package needs no deps.)"""
     from PIL import Image, ImageDraw
+    p = _asset_path("burnmeter.png")
+    if p is not None:
+        try:
+            return Image.open(p).convert("RGBA")
+        except Exception:
+            pass
     img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     d.ellipse((2, 2, 62, 62), fill=(20, 20, 24, 255))            # dark disc

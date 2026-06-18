@@ -1,17 +1,18 @@
 """PyInstaller entry point for the standalone Burnmeter desktop app.
 
-A frozen build has no separate Python interpreter, so the re-exec /
-`python -m burnmeter` subprocess tricks used by the pip install don't apply here.
-Instead this entry:
+A frozen build has no separate Python interpreter, so `python -m burnmeter`
+doesn't exist — the exe IS the launcher. This entry routes argv to the normal
+CLI so the FULL app works (background tray server + native window + the cache
+worker), with the exe re-invoking ITSELF for subprocesses
+(`Burnmeter.exe tray` / `Burnmeter.exe app` / `Burnmeter.exe _worker`).
 
-  1. Hides the console window (the build is `--console` so pywebview gets a real
-     console — it renders OFF-SCREEN under a console-less process — but the user
-     never sees it).
-  2. Runs the dashboard window IN-PROCESS (server on a daemon thread + the
-     native window), so the whole app is one self-contained .exe with no Python,
-     no pip, no terminal.
+  * no args (double-click) → `app` → background tray server + native window;
+    closing the window leaves the tray running (quit from the tray).
+  * `tray`  → the background server + tray icon.
+  * `_worker` → the short-lived codex cache build worker (stdin→stdout).
 
-Tray / background-persistence / auto-update for the frozen app are a later phase.
+The build is `--console` (pywebview renders OFF-SCREEN under a console-less
+process) and the console window is hidden at runtime — so no flash, no ghost.
 """
 import sys
 
@@ -29,18 +30,20 @@ def _hide_console():
 
 
 def main() -> int:
-    # The codex cache "build worker" re-invokes this exe as `Burnmeter.exe
-    # _worker` (frozen has no `python -m`). Route that to the worker instead of
-    # opening a 2nd window. The worker reads config on stdin, prints JSON, exits.
+    # Cache worker re-invocation: `Burnmeter.exe _worker` (reads stdin, prints
+    # JSON, exits) — must NOT open a window.
     if len(sys.argv) >= 2 and sys.argv[1] == "_worker":
         from burnmeter._worker import main as worker_main
         return worker_main()
 
-    _hide_console()
-    from burnmeter.window import run_window
-    # In-process server (ensure_background=False): one process owns both the
-    # HTTP server and the window. Closing the window exits the app.
-    return run_window(open_browser=False, ensure_background=False)
+    if len(sys.argv) == 1:
+        sys.argv.append("app")          # double-click → the window app
+
+    if sys.argv[1] in ("app", "tray"):
+        _hide_console()                 # GUI subcommands: hide the console window
+
+    from burnmeter.cli import main as cli_main
+    return cli_main()
 
 
 if __name__ == "__main__":

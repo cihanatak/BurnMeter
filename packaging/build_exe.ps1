@@ -16,15 +16,20 @@ $env:PYTHONPATH = $root
 $sep = ";"   # add-data path separator on Windows
 
 python -m PyInstaller --noconfirm --clean --name Burnmeter --console `
+  --icon "burnmeter\assets\burnmeter.ico" `
   --paths $root `
   --collect-all webview `
   --collect-all clr_loader `
   --collect-all pythonnet `
   --collect-all cryptography `
+  --collect-all pystray `
+  --collect-all PIL `
   --collect-submodules burnmeter `
   --hidden-import proxy_tools `
   --hidden-import bottle `
+  --hidden-import pystray._win32 `
   --add-data "burnmeter\static${sep}burnmeter\static" `
+  --add-data "burnmeter\assets${sep}burnmeter\assets" `
   packaging\burnmeter_app.py
 
 Write-Host "`nBuilt: dist\Burnmeter\Burnmeter.exe"

@@ -99,16 +99,27 @@ def _spawn_background_server(kwargs) -> None:
     popping up: the native window is the surface. On Windows: pythonw + DETACHED/
     NO_WINDOW flags; on POSIX: a new session."""
     import importlib.util
+    env = dict(os.environ, BURNMETER_TRAY_DETACHED="1", PYTHONUTF8="1")
+    home = str(Path.home())
+    win_flags = 0x00000008 | 0x00000200 | 0x08000000  # DETACHED | NEW_GROUP | NO_WINDOW
+
+    if getattr(sys, "frozen", False):
+        # The exe IS the launcher: `Burnmeter.exe tray …`. pystray is bundled.
+        argv = [sys.executable, "tray", "--no-browser", "--no-shortcut",
+                *_kwargs_to_argv(kwargs)]
+        if sys.platform == "win32":
+            subprocess.Popen(argv, env=env, creationflags=win_flags, close_fds=True, cwd=home)
+        else:
+            subprocess.Popen(argv, env=env, start_new_session=True, close_fds=True, cwd=home)
+        return
+
     sub = "tray" if importlib.util.find_spec("pystray") is not None else "serve"
     argv = ["-m", "burnmeter", sub, "--no-browser", "--no-shortcut",
             *_kwargs_to_argv(kwargs)]
-    env = dict(os.environ, BURNMETER_TRAY_DETACHED="1", PYTHONUTF8="1")
-    home = str(Path.home())
     if sys.platform == "win32":
         from . import desktop
         pyw = desktop._pythonw(sys.executable)
-        flags = 0x00000008 | 0x00000200 | 0x08000000  # DETACHED | NEW_GROUP | NO_WINDOW
-        subprocess.Popen([pyw, *argv], env=env, creationflags=flags,
+        subprocess.Popen([pyw, *argv], env=env, creationflags=win_flags,
                          close_fds=True, cwd=home)
     else:
         subprocess.Popen([sys.executable, *argv], env=env,
@@ -134,7 +145,11 @@ def spawn_window(extra_args=None) -> bool:
 
     BURNMETER_APP_REEXEC=1 tells the child's cmd_app to skip re-exec and run the
     window directly (it's already python.exe)."""
-    argv = [str(_python_for_window()), "-m", "burnmeter", "app", *(extra_args or [])]
+    if getattr(sys, "frozen", False):
+        # The exe IS the launcher: `Burnmeter.exe app …` (no `python -m`).
+        argv = [sys.executable, "app", *(extra_args or [])]
+    else:
+        argv = [str(_python_for_window()), "-m", "burnmeter", "app", *(extra_args or [])]
     env = dict(os.environ, BURNMETER_APP_REEXEC="1", PYTHONUTF8="1")
     home = str(Path.home())
     try:

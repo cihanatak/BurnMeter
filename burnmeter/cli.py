@@ -258,6 +258,8 @@ def _ensure_shortcut_once(args) -> None:
     Idempotent; --no-shortcut opts out. Never raises — best-effort UX."""
     if getattr(args, "no_shortcut", False):
         return
+    if getattr(sys, "frozen", False):
+        return        # the packaged installer owns the shortcut, not the exe
     try:
         from . import desktop
         path, changed = desktop.ensure_shortcut(port=args.port)
@@ -348,6 +350,8 @@ def _maybe_detach_tray(args) -> bool:
     on non-Windows / any failure (then the tray just runs in-process)."""
     if sys.platform != "win32":
         return False
+    if getattr(sys, "frozen", False):
+        return False        # frozen exe is spawned already-detached by the app flow
     if os.environ.get("BURNMETER_TRAY_DETACHED") == "1" or _is_windowless():
         return False
     try:
