@@ -11,8 +11,9 @@ worker), with the exe re-invoking ITSELF for subprocesses
   * `tray`  → the background server + tray icon.
   * `_worker` → the short-lived codex cache build worker (stdin→stdout).
 
-The build is `--console` (pywebview renders OFF-SCREEN under a console-less
-process) and the console window is hidden at runtime — so no flash, no ghost.
+The build is `--windowed` (no console window ever — the standard pywebview
+packaging). std streams are nulled by --windowed, so we restore the worker's real
+pipe fds and route GUI prints to devnull (below).
 """
 import sys
 
@@ -30,17 +31,30 @@ def _hide_console():
 
 
 def main() -> int:
-    # Cache worker re-invocation: `Burnmeter.exe _worker` (reads stdin, prints
-    # JSON, exits) — must NOT open a window.
+    # Cache worker re-invocation: `Burnmeter.exe _worker` reads its config on
+    # stdin and prints the report JSON to stdout. A --windowed (no-console) build
+    # nulls std streams, so restore the REAL pipe fds the parent gave this child.
     if len(sys.argv) >= 2 and sys.argv[1] == "_worker":
+        import io
+        if sys.stdin is None:
+            sys.stdin = io.TextIOWrapper(io.FileIO(0, "r"), encoding="utf-8")
+        if sys.stdout is None:
+            sys.stdout = io.TextIOWrapper(io.FileIO(1, "w"), encoding="utf-8")
         from burnmeter._worker import main as worker_main
         return worker_main()
+
+    # Non-worker (GUI) paths: --windowed nulls stdout/stderr → guard so the CLI's
+    # print()/stderr.write() calls never crash.
+    import os
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
     if len(sys.argv) == 1:
         sys.argv.append("app")          # double-click → the window app
 
-    if sys.argv[1] in ("app", "tray"):
-        _hide_console()                 # GUI subcommands: hide the console window
+    _hide_console()                     # no-op under --windowed; safe either way
 
     from burnmeter.cli import main as cli_main
     return cli_main()

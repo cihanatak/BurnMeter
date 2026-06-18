@@ -1,8 +1,8 @@
 # Build the standalone Burnmeter.exe (PoC, UNSIGNED).
 #
 # Produces dist\Burnmeter\Burnmeter.exe — a self-contained Windows app that needs
-# NO Python/pip installed. Built --console (pywebview needs a console allocated or
-# it renders off-screen) with the console hidden at runtime (see burnmeter_app.py).
+# NO Python/pip installed. Built --windowed (no console window — standard pywebview
+# packaging; the entry restores the worker's std streams, see burnmeter_app.py).
 #
 # Usage:  powershell -ExecutionPolicy Bypass -File packaging\build_exe.ps1
 $ErrorActionPreference = "Stop"
@@ -15,7 +15,7 @@ python -m pip install --quiet --upgrade pyinstaller pyinstaller-hooks-contrib
 $env:PYTHONPATH = $root
 $sep = ";"   # add-data path separator on Windows
 
-python -m PyInstaller --noconfirm --clean --name Burnmeter --console `
+python -m PyInstaller --noconfirm --clean --name Burnmeter --windowed `
   --icon "burnmeter\assets\burnmeter.ico" `
   --paths $root `
   --collect-all webview `
