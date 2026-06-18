@@ -163,9 +163,15 @@ def run_window(open_browser: bool = False, ensure_background: bool = False, **kw
         handle.start_warm()
         url = handle.url
 
+    # maximized=True is load-bearing: under pythonw.exe (the desktop-icon
+    # interpreter) pywebview's auto-centering miscomputes screen metrics and
+    # parks the window OFF-SCREEN at a huge negative coord, collapsed to a
+    # title-bar sliver. A maximized window's geometry is computed by Windows to
+    # fill the monitor, bypassing pywebview's broken positioning — so it can
+    # never land off-screen. (python.exe positions fine; pythonw does not.)
     webview.create_window(
         f"Burnmeter v{__version__}", url,
-        width=1480, height=980, min_size=(940, 640))
+        width=1280, height=860, min_size=(900, 600), maximized=True)
     try:
         webview.start()           # blocks on the main thread until the window closes
     finally:
