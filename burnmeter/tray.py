@@ -24,6 +24,7 @@ import os
 import sys
 import threading
 import time
+from pathlib import Path
 
 from . import __version__
 from .server import setup_server, _already_running, _open_browser_async

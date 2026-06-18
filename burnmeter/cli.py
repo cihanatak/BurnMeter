@@ -381,11 +381,28 @@ def cmd_tray(args):
     kwargs = _common_kwargs(args)
     open_browser = not getattr(args, "no_browser", False)
     from . import tray as traymod
+    frozen = getattr(sys, "frozen", False)
     try:
         return traymod.run_tray(open_browser=open_browser, **kwargs)
-    except (ImportError, traymod.TrayUnavailable):
+    except (ImportError, traymod.TrayUnavailable) as e:
         from .server import serve
-        if _is_windowless():
+        import traceback
+        reason = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+        sys.stderr.write(f"[burnmeter] tray unavailable:\n{reason}\n")
+        if frozen:
+            # the packaged exe bundles pystray, so a failure here is a bug — log
+            # the full reason so it can be diagnosed (no pip in a frozen app).
+            try:
+                d = Path.home() / ".burnmeter"
+                d.mkdir(parents=True, exist_ok=True)
+                (d / "tray_error.txt").write_text(reason, encoding="utf-8")
+            except Exception:
+                pass
+            if _is_windowless():
+                _windowless_notice(
+                    "Couldn't start the Burnmeter tray icon.\n"
+                    "Opening the dashboard in a window instead.")
+        elif _is_windowless():
             _windowless_notice(
                 "Burnmeter's tray icon needs an extra package:\n\n"
                 "    pip install burnmeter[tray]\n\n"
@@ -394,8 +411,7 @@ def cmd_tray(args):
             print(yellow("Tray support needs an extra package — install with:"))
             print("    pip install burnmeter[tray]")
             print(dim("Falling back to console mode (Ctrl+C to stop)…"))
-        # ALWAYS open the browser in the fallback — on the windowless path it's
-        # the only proof-of-life that the launch did something.
+        # Proof-of-life fallback so the launch never does nothing.
         serve(open_browser=True, **kwargs)
         return 0
 
