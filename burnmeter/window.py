@@ -115,6 +115,40 @@ def _spawn_background_server(kwargs) -> None:
                          start_new_session=True, close_fds=True, cwd=home)
 
 
+def _python_for_window() -> Path:
+    """python.exe next to the current interpreter — pywebview's window is broken
+    under pythonw.exe (no console), so the window process must be python.exe."""
+    py = Path(sys.executable)
+    if py.name.lower() == "pythonw.exe":
+        cand = py.with_name("python.exe")
+        if cand.exists():
+            return cand
+    return py
+
+
+def spawn_window(extra_args=None) -> bool:
+    """Launch the native window as a DETACHED process under python.exe with a
+    HIDDEN console (CREATE_NO_WINDOW on Windows): console allocated so pywebview
+    renders, no window so no flash/ghost. Used by the desktop-icon re-exec and by
+    the tray's "Open dashboard". Returns True if the process was spawned.
+
+    BURNMETER_APP_REEXEC=1 tells the child's cmd_app to skip re-exec and run the
+    window directly (it's already python.exe)."""
+    argv = [str(_python_for_window()), "-m", "burnmeter", "app", *(extra_args or [])]
+    env = dict(os.environ, BURNMETER_APP_REEXEC="1", PYTHONUTF8="1")
+    home = str(Path.home())
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(argv, env=env, creationflags=0x08000000,  # CREATE_NO_WINDOW
+                             close_fds=True, cwd=home)
+        else:
+            subprocess.Popen(argv, env=env, start_new_session=True,
+                             close_fds=True, cwd=home)
+        return True
+    except Exception:
+        return False
+
+
 def run_window(open_browser: bool = False, ensure_background: bool = False, **kwargs) -> int:
     """Open the dashboard in a native window.
 

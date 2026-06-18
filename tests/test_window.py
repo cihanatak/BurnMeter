@@ -137,6 +137,28 @@ def test_window_ensure_background_falls_back_in_process(monkeypatch):
     assert "close" in events            # we own this one → torn down on close
 
 
+def test_spawn_window_builds_app_command(monkeypatch):
+    """spawn_window launches `python.exe -m burnmeter app <flags>` detached with
+    the re-exec guard set, and NEVER under pythonw.exe."""
+    calls = {}
+
+    def fake_popen(argv, **kw):
+        calls["argv"] = argv
+        calls["env"] = kw.get("env", {})
+
+        class _P:
+            pass
+        return _P()
+
+    monkeypatch.setattr(W.subprocess, "Popen", fake_popen)
+    ok = W.spawn_window(["--port", "9000"])
+    assert ok is True
+    assert calls["argv"][1:4] == ["-m", "burnmeter", "app"]
+    assert calls["argv"][4:] == ["--port", "9000"]
+    assert calls["env"].get("BURNMETER_APP_REEXEC") == "1"
+    assert "pythonw.exe" not in calls["argv"][0].lower()   # window needs a console
+
+
 def test_window_fallback_without_pywebview(monkeypatch):
     # None in sys.modules makes `import webview` raise ImportError.
     monkeypatch.setitem(sys.modules, "webview", None)

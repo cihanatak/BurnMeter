@@ -304,28 +304,20 @@ def cmd_app(args):
     dashboard running (quit from the tray icon). Falls back to the browser if
     pywebview isn't installed — never a dead double-click."""
     _ensure_shortcut_once(args)
+    from .window import run_window, spawn_window
     # pywebview's window is unreliable under pythonw.exe (NO console → it parks
     # the window off-screen / minimized and won't render). python.exe works.
     # The desktop icon launches pythonw (no flash); here we re-exec under
-    # python.exe with a HIDDEN console (CREATE_NO_WINDOW): the console is
-    # allocated so pywebview behaves, but has no window — so still no flash and
-    # no lingering console "ghost". Guard against infinite re-exec.
+    # python.exe with a HIDDEN console (CREATE_NO_WINDOW) so pywebview behaves,
+    # but with no console window — so still no flash and no lingering "ghost".
+    # Guard env BURNMETER_APP_REEXEC=1 stops infinite re-exec.
     if (sys.platform == "win32"
             and os.environ.get("BURNMETER_APP_REEXEC") != "1"
-            and Path(sys.executable).name.lower() == "pythonw.exe"):
-        py = Path(sys.executable).with_name("python.exe")
-        if py.exists():
-            CREATE_NO_WINDOW = 0x08000000
-            try:
-                subprocess.Popen(
-                    [str(py), "-m", "burnmeter", *sys.argv[1:]],
-                    env=dict(os.environ, BURNMETER_APP_REEXEC="1", PYTHONUTF8="1"),
-                    creationflags=CREATE_NO_WINDOW, close_fds=True,
-                    cwd=str(Path.home()))
-                return 0
-            except Exception:
-                pass        # fall through and try in-process (may misrender)
-    from .window import run_window
+            and Path(sys.executable).name.lower() == "pythonw.exe"
+            and Path(sys.executable).with_name("python.exe").exists()):
+        if spawn_window(sys.argv[2:]):      # sys.argv[1] == "app"; pass through flags
+            return 0
+        # else fall through and try in-process (may misrender under pythonw)
     print("Opening Burnmeter…")
     return run_window(open_browser=False, ensure_background=True,
                       **_common_kwargs(args))

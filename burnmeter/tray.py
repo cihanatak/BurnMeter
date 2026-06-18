@@ -164,13 +164,25 @@ def run_tray(host: str = "127.0.0.1", port: int = 7654, projects_dir=None,
             else:
                 threading.Thread(target=lambda: _do_check(icon, manual=True), daemon=True).start()
 
+        def _open_dashboard():
+            # Open the NATIVE WINDOW (not the browser). The window attaches to
+            # THIS already-running tray server. If pywebview isn't installed,
+            # run_window falls back to the browser — so still never a dead click.
+            try:
+                from .window import spawn_window
+                if spawn_window():
+                    return
+            except Exception:
+                pass
+            _open_browser_async(h.url)        # last-resort fallback
+
         def _on_ready(icon):
             # pystray calls setup() on its loop thread once the icon is actually
-            # registered → open the browser HERE, not before run() (avoids racing
+            # registered → open the window HERE, not before run() (avoids racing
             # a not-yet-visible icon / not-yet-accepting socket).
             icon.visible = True
             if open_browser:
-                _open_browser_async(h.url)
+                _open_dashboard()
             # Background update watch: check once now, then every 6h. Fail-silent;
             # only notifies when a newer version is actually published.
             def _auto():
@@ -181,7 +193,7 @@ def run_tray(host: str = "127.0.0.1", port: int = 7654, projects_dir=None,
             threading.Thread(target=_auto, daemon=True).start()
 
         def _on_open(icon, item):
-            _open_browser_async(h.url)
+            _open_dashboard()
 
         def _on_quit(icon, item):
             icon.stop()          # returns control to icon.run() on the main thread
