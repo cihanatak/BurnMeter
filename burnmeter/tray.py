@@ -143,6 +143,8 @@ def run_tray(host: str = "127.0.0.1", port: int = 7654, projects_dir=None,
             except Exception:
                 pass
 
+        frozen = getattr(sys, "frozen", False)
+
         def _do_check(icon, manual=False):
             v = latest_version()
             if v and _newer(v, __version__):
@@ -151,25 +153,32 @@ def run_tray(host: str = "127.0.0.1", port: int = 7654, projects_dir=None,
                     icon.update_menu()        # flip the menu label to "Update available"
                 except Exception:
                     pass
-                _notify(icon, f"Burnmeter v{v} is available.\n"
-                              f"Update:  pip install git+https://github.com/cihanatak/BurnMeter",
-                        "Update available")
+                how = ("Click the tray → Update to install."
+                       if frozen else
+                       "Update:  pip install git+https://github.com/cihanatak/BurnMeter")
+                _notify(icon, f"Burnmeter v{v} is available.\n{how}", "Update available")
             elif manual:
                 _notify(icon, f"You're on the latest version (v{__version__}).")
 
         def _do_update(icon):
-            # Hand off to the DETACHED updater: it stops THIS tray, reinstalls (the
-            # package is no longer in use → pip can't hang), then relaunches the new
-            # code. We must NOT pip from here — the tray runs from site-packages, and
-            # replacing in-use package files on Windows hangs.
             _notify(icon, "Updating Burnmeter — it will restart in a moment…", "Updating")
-            from .server import _spawn_update
             time.sleep(0.8)              # let the notification surface
+            if frozen:
+                # Frozen exe: download the latest installer and run it SILENTLY.
+                # CloseApplications/RestartApplications in the .iss closes this app,
+                # upgrades in place, and relaunches it.
+                from .updater import run_installer_update
+                if not run_installer_update():
+                    _notify(icon, "Couldn't download the update. Get it from "
+                                  "https://burnmeter.dev", "Update failed")
+                return
+            # pip install: hand off to the DETACHED updater (stops this tray,
+            # reinstalls when files are free, relaunches the new code).
+            from .server import _spawn_update
             if not _spawn_update(h.host, h.port):
                 _notify(icon, "Couldn't start the updater. From a terminal:\n"
                               "pip install --force-reinstall --no-cache-dir "
                               "git+https://github.com/cihanatak/BurnMeter", "Update failed")
-            # the detached _update will taskkill this tray + relaunch the new version
 
         def _update_text(item):
             v = update["latest"]

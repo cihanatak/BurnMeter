@@ -31,6 +31,10 @@ UninstallDisplayName={#MyAppName}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+; Auto-update: let a silent in-place upgrade close the running app and restart it
+; (the app's frozen updater runs this installer with /SILENT /RESTARTAPPLICATIONS).
+CloseApplications=yes
+RestartApplications=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
