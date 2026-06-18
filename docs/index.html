@@ -34,12 +34,15 @@
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--t2);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased;letter-spacing:-.006em}
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(1000px 560px at 50% -8%,rgba(94,106,210,.20),transparent 68%),radial-gradient(780px 540px at 88% 8%,rgba(16,163,127,.13),transparent 64%),radial-gradient(700px 500px at 8% 16%,rgba(217,119,87,.10),transparent 64%)}
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
 a{color:var(--accent);text-decoration:none} a:hover{color:#6E79E0}
 .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
 .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:10px;font-weight:600;font-size:15px;cursor:pointer;transition:.15s}
 .btn-primary{background:var(--accent);color:#fff;border:1px solid var(--accent)} .btn-primary:hover{background:#6E79E0}
 .btn-ghost{background:transparent;color:var(--t1);border:1px solid var(--b2)} .btn-ghost:hover{border-color:var(--b3);background:var(--raised)}
+.btn-star{background:linear-gradient(180deg,rgba(245,200,75,.14),rgba(245,200,75,.06));color:var(--t1);border:1px solid rgba(245,200,75,.34)} .btn-star:hover{background:linear-gradient(180deg,rgba(245,200,75,.22),rgba(245,200,75,.10));border-color:rgba(245,200,75,.6);box-shadow:0 6px 22px -8px rgba(245,200,75,.5)}
+.btn-star .s{color:#FFC93C;font-size:16px}
 
 /* nav */
 nav{position:sticky;top:0;z-index:10;background:rgba(8,9,10,.85);backdrop-filter:blur(14px);border-bottom:1px solid var(--b1)}
@@ -174,7 +177,7 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
     are to your plan's rate limit. No API keys. No cloud. Your data never leaves your machine.</p>
   <div class="cta">
     <a href="https://github.com/cihanatak/BurnMeter/releases/latest/download/BurnmeterSetup.exe" class="btn btn-primary">⬇ Download for Windows</a>
-    <a href="https://github.com/cihanatak/BurnMeter" target="_blank" rel="noopener" class="btn btn-ghost">★ Star on GitHub</a>
+    <a href="https://github.com/cihanatak/BurnMeter" target="_blank" rel="noopener" class="btn btn-star"><span class="s">★</span> Star on GitHub</a>
   </div>
   <div class="cta-note">Free · no Python needed · native app + system tray · your data never leaves your machine<br>
     <span style="opacity:.75">Unsigned for now — if Windows SmartScreen appears, click <b>More info → Run anyway</b>.</span></div>
