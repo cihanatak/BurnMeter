@@ -170,11 +170,13 @@ footer{border-top:1px solid var(--b1);padding:48px 0 40px}
   </div>
   <div class="cta-note">Free · no Python needed · native app + system tray · your data never leaves your machine<br>
     <span style="opacity:.75">Unsigned for now — if Windows SmartScreen appears, click <b>More info → Run anyway</b>.</span></div>
-  <div class="cta-note" style="margin-top:12px;opacity:.85">
-    <b>macOS &amp; Linux:</b> install via pip (no security prompt) —
-    <code style="font-family:ui-monospace,monospace;background:rgba(255,255,255,.06);padding:2px 8px;border-radius:6px">pip install "burnmeter[app] @ git+https://github.com/cihanatak/BurnMeter"</code>
-    then run <code style="font-family:ui-monospace,monospace;background:rgba(255,255,255,.06);padding:2px 8px;border-radius:6px">burnmeter</code><br>
-    <span style="opacity:.6;font-size:13px">Or the macOS .dmg (unsigned — needs <b>System Settings → Open Anyway</b>): <a href="https://github.com/cihanatak/BurnMeter/releases/latest/download/Burnmeter.dmg" style="color:inherit;text-decoration:underline">download</a></span></div>
+  <div class="cta-note" style="margin-top:16px"><b>macOS &amp; Linux</b> — install with pip (Python 3.10+) · native window · no security prompt:</div>
+  <div class="install" style="margin-top:8px">
+    <button class="cp" id="install-copy" type="button" aria-label="copy install commands">Copy</button>
+    <code class="cmd"><span class="pr" aria-hidden="true">$ </span><span id="install-cmd">pip install "burnmeter[app] @ git+https://github.com/cihanatak/BurnMeter"</span></code>
+    <code class="cmd"><span class="pr" aria-hidden="true">$ </span>burnmeter</code>
+  </div>
+  <div class="cta-note" style="opacity:.6;font-size:13px;margin-top:10px">Or the macOS <b>.dmg</b> (unsigned — <b>System Settings → Open Anyway</b>): <a href="https://github.com/cihanatak/BurnMeter/releases/latest/download/Burnmeter.dmg" style="color:inherit;text-decoration:underline">download</a></div>
 
   <div class="trust">
     <span><b>AGPL-3.0</b> open source</span>
