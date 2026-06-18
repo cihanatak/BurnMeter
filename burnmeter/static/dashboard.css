@@ -124,6 +124,14 @@ header {
 #reset-layout:active { transform: scale(.96); }
 #alert-toggle { background:transparent; border:1px solid var(--border-default); color:var(--text-3); width:34px; height:34px; border-radius:8px; cursor:pointer; font-size:16px; transition:all .15s; }
 #alert-toggle:hover { color:var(--text-1); border-color:var(--border-strong); }
+.zoom-ctl { display:inline-flex; align-items:center; height:34px; border:1px solid var(--border-default);
+  border-radius:8px; overflow:hidden; background:transparent; }
+.zoom-ctl button { background:transparent; border:0; color:var(--text-3); height:32px; cursor:pointer;
+  font:600 13px/1 var(--font-sans); transition: all .12s; }
+.zoom-ctl #zoom-out, .zoom-ctl #zoom-in { width:30px; font-size:18px; }
+.zoom-ctl #zoom-reset { min-width:46px; padding:0 4px; color:var(--text-2); border-left:1px solid var(--border-default); border-right:1px solid var(--border-default); }
+.zoom-ctl button:hover { color:var(--text-1); background:var(--bg-raised); }
+.zoom-ctl button:active { transform: scale(.94); }
 #alert-toggle.on { color:var(--brand-codex); border-color:var(--brand-codex); box-shadow:inset 0 0 0 1px var(--brand-codex); }
 .alert-toast { position:fixed; top:52px; left:50%; transform:translateX(-50%) translateY(-12px); z-index:9999;
   background:var(--bg-overlay); border:1px solid var(--border-strong); border-radius:10px; padding:11px 18px;

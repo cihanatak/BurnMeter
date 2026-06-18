@@ -19,6 +19,43 @@
   localStorage.setItem("burnmeter_ls_migrated", "1");
 } catch (e) {} })();
 
+// ---------- view zoom (high-DPI friendliness; works in browser + native window) ----------
+// On a 150%-scaled monitor the dashboard renders large; this lets the user scale
+// it down (Ctrl +/-/0 or the header − %  + control) and remembers the choice.
+// First run with no preference picks a smaller default on high-DPI screens.
+(function () {
+  const KEY = "burnmeter_zoom";
+  const MIN = 0.5, MAX = 1.5, STEP = 0.1;
+  const defaultZoom = () => {
+    const dpr = window.devicePixelRatio || 1;
+    if (dpr >= 1.5) return 0.8;
+    if (dpr >= 1.25) return 0.9;
+    return 1.0;
+  };
+  const clamp = (z) => Math.min(MAX, Math.max(MIN, Math.round(z * 100) / 100));
+  const current = () => {
+    const z = parseFloat(localStorage.getItem(KEY));
+    return clamp(!z || isNaN(z) ? defaultZoom() : z);
+  };
+  const apply = (z) => {
+    document.documentElement.style.zoom = z;          // Chromium/WebView2 CSS zoom
+    const pct = document.getElementById("zoom-pct");
+    if (pct) pct.textContent = Math.round(z * 100) + "%";
+  };
+  const setZoom = (z) => { z = clamp(z); localStorage.setItem(KEY, String(z)); apply(z); };
+  window.bmZoomIn = () => setZoom(current() + STEP);
+  window.bmZoomOut = () => setZoom(current() - STEP);
+  window.bmZoomReset = () => setZoom(1.0);
+  apply(current());                                    // apply ASAP (html exists)
+  document.addEventListener("DOMContentLoaded", () => apply(current()));
+  window.addEventListener("keydown", (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.key === "+" || e.key === "=") { e.preventDefault(); window.bmZoomIn(); }
+    else if (e.key === "-" || e.key === "_") { e.preventDefault(); window.bmZoomOut(); }
+    else if (e.key === "0") { e.preventDefault(); window.bmZoomReset(); }
+  });
+})();
+
 // ---------- helpers ----------
 const $ = (id) => document.getElementById(id);
 const fmtMoney = (n) => "$" + (Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });

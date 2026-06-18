@@ -30,6 +30,11 @@
     <span class="live-dot live" id="live-dot" title="live"></span>
     <a id="home-link" href="https://burnmeter.dev/" target="_blank" rel="noopener" title="Home — burnmeter.dev">Home</a>
     <a id="pro-link" href="https://burnmeter.dev/#pricing" target="_blank" rel="noopener" title="Pro — cross-device sync + limit alerts (desktop & Slack)">✦ Pro</a>
+    <span class="zoom-ctl" title="zoom (Ctrl +/-/0)">
+      <button id="zoom-out" onclick="bmZoomOut()" title="zoom out (Ctrl -)">−</button>
+      <button id="zoom-reset" onclick="bmZoomReset()" title="reset zoom (Ctrl 0)"><span id="zoom-pct">100%</span></button>
+      <button id="zoom-in" onclick="bmZoomIn()" title="zoom in (Ctrl +)">+</button>
+    </span>
     <button id="export-csv" title="download records as CSV">⬇</button>
     <button id="alert-toggle" title="limit alerts off (click)">🔔</button>
     <button id="reset-layout" title="restore card layout to default">⤢ Reset layout</button>

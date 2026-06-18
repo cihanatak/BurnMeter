@@ -221,8 +221,17 @@ def run_window(open_browser: bool = False, ensure_background: bool = False, **kw
     webview.create_window(
         f"Burnmeter v{__version__}", url,
         width=1280, height=860, min_size=(900, 600), maximized=True)
+    # Persist the WebView profile (localStorage: zoom level + client prefs) across
+    # restarts — private_mode=True (the default) would forget them every launch.
+    storage = Path.home() / ".burnmeter" / "webview"
     try:
-        webview.start()           # blocks on the main thread until the window closes
+        storage.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    try:
+        webview.start(private_mode=False, storage_path=str(storage))
+    except TypeError:
+        webview.start()           # older pywebview without these kwargs
     finally:
         if handle is not None:    # only tear down a server WE own; never the tray
             handle.close()
