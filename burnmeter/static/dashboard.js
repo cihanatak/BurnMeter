@@ -445,6 +445,8 @@ function populateScopePill(payload) {
   const sel = $("scope-select"), wrap = $("scope-wrap");
   if (!sel || !wrap) return;
   const devs = (payload && payload.devices ? payload.devices.filter((d) => !d._undecryptable) : []);
+  const badge = $("nav-dev-count");   // device count on the sidebar "Devices" item
+  if (badge) { if (devs.length) { badge.textContent = String(devs.length); badge.style.display = ""; } else { badge.style.display = "none"; } }
   if (devs.length <= 1) { wrap.style.display = "none"; return; }   // only meaningful with 2+
   wrap.style.display = "";
   const opts = ['<option value="all">All devices</option>'];
@@ -1623,7 +1625,7 @@ function fireAlert(msg, level) {
 }
 function wireAlerts() {
   const b = $("alert-toggle"); if (!b) return;
-  const sync = () => { const on = localStorage.getItem("burnmeter_alerts_on") === "1"; b.classList.toggle("on", on); b.title = on ? "limit alerts ON" : "limit alerts off (click)"; };
+  const sync = () => { const on = localStorage.getItem("burnmeter_alerts_on") === "1"; b.classList.toggle("on", on); b.title = on ? "limit alerts ON" : "limit alerts off (click)"; if (b.classList.contains("set-btn")) b.textContent = on ? "🔔 Alerts on" : "🔔 Alerts off"; };
   sync();
   b.addEventListener("click", async () => {
     const on = localStorage.getItem("burnmeter_alerts_on") === "1";
@@ -1646,8 +1648,27 @@ function applyZoom() {
   try { document.body.style.zoom = z; } catch (e) {}
 }
 
+// ---------- section navigation (sidebar menu) ----------
+window.bmShowSection = function (name) {
+  const valid = ["overview", "devices", "projects", "trends", "alerts", "settings"];
+  name = valid.includes(name) ? name : "overview";
+  document.querySelectorAll("main > .section").forEach((s) =>
+    s.classList.toggle("active", s.dataset.section === name));
+  document.querySelectorAll(".nav-item[data-section]").forEach((b) =>
+    b.classList.toggle("active", b.dataset.section === name));
+  try { localStorage.setItem("burnmeter_section", name); } catch (e) {}
+  // Charts created while their section was display:none render at 0×0 — resize on show.
+  requestAnimationFrame(() => {
+    Object.values(window.__charts || {}).forEach((ch) => { try { ch.resize(); } catch (e) {} });
+  });
+};
+
 function start() {
   applyZoom();
+  // sidebar section navigation
+  document.querySelectorAll(".nav-item[data-section]").forEach((b) =>
+    b.addEventListener("click", () => bmShowSection(b.dataset.section)));
+  bmShowSection(localStorage.getItem("burnmeter_section") || "overview");
   window.addEventListener("resize", applyZoom);
   $("refresh").addEventListener("click", () => refresh(true));
   wireAlerts();

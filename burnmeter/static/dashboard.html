@@ -4,201 +4,253 @@
   <meta charset="utf-8" />
   <title>Burnmeter — AI coding fuel gauge</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack.min.css" />
-  <!-- column-count rules for 1–11 cols — REQUIRED for the responsive breakpoints
-       (6-col <1100px, 1-col <700px); without it narrow windows render cards at
-       width:0 → a blank dashboard. -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack-extra.min.css" />
   <link rel="stylesheet" href="/static/dashboard.css?v=__BMVER__" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/gridstack@11.2.0/dist/gridstack-all.js" defer></script>
   <script src="/static/dashboard.js?v=__BMVER__" defer></script>
 </head>
 <body>
 
-<header>
-  <div class="brand-mark">
-    <div class="brand-logo" id="brand-logo">◔</div>
-    <span class="brand-name" id="app-name">Burnmeter</span>
-    <span class="brand-ver" id="version">…</span>
-    <a id="update-link" class="update-pill" target="_blank" rel="noopener" style="display:none"></a>
-    <span class="source-toggle" id="source-toggle">
-      <button data-source="claude" class="active"><span class="dot"></span>Claude Code</button>
-      <button data-source="codex"><span class="dot"></span>Codex</button>
-      <button data-source="both"><span class="dot"></span>Claude Code + Codex</button>
-    </span>
-    <span class="scope-wrap" id="scope-wrap" style="display:none" title="which machines the fuel panel shows">
-      <span class="scope-ico" aria-hidden="true">🖥</span>
-      <select id="scope-select" class="scope-select" onchange="bmSetScope(this.value)"></select>
-    </span>
-  </div>
-  <div class="header-meta">
-    <span class="meta-txt" id="data-source">…</span>
-    <span class="meta-txt" id="last-updated">…</span>
-    <span class="live-dot live" id="live-dot" title="live"></span>
-    <a id="home-link" href="https://burnmeter.dev/" target="_blank" rel="noopener" title="Home — burnmeter.dev">Home</a>
-    <a id="pro-link" href="https://burnmeter.dev/#pricing" target="_blank" rel="noopener" title="Pro — cross-device sync + limit alerts (desktop & Slack)">✦ Pro</a>
-    <span class="zoom-ctl" title="zoom (Ctrl +/-/0)">
-      <button id="zoom-out" onclick="bmZoomOut()" title="zoom out (Ctrl -)">−</button>
-      <button id="zoom-reset" onclick="bmZoomReset()" title="reset zoom (Ctrl 0)"><span id="zoom-pct">100%</span></button>
-      <button id="zoom-in" onclick="bmZoomIn()" title="zoom in (Ctrl +)">+</button>
-    </span>
-    <button id="export-csv" title="download records as CSV">⬇</button>
-    <button id="alert-toggle" title="limit alerts off (click)">🔔</button>
-    <button id="reset-layout" title="restore card layout to default">⤢ Reset layout</button>
-    <button id="refresh" title="refresh now">↻</button>
-  </div>
-</header>
+<div class="app-shell">
 
-<main>
-
-  <!-- FIRST-RUN welcome (shown only while history is thin; dismissible) -->
-  <section class="card col-12 welcome-card" id="welcome-card" data-card="welcome" style="display:none"></section>
-
-  <!-- ROW 1 — HERO: burn-rate SPEEDOMETER (car gauge) + binding-constraint aside -->
-  <section class="card card-hero col-8" data-card="hero">
-    <div class="card-title">
-      Burn rate · burning too fast?
-      <span class="picker" id="burn-window-picker">
-        <button data-h="0.0833">5m</button><button data-h="0.25">15m</button><button data-h="1">1h</button>
-        <button data-h="2" class="active">2h</button><button data-h="4">4h</button><button data-h="6">6h</button>
-      </span>
-    </div>
-    <div class="speedo-wrap">
-      <svg id="speedo-svg" viewBox="0 0 400 272" preserveAspectRatio="xMidYMid meet"></svg>
-      <div style="flex:1;min-width:0">
-        <div class="speedo-zone-txt" id="speedo-zone">…</div>
-        <div class="hero-detail" id="hero-detail" style="font-size:13.5px;line-height:1.55">…</div>
-        <div class="speedo-breakdown" id="speedo-breakdown"></div>
+  <!-- LEFT SIDEBAR — section navigation (the app's menu) -->
+  <aside class="sidebar" id="sidebar">
+    <div class="side-brand">
+      <div class="brand-logo" id="brand-logo">◔</div>
+      <div class="side-brand-txt">
+        <div class="brand-name" id="app-name">Burnmeter</div>
+        <div class="brand-ver" id="version">…</div>
       </div>
     </div>
-    <div class="device-breakdown" id="device-breakdown" style="display:none"></div>
-  </section>
-  <section class="card col-4" data-card="hero-aside">
-    <div class="card-title" id="aside-title">Now <span class="sub" id="aside-sub"></span></div>
-    <div id="hero-aside-body"></div>
-  </section>
+    <a id="update-link" class="update-pill" target="_blank" rel="noopener" style="display:none"></a>
+    <nav class="side-nav" id="side-nav">
+      <button class="nav-item active" data-section="overview"><span class="nav-ico" aria-hidden="true">◉</span><span class="nav-lbl">Overview</span></button>
+      <button class="nav-item" data-section="devices"><span class="nav-ico" aria-hidden="true">🖥</span><span class="nav-lbl">Devices</span><span class="nav-badge" id="nav-dev-count" style="display:none"></span></button>
+      <button class="nav-item" data-section="projects"><span class="nav-ico" aria-hidden="true">▦</span><span class="nav-lbl">Projects</span></button>
+      <button class="nav-item" data-section="trends"><span class="nav-ico" aria-hidden="true">📈</span><span class="nav-lbl">Trends</span></button>
+      <button class="nav-item" data-section="alerts"><span class="nav-ico" aria-hidden="true">🔔</span><span class="nav-lbl">Alerts</span></button>
+    </nav>
+    <div class="side-foot">
+      <button class="nav-item" data-section="settings"><span class="nav-ico" aria-hidden="true">⚙</span><span class="nav-lbl">Settings</span></button>
+      <a id="pro-link" class="side-pro" href="https://burnmeter.dev/#pricing" target="_blank" rel="noopener" title="Pro — cross-device sync + limit alerts (desktop & Slack)"><span aria-hidden="true">✦</span> <span class="nav-lbl">Pro</span></a>
+    </div>
+  </aside>
 
-  <!-- ROW 2 — KPI STRIP -->
-  <section class="card col-3" data-card="kpi"><div class="kpi-label" id="kpi1-l">…</div><div class="kpi-value" id="kpi1-v">—</div><div class="kpi-sub" id="kpi1-s"></div><div class="kpi-spark"><canvas id="kpi1-spark"></canvas></div></section>
-  <section class="card col-3" data-card="kpi"><div class="kpi-label" id="kpi2-l">…</div><div class="kpi-value" id="kpi2-v">—</div><div class="kpi-sub" id="kpi2-s"></div><div class="kpi-spark"><canvas id="kpi2-spark"></canvas></div></section>
-  <section class="card col-3" data-card="kpi"><div class="kpi-label" id="kpi3-l">…</div><div class="kpi-value" id="kpi3-v">—</div><div class="kpi-sub" id="kpi3-s"></div><div class="kpi-spark"><canvas id="kpi3-spark"></canvas></div></section>
-  <section class="card col-3" data-card="kpi"><div class="kpi-label" id="kpi4-l">…</div><div class="kpi-value" id="kpi4-v">—</div><div class="kpi-sub" id="kpi4-s"></div><div class="kpi-spark"><canvas id="kpi4-spark"></canvas></div></section>
+  <div class="app-content">
 
-  <!-- Pro account + cross-device sync (E2E) — up top so the account/login is prominent -->
-  <section class="card col-6" data-card="sync-devices">
-    <div class="card-title">Devices <span class="sub">Pro sync · end-to-end encrypted · our servers never see your data</span></div>
-    <div id="sync-devices-body"></div>
-  </section>
-
-  <!-- ROW 3 — LIVE NOW (most fresh): currently running model + recent activity -->
-  <section class="card col-6" data-card="active-model">
-    <div class="card-title">Live active model <span class="sub">running now</span>
-      <span class="picker" id="active-window-picker">
-        <button data-w="live" class="active">● Live</button><button data-w="1">1m</button><button data-w="5">5m</button><button data-w="15">15m</button>
+    <!-- TOP BAR — global controls (apply across every section) -->
+    <header class="topbar">
+      <span class="source-toggle" id="source-toggle">
+        <button data-source="claude" class="active"><span class="dot"></span>Claude Code</button>
+        <button data-source="codex"><span class="dot"></span>Codex</button>
+        <button data-source="both"><span class="dot"></span>Claude Code + Codex</button>
       </span>
-    </div>
-    <div id="active-model-body"></div>
-  </section>
-  <section class="card col-6" data-card="recent">
-    <div class="card-title">Recent activity · one row per prompt <span class="sub" id="recent-sub">tokens, weighted by cost</span></div>
-    <div class="scroll"><table class="tbl" id="recent-tbl">
-      <thead><tr><th>when</th><th>project</th><th>model</th><th class="num">tokens</th><th class="num">$ (est.)</th><th class="num">cache hit</th></tr></thead>
-      <tbody></tbody></table></div>
-  </section>
-
-  <!-- ROW — monthly BUDGET tracking (#7): spent this month vs your set $ limit -->
-  <section class="card col-6" data-card="budget">
-    <div class="card-title">Monthly budget <span class="sub">spent this month vs your budget · all figures are estimates</span></div>
-    <div id="budget-body"></div>
-  </section>
-
-
-  <!-- ROW 4 — verimlilik (sen vs tipik) + cache efficiency -->
-  <section class="card col-8" data-card="eff">
-    <div class="card-title">Efficiency · cost per unit of work <span class="sub">your cost per hour, day, commit & turn — mostly vs your own past</span></div>
-    <div id="eff-body"></div>
-  </section>
-  <section class="card col-4" data-card="cache">
-    <div class="card-title">Cache efficiency <span class="sub">how much input was reused from cache — higher saves money (all-time)</span></div>
-    <div id="cache-body"></div>
-  </section>
-
-  <!-- ROW 4 — usage over time (wide) + model split (donut) -->
-  <section class="card col-8" data-card="trend">
-    <div class="card-title">
-      Burn rate trend · <span class="sub" id="trend-unit">$/hr</span>
-      <span class="picker" id="trend-picker">
-        <button data-tf="1">1h</button><button data-tf="4">4h</button>
-        <button data-tf="6">6h</button><button data-tf="12">12h</button>
-        <button data-tf="24" class="active">1d</button>
+      <span class="scope-wrap" id="scope-wrap" style="display:none" title="which machines the fuel panel shows">
+        <span class="scope-ico" aria-hidden="true">🖥</span>
+        <select id="scope-select" class="scope-select" onchange="bmSetScope(this.value)"></select>
       </span>
-    </div>
-    <div class="indicator-bar">
-      <span class="dim" style="font-size:10px">MA:</span>
-      <button class="indicator-btn ma-7"   data-ma="7">7</button>
-      <button class="indicator-btn ma-25"  data-ma="25">25</button>
-      <button class="indicator-btn ma-50"  data-ma="50">50</button>
-      <button class="indicator-btn ma-100" data-ma="100">100</button>
-      <span class="dim" style="font-size:10px;margin-left:auto">moving avg of last N bars</span>
-    </div>
-    <div class="chart-wrap tall"><canvas id="chart-trend"></canvas></div>
-  </section>
-  <section class="card col-4" data-card="models">
-    <div class="card-title">Model split <span class="sub">lifetime $ (est.)</span></div>
-    <div class="donut-wrap"><canvas id="chart-models"></canvas>
-      <div class="donut-center"><div class="v" id="models-total">—</div><div class="l">total</div></div>
-    </div>
-    <div id="models-legend" style="margin-top:12px"></div>
-  </section>
+      <div class="header-meta">
+        <span class="meta-txt" id="data-source">…</span>
+        <span class="meta-txt" id="last-updated">…</span>
+        <span class="live-dot live" id="live-dot" title="live"></span>
+        <button id="refresh" title="refresh now">↻</button>
+      </div>
+    </header>
 
-  <!-- daily spend (wide) + per-project (side) -->
-  <section class="card col-7" data-card="daily">
-    <div class="card-title">Last 30 days · daily $ (est.) <span class="sub" id="daily-sub"></span></div>
-    <div class="chart-wrap"><canvas id="chart-daily"></canvas></div>
-  </section>
-  <section class="card col-5" data-card="projects">
-    <div class="card-title" id="projects-title">Projects · lifetime <span class="sub">where your spend goes</span></div>
-    <div class="scroll"><table class="tbl" id="projects-tbl">
-      <thead><tr><th>project</th><th class="num">tokens</th><th class="num">$ (est.)</th></tr></thead>
-      <tbody></tbody></table></div>
-  </section>
+    <main>
 
-  <!-- usage HEATMAP — hour × day activity (local time) -->
-  <section class="card col-12" data-card="heatmap">
-    <div class="card-title">Activity heatmap <span class="sub">hour × day · local time · darker = more tokens</span></div>
-    <div id="heatmap-body"></div>
-  </section>
+      <!-- ===== OVERVIEW ===== -->
+      <div class="section active" data-section="overview">
 
-  <!-- per-model table (lifetime) + behavior + tool -->
-  <section class="card col-6" data-card="model-table">
-    <div class="card-title">Models · lifetime <span class="sub">each model at its actual rate</span></div>
-    <div class="scroll"><table class="tbl" id="modeltbl">
-      <thead><tr><th>model</th><th class="num">prompts</th><th class="num">tokens</th><th class="num">$</th></tr></thead>
-      <tbody></tbody></table></div>
-  </section>
+        <!-- FIRST-RUN welcome (shown only while history is thin; dismissible) -->
+        <section class="card col-12 welcome-card" id="welcome-card" data-card="welcome" style="display:none"></section>
 
-  <!-- ROW 7 — behavior (errors) + tool usage -->
-  <section class="card col-6" data-card="behavior">
-    <div class="card-title">Errors · last 24h <span class="sub" id="behavior-sub"></span></div>
-    <div id="behavior-body"></div>
-  </section>
-  <section class="card col-6" data-card="tools">
-    <div class="card-title">Tool usage · lifetime <span class="sub" id="tools-sub"></span></div>
-    <div id="tools-body"></div>
-  </section>
+        <!-- HERO: burn-rate SPEEDOMETER (car gauge) + binding-constraint aside -->
+        <section class="card card-hero col-8" data-card="hero">
+          <div class="card-title">
+            Burn rate · burning too fast?
+            <span class="picker" id="burn-window-picker">
+              <button data-h="0.0833">5m</button><button data-h="0.25">15m</button><button data-h="1">1h</button>
+              <button data-h="2" class="active">2h</button><button data-h="4">4h</button><button data-h="6">6h</button>
+            </span>
+          </div>
+          <div class="speedo-wrap">
+            <svg id="speedo-svg" viewBox="0 0 400 272" preserveAspectRatio="xMidYMid meet"></svg>
+            <div style="flex:1;min-width:0">
+              <div class="speedo-zone-txt" id="speedo-zone">…</div>
+              <div class="hero-detail" id="hero-detail" style="font-size:13.5px;line-height:1.55">…</div>
+              <div class="speedo-breakdown" id="speedo-breakdown"></div>
+            </div>
+          </div>
+          <div class="device-breakdown" id="device-breakdown" style="display:none"></div>
+        </section>
+        <section class="card col-4" data-card="hero-aside">
+          <div class="card-title" id="aside-title">Now <span class="sub" id="aside-sub"></span></div>
+          <div id="hero-aside-body"></div>
+        </section>
 
-</main>
+        <!-- KPI STRIP -->
+        <section class="card col-3" data-card="kpi"><div class="kpi-label" id="kpi1-l">…</div><div class="kpi-value" id="kpi1-v">—</div><div class="kpi-sub" id="kpi1-s"></div><div class="kpi-spark"><canvas id="kpi1-spark"></canvas></div></section>
+        <section class="card col-3" data-card="kpi"><div class="kpi-label" id="kpi2-l">…</div><div class="kpi-value" id="kpi2-v">—</div><div class="kpi-sub" id="kpi2-s"></div><div class="kpi-spark"><canvas id="kpi2-spark"></canvas></div></section>
+        <section class="card col-3" data-card="kpi"><div class="kpi-label" id="kpi3-l">…</div><div class="kpi-value" id="kpi3-v">—</div><div class="kpi-sub" id="kpi3-s"></div><div class="kpi-spark"><canvas id="kpi3-spark"></canvas></div></section>
+        <section class="card col-3" data-card="kpi"><div class="kpi-label" id="kpi4-l">…</div><div class="kpi-value" id="kpi4-v">—</div><div class="kpi-sub" id="kpi4-s"></div><div class="kpi-spark"><canvas id="kpi4-spark"></canvas></div></section>
 
-<!-- COMBINED "both" — Claude | Codex side by side, split down the middle (JS display:flex) -->
-<section id="combined-view" class="combined-view">
-  <div class="cv-half" id="cv-claude"></div>
-  <div class="cv-half" id="cv-codex"></div>
-</section>
+        <!-- LIVE NOW: currently running model + recent activity -->
+        <section class="card col-6" data-card="active-model">
+          <div class="card-title">Live active model <span class="sub">running now</span>
+            <span class="picker" id="active-window-picker">
+              <button data-w="live" class="active">● Live</button><button data-w="1">1m</button><button data-w="5">5m</button><button data-w="15">15m</button>
+            </span>
+          </div>
+          <div id="active-model-body"></div>
+        </section>
+        <section class="card col-6" data-card="recent">
+          <div class="card-title">Recent activity · one row per prompt <span class="sub" id="recent-sub">tokens, weighted by cost</span></div>
+          <div class="scroll"><table class="tbl" id="recent-tbl">
+            <thead><tr><th>when</th><th>project</th><th>model</th><th class="num">tokens</th><th class="num">$ (est.)</th><th class="num">cache hit</th></tr></thead>
+            <tbody></tbody></table></div>
+        </section>
 
-<footer style="max-width:var(--maxw);margin:0 auto;padding:8px var(--page-pad) 32px;color:var(--text-4);font-size:11px;font-family:var(--font-mono);">
-  <span id="footer-text">local · reads ~/.claude/projects + ~/.codex/sessions · $ is an estimate</span>
-</footer>
+      </div>
+
+      <!-- ===== DEVICES (fleet) ===== -->
+      <div class="section" data-section="devices">
+        <section class="card col-12" data-card="sync-devices">
+          <div class="card-title">Devices <span class="sub">Pro sync · end-to-end encrypted · our servers never see your data</span></div>
+          <div id="sync-devices-body"></div>
+        </section>
+      </div>
+
+      <!-- ===== PROJECTS ===== -->
+      <div class="section" data-section="projects">
+        <section class="card col-12" data-card="projects">
+          <div class="card-title" id="projects-title">Projects · lifetime <span class="sub">where your spend goes</span></div>
+          <div class="scroll"><table class="tbl" id="projects-tbl">
+            <thead><tr><th>project</th><th class="num">tokens</th><th class="num">$ (est.)</th></tr></thead>
+            <tbody></tbody></table></div>
+        </section>
+      </div>
+
+      <!-- ===== TRENDS ===== -->
+      <div class="section" data-section="trends">
+
+        <section class="card col-8" data-card="eff">
+          <div class="card-title">Efficiency · cost per unit of work <span class="sub">your cost per hour, day, commit & turn — mostly vs your own past</span></div>
+          <div id="eff-body"></div>
+        </section>
+        <section class="card col-4" data-card="cache">
+          <div class="card-title">Cache efficiency <span class="sub">how much input was reused from cache — higher saves money (all-time)</span></div>
+          <div id="cache-body"></div>
+        </section>
+
+        <section class="card col-8" data-card="trend">
+          <div class="card-title">
+            Burn rate trend · <span class="sub" id="trend-unit">$/hr</span>
+            <span class="picker" id="trend-picker">
+              <button data-tf="1">1h</button><button data-tf="4">4h</button>
+              <button data-tf="6">6h</button><button data-tf="12">12h</button>
+              <button data-tf="24" class="active">1d</button>
+            </span>
+          </div>
+          <div class="indicator-bar">
+            <span class="dim" style="font-size:10px">MA:</span>
+            <button class="indicator-btn ma-7"   data-ma="7">7</button>
+            <button class="indicator-btn ma-25"  data-ma="25">25</button>
+            <button class="indicator-btn ma-50"  data-ma="50">50</button>
+            <button class="indicator-btn ma-100" data-ma="100">100</button>
+            <span class="dim" style="font-size:10px;margin-left:auto">moving avg of last N bars</span>
+          </div>
+          <div class="chart-wrap tall"><canvas id="chart-trend"></canvas></div>
+        </section>
+        <section class="card col-4" data-card="models">
+          <div class="card-title">Model split <span class="sub">lifetime $ (est.)</span></div>
+          <div class="donut-wrap"><canvas id="chart-models"></canvas>
+            <div class="donut-center"><div class="v" id="models-total">—</div><div class="l">total</div></div>
+          </div>
+          <div id="models-legend" style="margin-top:12px"></div>
+        </section>
+
+        <section class="card col-7" data-card="daily">
+          <div class="card-title">Last 30 days · daily $ (est.) <span class="sub" id="daily-sub"></span></div>
+          <div class="chart-wrap"><canvas id="chart-daily"></canvas></div>
+        </section>
+        <section class="card col-5" data-card="model-table">
+          <div class="card-title">Models · lifetime <span class="sub">each model at its actual rate</span></div>
+          <div class="scroll"><table class="tbl" id="modeltbl">
+            <thead><tr><th>model</th><th class="num">prompts</th><th class="num">tokens</th><th class="num">$</th></tr></thead>
+            <tbody></tbody></table></div>
+        </section>
+
+        <section class="card col-12" data-card="heatmap">
+          <div class="card-title">Activity heatmap <span class="sub">hour × day · local time · darker = more tokens</span></div>
+          <div id="heatmap-body"></div>
+        </section>
+
+        <section class="card col-6" data-card="behavior">
+          <div class="card-title">Errors · last 24h <span class="sub" id="behavior-sub"></span></div>
+          <div id="behavior-body"></div>
+        </section>
+        <section class="card col-6" data-card="tools">
+          <div class="card-title">Tool usage · lifetime <span class="sub" id="tools-sub"></span></div>
+          <div id="tools-body"></div>
+        </section>
+
+      </div>
+
+      <!-- ===== ALERTS (budget + limits) ===== -->
+      <div class="section" data-section="alerts">
+        <section class="card col-12" data-card="budget">
+          <div class="card-title">Monthly budget <span class="sub">spent this month vs your budget · all figures are estimates</span></div>
+          <div id="budget-body"></div>
+        </section>
+      </div>
+
+      <!-- ===== SETTINGS ===== -->
+      <div class="section" data-section="settings">
+        <section class="card col-12" data-card="settings">
+          <div class="card-title">Settings <span class="sub">preferences for this device</span></div>
+          <div class="settings-list">
+            <div class="set-row">
+              <div class="set-k">Zoom <span class="set-h">make everything bigger or smaller (Ctrl +/−/0)</span></div>
+              <span class="zoom-ctl">
+                <button id="zoom-out" onclick="bmZoomOut()" title="zoom out (Ctrl -)">−</button>
+                <button id="zoom-reset" onclick="bmZoomReset()" title="reset zoom (Ctrl 0)"><span id="zoom-pct">100%</span></button>
+                <button id="zoom-in" onclick="bmZoomIn()" title="zoom in (Ctrl +)">+</button>
+              </span>
+            </div>
+            <div class="set-row">
+              <div class="set-k">Export <span class="set-h">download your records as a CSV file</span></div>
+              <button id="export-csv" class="set-btn">⬇ Download CSV</button>
+            </div>
+            <div class="set-row">
+              <div class="set-k">Limit alerts <span class="set-h">warn before you hit a rate limit (desktop notification)</span></div>
+              <button id="alert-toggle" class="set-btn" title="limit alerts off (click)">🔔 Alerts off</button>
+            </div>
+            <div class="set-row">
+              <div class="set-k">Links</div>
+              <span class="set-links">
+                <a id="home-link" href="https://burnmeter.dev/" target="_blank" rel="noopener">Home</a>
+                <a href="https://burnmeter.dev/#pricing" target="_blank" rel="noopener">About Pro</a>
+                <a href="https://github.com/cihanatak/BurnMeter" target="_blank" rel="noopener">GitHub</a>
+              </span>
+            </div>
+          </div>
+        </section>
+      </div>
+
+    </main>
+
+    <!-- COMBINED "both" — Claude | Codex side by side, split down the middle (JS display:flex) -->
+    <section id="combined-view" class="combined-view">
+      <div class="cv-half" id="cv-claude"></div>
+      <div class="cv-half" id="cv-codex"></div>
+    </section>
+
+    <footer class="app-foot">
+      <span id="footer-text">local · reads ~/.claude/projects + ~/.codex/sessions · $ is an estimate</span>
+    </footer>
+
+  </div>
+</div>
 
 </body>
 </html>
