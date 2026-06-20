@@ -514,7 +514,9 @@ window.bmSetScope = function (v) {
   window.__scope = bmSid(v) || "all";
   localStorage.setItem("burnmeter_scope", window.__scope);
   const sel = $("scope-select"); if (sel && sel.value !== window.__scope) sel.value = window.__scope;
-  bmRefreshHero();
+  const lr = window.__lastReport;
+  if (lr && lr._combined) renderCombined(lr.claude, lr.codex);   // "both" view re-scopes
+  else bmRefreshHero();
   bmHighlightScope();
 };
 // Click a device card / breakdown segment again to go back to the whole fleet.
@@ -668,6 +670,90 @@ function renderActiveModel(rep) {
 }
 
 // ---------- COMBINED "her ikisi" görünümü (Claude | Codex yan yana) ----------
+// A per-source report scoped to the device selection, for the combined ("both") view.
+// scope "this"/no-devices → the live local report. Else merge that source across the
+// picked devices: local device = LIVE (from the combined report's half), remote = its
+// snapshot. Mirrors bmScopedRep but for one named source.
+function bmScopedHalf(localRep, source) {
+  const scope = window.__scope || "all";
+  const payload = window.__devicesCache;
+  const devices = (payload && payload.devices ? payload.devices.filter((d) => !d._undecryptable) : []);
+  if (scope === "this" || !devices.length) return localRep;
+  const pick = scope === "all" ? devices : devices.filter((d) => d.device_id === scope);
+  if (!pick.length) return localRep;
+  let burn = 0, today = 0, month = 0, lifetime = 0, tokens = 0, records = 0, chSum = 0, chW = 0, k = 0;
+  const recent = [];
+  pick.forEach((d) => {
+    const isThis = payload && d.device_id === payload.this_device;
+    if (isThis && localRep && !localRep._combined) {
+      const fc = localRep.forecast || {}, tot = localRep.totals || {};
+      const hrs = localStorage.getItem("burnmeter_burn_hours_" + source) || "2";
+      const lb = (fc.burn_rates_by_hours && fc.burn_rates_by_hours[hrs] != null)
+        ? fc.burn_rates_by_hours[hrs] : (fc.burn_rate_per_hour_recent || 0);
+      burn += lb || 0; today += (fc.today && fc.today.so_far) || 0; month += (fc.month && fc.month.so_far) || 0;
+      lifetime += tot.cost_usd || 0; tokens += tot.total_tokens || 0; records += localRep.record_count || 0;
+      chSum += (tot.cache_hit_rate || 0) * (localRep.record_count || 0); chW += localRep.record_count || 0;
+      if ((lb || 0) > 0.01) k++;
+      (localRep.recent_turns || []).forEach((t) => recent.push({ ...t, device: d.label }));
+    } else {
+      const v = (d.sources || {})[source]; if (!v) return;
+      burn += v.burn_rate_per_hour || 0; today += v.today_cost || 0; month += v.month_so_far || 0;
+      lifetime += v.lifetime_cost || 0; tokens += v.lifetime_tokens || 0; records += v.record_count || 0;
+      chSum += (v.cache_hit_rate || 0) * (v.record_count || 0); chW += v.record_count || 0;
+      if ((v.burn_rate_per_hour || 0) > 0.01) k++;
+      (v.recent || []).forEach((t) => recent.push({
+        timestamp: t.ts, project_label: t.project, model: t.model,
+        effective_tokens: t.tokens, total_tokens: t.tokens, cost_usd: t.cost, cache_hit_rate: null, device: d.label,
+      }));
+    }
+  });
+  recent.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+  const kk = Math.max(1, scope === "all" ? k : 1);
+  const z0 = localRep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25, max: 50 };
+  return {
+    ...localRep,
+    __scopeLabel: scope === "all" ? "All devices" : (pick[0].label || "device"),
+    forecast: { ...(localRep.forecast || {}), burn_rate_per_hour_recent: burn,
+                today: { so_far: today }, month: { so_far: month }, burn_rates_by_hours: undefined },
+    totals: { ...(localRep.totals || {}), cost_usd: lifetime, total_tokens: tokens, cache_hit_rate: chW ? chSum / chW : 0 },
+    record_count: records,
+    burn_rate_zones: { typical: z0.typical * kk, busy: z0.busy * kk, heavy: z0.heavy * kk,
+                       max: (z0.max || 50) * kk, insufficient_history: z0.insufficient_history },
+    recent_turns: recent.slice(0, 12),
+  };
+}
+
+// Device selector (scroll) for the combined view: All devices + per device (combined
+// Claude+Codex $). Click → scope; the combined halves re-render scoped.
+function renderCombinedFleet() {
+  const el = $("cv-fleet"); if (!el) return;
+  const payload = window.__devicesCache;
+  const devs = (payload && payload.devices ? payload.devices.filter((d) => !d._undecryptable) : []);
+  if (devs.length < 2) { el.style.display = "none"; return; }
+  const lr = window.__lastReport, scope = window.__scope || "all";
+  const devMonth = (d) => {
+    if (payload && d.device_id === payload.this_device && lr && lr._combined) {
+      return ((lr.claude && lr.claude.forecast && lr.claude.forecast.month && lr.claude.forecast.month.so_far) || 0)
+           + ((lr.codex && lr.codex.forecast && lr.codex.forecast.month && lr.codex.forecast.month.so_far) || 0);
+    }
+    return ((d.sources && d.sources.claude && d.sources.claude.month_so_far) || 0)
+         + ((d.sources && d.sources.codex && d.sources.codex.month_so_far) || 0);
+  };
+  const total = devs.reduce((s, d) => s + devMonth(d), 0);
+  let html = `<button class="ovf-chip${scope === 'all' ? ' on' : ''}" onclick="bmSetScope('all')">` +
+    `<span class="ovf-ic" aria-hidden="true">🖥</span><span class="ovf-nm">All devices</span><span class="ovf-v">${fmtMoney0(total)}</span></button>`;
+  devs.forEach((d) => {
+    const isThis = payload && d.device_id === payload.this_device;
+    const id = bmSid(isThis ? "this" : d.device_id);
+    const ic = BM_OSICON[d.os] || "🖥";
+    html += `<button class="ovf-chip${scope === id ? ' on' : ''}" onclick="bmToggleScope('${id}')">` +
+      `<span class="ovf-ic" aria-hidden="true">${ic}</span><span class="ovf-nm">${esc(d.label || 'device')}${isThis ? ' ·this' : ''}</span>` +
+      `<span class="ovf-v">${fmtMoney0(devMonth(d))}</span></button>`;
+  });
+  el.innerHTML = html;
+  el.style.display = "";
+}
+
 function renderCombined(cl, cx) {
   const cv = $("combined-view"), mn = document.querySelector("main");
   if (mn) mn.style.display = "none";
@@ -682,10 +768,13 @@ function renderCombined(cl, cx) {
   window.__multiDevice = new Set([...Object.keys(cl.by_device || {}), ...Object.keys(cx.by_device || {})]).size > 1;
   $("data-source").textContent = `Claude ${fmtInt(cl.record_count || 0)} · Codex ${fmtInt(cx.record_count || 0)} records`;
   $("last-updated").textContent = "now";
-  const a = $("cv-claude"); if (a) a.innerHTML = halfStructure(cl, false, "claude");
-  const b = $("cv-codex");  if (b) b.innerHTML = halfStructure(cx, true, "codex");
-  paintCombinedSide("claude", cl, false);
-  paintCombinedSide("codex", cx, true);
+  // Device-aware: each half reflects the device scope (default all devices combined).
+  const scl = bmScopedHalf(cl, "claude"), scx = bmScopedHalf(cx, "codex");
+  renderCombinedFleet();
+  const a = $("cv-claude"); if (a) a.innerHTML = halfStructure(scl, false, "claude");
+  const b = $("cv-codex");  if (b) b.innerHTML = halfStructure(scx, true, "codex");
+  paintCombinedSide("claude", scl, false);
+  paintCombinedSide("codex", scx, true);
 }
 
 // her yarıda GERÇEK burn-rate speedometer (kendi tab'larındaki gibi) + 15dk/1h/2h/4h/6h picker

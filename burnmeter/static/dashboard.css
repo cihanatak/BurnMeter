@@ -232,7 +232,10 @@ main.gs-active { display:block; }
 .am-seen { font-size:11.5px; text-align:right; min-width:56px; color:var(--text-3); }
 
 /* ---------- combined "her ikisi" görünümü (Claude | Codex yan yana) ---------- */
-.combined-view { display:none; max-width:var(--maxw); margin:18px auto 0; padding:0 var(--page-pad); }
+.combined-view { display:none; flex-direction:column; max-width:var(--maxw); margin:18px auto 0; padding:0 var(--page-pad); }
+.cv-cols { display:flex; align-items:stretch; }
+.cv-fleet { display:flex; gap:8px; overflow-x:auto; padding:0 0 14px; }
+.cv-fleet .ovf-chip { flex-shrink:0; }
 .cv-half { flex:1 1 50%; min-width:0; padding:24px 34px; display:flex; flex-direction:column; gap:16px; }
 .cv-half:first-child { border-right:1px solid var(--border-default); }
 .cv-head { display:flex; align-items:center; gap:10px; }
@@ -262,7 +265,7 @@ main.gs-active { display:block; }
 .cv-zone2.good{ color:#2BD96B } .cv-zone2.warn{ color:#F5A623 } .cv-zone2.bad{ color:#F2555A }
 .cv-breakdown { margin-top:12px; }
 .source-toggle button[data-source="both"].active { background:linear-gradient(95deg, var(--brand-claude), var(--brand-codex)); }
-@media (max-width:760px){ .combined-view{ flex-direction:column }
+@media (max-width:760px){ .cv-cols{ flex-direction:column }
   .cv-half:first-child{ border-right:none; border-bottom:1px solid var(--border-default) } }
 
 /* ---------- App shell: sidebar + content ---------- */
