@@ -122,7 +122,7 @@ header {
 }
 .live-dot.stale { background: var(--text-4); }
 @keyframes pulse { 0%{transform:scale(.6);opacity:.7} 100%{transform:scale(1.8);opacity:0} }
-#refresh, #export-csv { background:transparent; border:1px solid var(--border-default); color: var(--text-3);
+#refresh { background:transparent; border:1px solid var(--border-default); color: var(--text-3);
   width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:17px; transition: all .15s; }
 #refresh:hover { color: var(--text-1); border-color: var(--border-strong); background: var(--bg-raised); }
 #reset-layout { background: var(--bg-raised); border:1px solid var(--border-default); color: var(--text-2);
@@ -130,8 +130,7 @@ header {
   font:600 13px/1 var(--font-sans); display:inline-flex; align-items:center; gap:6px; transition: all .15s; }
 #reset-layout:hover { color: var(--text-1); border-color: var(--accent); background: var(--bg-overlay); }
 #reset-layout:active { transform: scale(.96); }
-#alert-toggle { background:transparent; border:1px solid var(--border-default); color:var(--text-3); width:34px; height:34px; border-radius:8px; cursor:pointer; font-size:16px; transition:all .15s; }
-#alert-toggle:hover { color:var(--text-1); border-color:var(--border-strong); }
+/* #alert-toggle now lives in Settings as a .set-btn (labeled) — no icon-square sizing. */
 .zoom-ctl { display:inline-flex; align-items:center; height:34px; border:1px solid var(--border-default);
   border-radius:8px; overflow:hidden; background:transparent; }
 .zoom-ctl button { background:transparent; border:0; color:var(--text-3); height:32px; cursor:pointer;
@@ -140,7 +139,6 @@ header {
 .zoom-ctl #zoom-reset { min-width:46px; padding:0 4px; color:var(--text-2); border-left:1px solid var(--border-default); border-right:1px solid var(--border-default); }
 .zoom-ctl button:hover { color:var(--text-1); background:var(--bg-raised); }
 .zoom-ctl button:active { transform: scale(.94); }
-#alert-toggle.on { color:var(--brand-codex); border-color:var(--brand-codex); box-shadow:inset 0 0 0 1px var(--brand-codex); }
 .alert-toast { position:fixed; top:52px; left:50%; transform:translateX(-50%) translateY(-12px); z-index:9999;
   background:var(--bg-overlay); border:1px solid var(--border-strong); border-radius:10px; padding:11px 18px;
   font-size:13px; font-weight:600; box-shadow:0 10px 34px rgba(0,0,0,.55); opacity:0; pointer-events:none;
@@ -287,7 +285,8 @@ main { flex:1; padding: var(--page-pad); }
 
 /* ---------- Sidebar (section menu) ---------- */
 .sidebar { width:190px; flex-shrink:0; background:var(--bg-raised); border-right:1px solid var(--border-default);
-  display:flex; flex-direction:column; gap:4px; padding:14px 10px; position:sticky; top:0; height:100vh; z-index:40; }
+  display:flex; flex-direction:column; gap:4px; padding:14px 10px; position:sticky; top:0; height:100vh;
+  overflow-y:auto; z-index:40; }   /* scroll if the viewport is too short to fit every item */
 .side-brand { display:flex; align-items:center; gap:10px; padding:4px 8px 14px; }
 .side-brand .brand-logo { font-size:22px; line-height:1; margin:0; }
 .side-brand-txt .brand-name { font-size:15px; font-weight:600; color:var(--text-1); }
@@ -338,6 +337,17 @@ main { flex:1; padding: var(--page-pad); }
 .set-links a:hover { text-decoration:underline; }
 .app-foot { max-width:var(--maxw); margin:0 auto; padding:8px var(--page-pad) 28px;
   color:var(--text-4); font-size:11px; font-family:var(--font-mono); }
+
+/* ---------- Overview device selector (chips: All devices + per-device) ---------- */
+.ov-fleet { grid-column:span 12; display:flex; flex-wrap:wrap; gap:8px; }
+.ovf-chip { display:inline-flex; align-items:center; gap:9px; background:var(--bg-surface);
+  border:1px solid var(--border-default); border-radius:var(--radius-md); padding:9px 14px; cursor:pointer;
+  color:var(--text-2); font:500 13px/1 var(--font-sans); transition:border-color .15s, background .15s; }
+.ovf-chip:hover { border-color:var(--brand); color:var(--text-1); }
+.ovf-chip.on { border-color:var(--brand); background:var(--brand-soft); color:var(--text-1); }
+.ovf-ic { font-size:15px; line-height:1; }
+.ovf-nm { font-weight:600; color:var(--text-1); }
+.ovf-v { font-family:var(--font-mono); color:var(--text-3); font-size:12px; }
 
 /* ---------- Card ---------- */
 .card {
@@ -576,10 +586,8 @@ main { flex:1; padding: var(--page-pad); }
   border:1px solid var(--brand); border-radius:var(--radius-full); padding:8px 14px;
   letter-spacing:.02em; transition:all .15s; white-space:nowrap; }
 #pro-link:hover { background:var(--brand); color:#fff; }
-#home-link { font:600 13px/1 var(--font-sans); text-decoration:none; color:var(--text-3);
-  border:1px solid var(--border-default); border-radius:var(--radius-full); padding:8px 14px;
-  letter-spacing:.02em; transition:all .15s; white-space:nowrap; }
-#home-link:hover { color:var(--text-1); border-color:var(--text-4); background:var(--bg-raised); }
+#home-link { font:500 13px/1 var(--font-sans); text-decoration:none; color:var(--brand); }
+#home-link:hover { text-decoration:underline; }
 
 /* ---------- large-screen scaling — laptop-sized px looked tiny on 2K/4K. CSS `zoom`
    scales EVERYTHING uniformly (incl. inline-styled px that per-selector rules miss);

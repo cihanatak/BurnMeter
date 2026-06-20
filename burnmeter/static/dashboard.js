@@ -399,7 +399,32 @@ function bmRefreshHero() {
   renderKPIs(h, isCodex);
   renderRecent(h);
   renderDeviceBreakdown();
+  renderOverviewFleet();
   renderProjects(rep);   // scope-aware: fleet rollup vs this-device
+}
+
+// Overview device selector — "All devices" + one chip per machine (name + this-month $).
+// Shows the fleet right on Overview and IS the scope picker; click → scope the panel.
+function renderOverviewFleet() {
+  const el = $("overview-fleet"); if (!el) return;
+  const payload = window.__devicesCache;
+  const devs = (payload && payload.devices ? payload.devices.filter((d) => !d._undecryptable) : []);
+  if (devs.length < 2 || (window.__lastReport && window.__lastReport._combined)) { el.style.display = "none"; return; }
+  const sources = bmActiveSources();
+  const scope = window.__scope || "all";
+  const total = devs.reduce((s, d) => s + bmDeviceAgg(d, sources).month, 0);
+  let html = `<button class="ovf-chip${scope === 'all' ? ' on' : ''}" onclick="bmSetScope('all')">` +
+    `<span class="ovf-ic" aria-hidden="true">🖥</span><span class="ovf-nm">All devices</span><span class="ovf-v">${fmtMoney0(total)}</span></button>`;
+  devs.forEach((d) => {
+    const isThis = d.device_id === payload.this_device;
+    const id = bmSid(isThis ? "this" : d.device_id);
+    const ic = BM_OSICON[d.os] || "🖥";
+    html += `<button class="ovf-chip${scope === id ? ' on' : ''}" data-scope="${esc(id)}" onclick="bmToggleScope('${id}')">` +
+      `<span class="ovf-ic" aria-hidden="true">${ic}</span><span class="ovf-nm">${esc(d.label || 'device')}${isThis ? ' ·this' : ''}</span>` +
+      `<span class="ovf-v">${fmtMoney0(bmDeviceAgg(d, sources).month)}</span></button>`;
+  });
+  el.innerHTML = html;
+  el.style.display = "";
 }
 
 // Scope ids are interpolated into inline onclick/data-scope. A synced device_id
@@ -622,6 +647,8 @@ function renderCombined(cl, cx) {
   const cv = $("combined-view"), mn = document.querySelector("main");
   if (mn) mn.style.display = "none";
   if (cv) cv.style.display = "flex";
+  // combined view replaces the sections → no section is "current"; don't lie in the nav
+  document.querySelectorAll(".nav-item[data-section]").forEach((b) => b.classList.remove("active"));
   document.documentElement.style.setProperty("--brand", "var(--brand-claude)");
   $("app-name").textContent = "Burnmeter"; $("brand-logo").textContent = "◫";
   document.title = "Burnmeter — Claude + Codex";
@@ -1652,6 +1679,13 @@ function applyZoom() {
 window.bmShowSection = function (name) {
   const valid = ["overview", "devices", "projects", "trends", "alerts", "settings"];
   name = valid.includes(name) ? name : "overview";
+  // In the "both" combined view <main> is hidden, so a section click would be a silent
+  // no-op. Switch back to the last single source first → render() shows <main> again.
+  if (window.__source === "both") {
+    const single = localStorage.getItem("burnmeter_source_single") || "claude";
+    const btn = document.querySelector(`#source-toggle button[data-source="${single}"]`);
+    if (btn) btn.click();
+  }
   document.querySelectorAll("main > .section").forEach((s) =>
     s.classList.toggle("active", s.dataset.section === name));
   document.querySelectorAll(".nav-item[data-section]").forEach((b) =>
@@ -1683,6 +1717,7 @@ function start() {
       const src = b.dataset.source;
       if (src === window.__source) return;
       window.__source = src; localStorage.setItem("burnmeter_source", src);
+      if (src !== "both") localStorage.setItem("burnmeter_source_single", src);   // remembered for exiting "both"
       document.querySelectorAll("#source-toggle button").forEach(x => x.classList.toggle("active", x.dataset.source === src));
       const instant = renderFromCache(src);                 // INSTANT switch if this source is already cached
       if (!instant) $("last-updated").textContent = "Burnmeter loading…";
