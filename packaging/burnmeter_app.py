@@ -31,15 +31,17 @@ def _hide_console():
 
 
 def main() -> int:
-    # Cache worker re-invocation: `Burnmeter.exe _worker` reads its config on
-    # stdin and prints the report JSON to stdout. A --windowed (no-console) build
-    # nulls std streams, so restore the REAL pipe fds the parent gave this child.
+    # Cache worker re-invocation: `Burnmeter.exe _worker`. Config in / report out
+    # go through temp files (BURNMETER_WORKER_IN/OUT) — NOT stdin/stdout — because
+    # a --windowed (no-console) process has no usable std streams (writing stdout
+    # raised OSError [Errno 22]). Route any stray std writes to devnull so nothing
+    # can crash the worker.
     if len(sys.argv) >= 2 and sys.argv[1] == "_worker":
-        import io
-        if sys.stdin is None:
-            sys.stdin = io.TextIOWrapper(io.FileIO(0, "r"), encoding="utf-8")
+        import os as _os
         if sys.stdout is None:
-            sys.stdout = io.TextIOWrapper(io.FileIO(1, "w"), encoding="utf-8")
+            sys.stdout = open(_os.devnull, "w", encoding="utf-8")
+        if sys.stderr is None:
+            sys.stderr = open(_os.devnull, "w", encoding="utf-8")
         from burnmeter._worker import main as worker_main
         return worker_main()
 

@@ -18,15 +18,25 @@ Prints report JSON to stdout. Non-zero exit on error.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
 
 def main() -> int:
+    # Config in / report out go through FILES (env vars) when set — a frozen
+    # --windowed (no-console) process has no usable stdin/stdout, so writing the
+    # report to stdout raised OSError [Errno 22]. Fall back to stdin/stdout for
+    # plain `python -m burnmeter._worker` use.
+    src = os.environ.get("BURNMETER_WORKER_IN")
+    raw = Path(src).read_text(encoding="utf-8") if src else (sys.stdin.read() or "{}")
     try:
-        cfg = json.loads(sys.stdin.read() or "{}")
+        cfg = json.loads(raw or "{}")
     except json.JSONDecodeError as e:
-        sys.stderr.write(f"[worker] bad config: {e}\n")
+        try:
+            sys.stderr.write(f"[worker] bad config: {e}\n")
+        except Exception:
+            pass
         return 2
 
     source = cfg.get("source", "claude")
@@ -55,8 +65,13 @@ def main() -> int:
 
     # Release before serializing (records no longer needed).
     records = None
-    sys.stdout.write(json.dumps(report, default=str))
-    sys.stdout.flush()
+    out = json.dumps(report, default=str)
+    dest = os.environ.get("BURNMETER_WORKER_OUT")
+    if dest:
+        Path(dest).write_text(out, encoding="utf-8")
+    else:
+        sys.stdout.write(out)
+        sys.stdout.flush()
     return 0
 
 

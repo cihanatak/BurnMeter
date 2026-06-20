@@ -63,33 +63,45 @@ class _Cache:
         self._report_at = 0.0
 
     def _run_worker(self) -> Optional[dict]:
-        """Spawn the build worker; return its report dict or None on failure."""
+        """Spawn the build worker; return its report dict or None on failure.
+
+        Config and result go through TEMP FILES (env vars), not stdin/stdout — a
+        frozen --windowed (no-console) worker has no usable std streams and
+        writing the report to stdout crashed with OSError [Errno 22]."""
         import subprocess
+        import tempfile
         from ._proc import NO_WINDOW
         # Frozen (PyInstaller) exe has no `python -m`: re-invoke the exe with a
         # `_worker` arg, which the frozen entry routes to burnmeter._worker.main().
-        # Otherwise `sys.executable -m burnmeter._worker` would just open a 2nd
-        # app window.
         if getattr(sys, "frozen", False):
             worker_argv = [sys.executable, "_worker"]
         else:
             worker_argv = [sys.executable, "-m", "burnmeter._worker"]
+        in_fd, in_path = tempfile.mkstemp(suffix=".json", prefix="bm-wk-in-")
+        os.close(in_fd)
+        out_fd, out_path = tempfile.mkstemp(suffix=".json", prefix="bm-wk-out-")
+        os.close(out_fd)
         try:
+            Path(in_path).write_text(json.dumps(self.worker_config or {}), encoding="utf-8")
+            env = dict(os.environ, BURNMETER_WORKER_IN=in_path,
+                       BURNMETER_WORKER_OUT=out_path, PYTHONUTF8="1")
             proc = subprocess.run(
-                worker_argv,
-                input=json.dumps(self.worker_config or {}),
-                capture_output=True, text=True, timeout=1200,
-                # No console window — else under the windowless tray this child
-                # pops (flashes) a cmd window every rebuild.
-                creationflags=NO_WINDOW,
+                worker_argv, capture_output=True, text=True, timeout=1200,
+                creationflags=NO_WINDOW, env=env,   # NO_WINDOW: no cmd flash per rebuild
             )
             if proc.returncode != 0:
-                sys.stderr.write(f"[burnmeter] worker rc={proc.returncode}: {proc.stderr[:300]}\n")
+                sys.stderr.write(f"[burnmeter] worker rc={proc.returncode}: {(proc.stderr or '')[:300]}\n")
                 return None
-            return json.loads(proc.stdout)
+            return json.loads(Path(out_path).read_text(encoding="utf-8"))
         except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError) as e:
             sys.stderr.write(f"[burnmeter] worker failed: {e}\n")
             return None
+        finally:
+            for p in (in_path, out_path):
+                try:
+                    os.unlink(p)
+                except Exception:
+                    pass
 
     def _do_build(self, build_fn, key):
         """Run the heavy build (worker subprocess, RAM-bounded; in-process on
