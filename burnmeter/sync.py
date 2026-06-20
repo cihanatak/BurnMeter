@@ -30,10 +30,11 @@ from pathlib import Path
 from typing import Optional
 
 CONFIG_PATH = Path.home() / ".config" / "burnmeter" / "sync.json"
-SNAPSHOT_VERSION = 4   # v4: + per-source by_project (cross-device project rollup).
+SNAPSHOT_VERSION = 5   # v5: + per-source live (cross-device "Live active model"). v4: by_project.
                        # v2: bounded recent-turns tail (metadata only) for cross-device recent.
 SNAPSHOT_RECENT_MAX = 25   # last N turns per source carried in the snapshot (a few KB)
 SNAPSHOT_PROJECTS_MAX = 12  # top N projects (by cost) per source — cross-device rollup
+SNAPSHOT_LIVE_MAX = 4       # top N currently-active models per source — cross-device live panel
 
 
 # ---------- friendly device names (never a raw IP) ----------
@@ -226,6 +227,23 @@ def _summarize(report: dict) -> dict:
     # Per-window burn (5m/15m/1h/2h/4h/6h) so another device can show THIS device's burn
     # at whatever window the viewer picks (the single recent value can't match the picker).
     burn_by_h = {str(k): round(v or 0, 4) for k, v in (fc.get("burn_rates_by_hours") or {}).items()}
+    # Currently-active models (last ~15 min) so another device's combined "Live active model"
+    # panel can show what's running on THIS machine. Metadata only — last_seen lets the
+    # viewer recompute "now / Xm ago" against its own clock (snapshots are ~as-of-last-sync).
+    lam15 = ((report.get("live_active_models_by_window") or {}).get("15") or {}).get("models") or []
+    live = [
+        {
+            "model_id": m.get("model_id"),
+            "tokens_per_min": round(m.get("tokens_per_min") or 0),
+            "messages": m.get("messages", 0) or 0,
+            "cost_per_hour": round(m.get("cost_per_hour") or 0, 2),
+            "last_seen": m.get("last_seen"),
+            "project": m.get("project"),
+        }
+        for m in lam15
+        if m.get("model_id") and not str(m.get("model_id")).startswith("<")
+        and (m.get("seconds_since_last") is None or m.get("seconds_since_last") <= 900)
+    ][:SNAPSHOT_LIVE_MAX]
     return {
         "record_count": report.get("record_count", 0),
         "burn_rate_per_hour": (fc.get("burn_rate_per_hour_recent") or 0),
@@ -239,6 +257,7 @@ def _summarize(report: dict) -> dict:
         "rate_limit_pct": (cw.get("block_pct_used") if cw else None),
         "recent": recent,
         "by_project": by_project,
+        "live": live,
     }
 
 

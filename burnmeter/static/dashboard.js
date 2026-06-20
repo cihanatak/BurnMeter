@@ -149,7 +149,7 @@ async function refresh(force = false) {
       window.__lastReport = { _combined: true, claude: cl, codex: cx };
       const sig = repSig(window.__lastReport);
       if (sig !== window.__renderSig) { renderCombined(cl, cx); window.__renderSig = sig; }
-      else { paintCombinedActive("claude", cl); paintCombinedActive("codex", cx); }  // canlı kart HER refresh'te tazelenir
+      else { paintCombinedActive("claude", bmScopedHalf(cl, "claude")); paintCombinedActive("codex", bmScopedHalf(cx, "codex")); }  // scoped → shows remote devices' live model
       window.__lastRefreshMs = Date.now();
       return;
     }
@@ -159,7 +159,7 @@ async function refresh(force = false) {
     window.__lastReport = rep;
     const sig = repSig(rep);
     if (sig !== window.__renderSig) { render(rep); window.__renderSig = sig; }
-    else { renderActiveModel(rep); }                       // canlı kart HER refresh'te tazelenir
+    else { renderActiveModel(bmScopedRep(rep) || rep); }   // scoped → keeps cross-device live model (no merged→local flicker)
     window.__lastRefreshMs = Date.now();
   } catch (e) {
     console.error(e);
@@ -422,6 +422,7 @@ function bmScopedRep(localRep) {
     cache_efficiency: localRep.cache_efficiency,   // snapshot lacks usd_saved → this-device est.
     daily: [],
     recent_turns: bmMergedRecent(pick, sources, 12),
+    live_active_models_by_window: bmMergeLive(localRep.live_active_models_by_window, pick, sources[0], payload && payload.this_device),
   };
 }
 function bmRefreshHero() {
@@ -563,7 +564,7 @@ function render(rep) {
   renderModelTable(rep);
   renderBehavior(rep);
   renderTools(rep);
-  renderActiveModel(rep);
+  renderActiveModel(heroRep);            // live model = scoped (shows other devices' running model)
   checkAlerts(rep, isCodex);
 }
 
@@ -741,7 +742,43 @@ function bmScopedHalf(localRep, source) {
     burn_rate_zones: { typical: z0.typical * kk, busy: z0.busy * kk, heavy: z0.heavy * kk,
                        max: (z0.max || 50) * kk, insufficient_history: z0.insufficient_history },
     recent_turns: recent.slice(0, 12),
+    // Live "what's running now" merged across devices (local windows + remote snapshots).
+    live_active_models_by_window: bmMergeLive(localRep.live_active_models_by_window, pick, source, payload && payload.this_device),
   };
+}
+
+// Merge each picked device's currently-active models into a live_active_models_by_window
+// shape so the "Live active model" panel shows REMOTE devices' running models too. Local
+// device keeps its own live windows; a remote device contributes its snapshot `live` list
+// (seconds_since_last recomputed from last_seen against THIS viewer's clock, filtered per
+// window — so a model the Mac ran 3m ago shows in 5m/15m but not the 1m view).
+function bmMergeLive(localLAM, pick, source, thisId) {
+  const WSEC = { "1": 60, "5": 300, "15": 900, "60": 3600, "300": 18000, "1440": 86400 };
+  const now = Date.now();
+  const out = {};
+  Object.keys(WSEC).forEach((w) => {
+    const lim = WSEC[w];
+    const models = ((((localLAM || {})[w]) || {}).models || []).slice();
+    (pick || []).forEach((d) => {
+      if (!d || d.device_id === thisId) return;   // local device already in localLAM
+      const v = (d.sources || {})[source];
+      const live = v && Array.isArray(v.live) ? v.live : [];
+      live.forEach((m) => {
+        const ls = m.last_seen ? new Date(m.last_seen).getTime() : NaN;
+        const ssl = isFinite(ls) ? Math.max(0, (now - ls) / 1000) : 9e9;
+        if (ssl > lim) return;
+        models.push({
+          model_id: m.model_id, device: d.label, project: m.project,
+          tokens_per_min: m.tokens_per_min || 0, messages: m.messages || 0,
+          cost_per_hour: m.cost_per_hour || 0, last_seen: m.last_seen,
+          seconds_since_last: Math.round(ssl),
+        });
+      });
+    });
+    models.sort((a, b) => (a.seconds_since_last ?? 9e9) - (b.seconds_since_last ?? 9e9));
+    out[w] = { models };
+  });
+  return out;
 }
 
 // Device selector (scroll) for the combined view: All devices + per device (combined
@@ -1891,7 +1928,7 @@ function start() {
     b.addEventListener("click", () => {
       localStorage.setItem("burnmeter_active_window3", b.dataset.w);
       document.querySelectorAll("#active-window-picker button").forEach(x => x.classList.toggle("active", x.dataset.w === b.dataset.w));
-      if (window.__lastReport) renderActiveModel(window.__lastReport);
+      if (window.__lastReport) renderActiveModel(bmScopedRep(window.__lastReport) || window.__lastReport);
     });
   });
   // trend MA toggle buttons (7/25/50/100, multi-select)

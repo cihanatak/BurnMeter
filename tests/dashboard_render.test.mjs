@@ -101,10 +101,18 @@ const devicesCache = {
     { device_id: "MAC", label: "Mac", os: "Darwin", sources: { claude: mkSnap(zero), codex: mkSnap(macCodexBBH) } },
   ],
 };
+// Mac is actively running a Codex model (30s ago) + ran another 10min ago.
+const recentISO = new Date(Date.now() - 30_000).toISOString();
+const oldISO = new Date(Date.now() - 600_000).toISOString();
+devicesCache.devices[1].sources.codex.live = [
+  { model_id: "gpt-5.5", tokens_per_min: 28000, messages: 5, cost_per_hour: 24, last_seen: recentISO, project: "Decentralized_AI" },
+  { model_id: "gpt-5.5-mini", tokens_per_min: 1000, messages: 1, cost_per_hour: 2, last_seen: oldISO, project: "Decentralized_AI" },
+];
 window.__devicesCache = devicesCache;
 
 const clLocal = mkLocal(pcClaudeBBH, "claude");
 const cxLocal = mkLocal(zero, "codex");
+clLocal.live_active_models_by_window = {}; cxLocal.live_active_models_by_window = {};
 
 let passed = 0;
 const near = (a, b) => Math.abs(a - b) < 1e-6;
@@ -158,5 +166,29 @@ assert.ok(/bmScopedHalf\(\s*rep\.claude/.test(lgt) && /bmScopedHalf\(\s*rep\.cod
 assert.ok(!/paintBurnGauge\([^)]*\},\s*rep\.(claude|codex),/.test(lgt),
   "liveGaugeTick must not pass a raw report half straight to paintBurnGauge");
 passed += 2;
+
+// === TEST 5: combined Codex live panel shows the Mac's RUNNING model (cross-device) ===
+window.__scope = "all"; window.__source = "codex";
+window.__lastReport = { _combined: true, claude: clLocal, codex: cxLocal };
+const cxHalf2 = bmScopedHalf(cxLocal, "codex");
+const live5 = ((cxHalf2.live_active_models_by_window || {})["5"] || {}).models || [];
+const macRunning = live5.find((m) => m.device === "Mac" && m.model_id === "gpt-5.5");
+assert.ok(macRunning, "combined Codex 'Live active model' (5m) must include the Mac's running model");
+assert.ok(macRunning.seconds_since_last <= 300, `recomputed seconds_since_last out of window: ${macRunning?.seconds_since_last}`);
+// the 10-minute-old model must NOT appear in the 5m window, but SHOULD in 15m
+const stale5 = live5.find((m) => m.model_id === "gpt-5.5-mini");
+assert.ok(!stale5, "a 10m-old model must not show in the 5m live window");
+const live15 = ((cxHalf2.live_active_models_by_window || {})["15"] || {}).models || [];
+assert.ok(live15.find((m) => m.model_id === "gpt-5.5-mini"), "a 10m-old model SHOULD show in the 15m window");
+passed += 3;
+
+// === TEST 6: single-tab scoped rep (bmScopedRep) also carries cross-device live models ===
+window.__scope = "all"; window.__source = "codex";
+window.__lastReport = cxLocal;
+const sr = bmScopedRep(cxLocal);
+const sr5 = ((sr.live_active_models_by_window || {})["5"] || {}).models || [];
+assert.ok(sr5.find((m) => m.device === "Mac" && m.model_id === "gpt-5.5"),
+  "single-tab scoped rep must also include the Mac's running model (refresh/picker paths use it)");
+passed += 1;
 
 console.log(`dashboard_render: ${passed} assertions passed`);
