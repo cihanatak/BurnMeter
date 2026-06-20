@@ -32,3 +32,7 @@ CLAUDE.md
 COMPANY_OS_BOOTSTRAP.md
 .claude/
 .playwright-mcp/
+
+# Electron
+electron/node_modules/
+electron/dist/

@@ -1,0 +1,15 @@
+{
+  "name": "burnmeter-desktop",
+  "productName": "Burnmeter",
+  "version": "0.1.55",
+  "description": "Burnmeter desktop (Electron shell over the Python sidecar)",
+  "main": "main.js",
+  "author": "Cihan Atak",
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.2.0"
+  }
+}
