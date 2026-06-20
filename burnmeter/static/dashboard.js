@@ -633,7 +633,11 @@ function liveGaugeTick() {
   const rep = window.__lastReport; if (!rep) return;
   try {
     if (rep._combined) {
-      [["claude", rep.claude, false], ["codex", rep.codex, true]].forEach(([side, r, isCodex]) => {
+      // Repaint the SAME device-scoped halves renderCombined uses — NOT the raw local
+      // report halves. Using rep.claude/rep.codex here clobbered the cross-device
+      // aggregate every 5s with the LOCAL-only value (combined Codex→$0 on a PC not
+      // running Codex; Claude→$0 on the Mac) → the "correct then $0" flicker.
+      [["claude", bmScopedHalf(rep.claude, "claude"), false], ["codex", bmScopedHalf(rep.codex, "codex"), true]].forEach(([side, r, isCodex]) => {
         const root = document.getElementById("cv-" + side); if (!root || !r) return;
         paintBurnGauge({
           svg: root.querySelector(".cv-speedo"),
