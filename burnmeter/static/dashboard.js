@@ -401,6 +401,13 @@ function bmRefreshHero() {
   renderDeviceBreakdown();
 }
 
+// Scope ids are interpolated into inline onclick/data-scope. A synced device_id
+// comes from another machine's snapshot (attacker-controlled if a co-account/Firebase
+// is compromised), so whitelist it to a safe charset — esc() alone is NOT enough in a
+// JS-handler context (the browser entity-decodes before running the handler). Legit ids
+// are uuid hex and "all"/"this", so this is a no-op for honest data.
+const bmSid = (x) => String(x == null ? "" : x).replace(/[^A-Za-z0-9_-]/g, "");
+
 // Per-device share of the headline (this month $) — a stacked bar under the hero.
 // The breakdown IS the picker: click a segment/legend to scope the hero to it.
 const BM_DEVCOLORS = ["#5E6AD2", "#10A37F", "#D97757", "#F5A623", "#2BD96B", "#9b6dff", "#e0567f", "#4cb3ff"];
@@ -410,10 +417,14 @@ function renderDeviceBreakdown() {
   const devs = (payload && payload.devices ? payload.devices.filter((d) => !d._undecryptable) : []);
   if (devs.length < 2 || (window.__lastReport && window.__lastReport._combined)) { el.style.display = "none"; return; }
   const sources = bmActiveSources();
+  const liveMonth = window.__lastReport?.forecast?.month?.so_far;   // live local this-month
   const parts = devs.map((d, i) => {
     const isThis = d.device_id === payload.this_device;
-    return { id: isThis ? "this" : d.device_id, label: d.label || "device",
-             val: bmDeviceAgg(d, sources).month, color: BM_DEVCOLORS[i % BM_DEVCOLORS.length], me: isThis };
+    // The local device's snapshot lags between auto-pushes — use the live local month
+    // so the "this" segment matches the rest of the (live) hero, not a stale snapshot.
+    const month = (isThis && typeof liveMonth === "number") ? liveMonth : bmDeviceAgg(d, sources).month;
+    return { id: bmSid(isThis ? "this" : d.device_id), label: d.label || "device",
+             val: month, color: BM_DEVCOLORS[i % BM_DEVCOLORS.length], me: isThis };
   }).sort((a, b) => b.val - a.val);
   const total = parts.reduce((s, p) => s + p.val, 0) || 1;
   const active = window.__scope;
@@ -438,16 +449,16 @@ function populateScopePill(payload) {
   const opts = ['<option value="all">All devices</option>'];
   devs.forEach((d) => {
     const isThis = d.device_id === payload.this_device;
-    const val = isThis ? "this" : d.device_id;
+    const val = bmSid(isThis ? "this" : d.device_id);
     opts.push(`<option value="${esc(val)}">${esc(d.label || "device")}${isThis ? " (this)" : ""}</option>`);
   });
   sel.innerHTML = opts.join("");
-  const valid = ["all", "this", ...devs.map((d) => d.device_id)];
+  const valid = ["all", "this", ...devs.map((d) => bmSid(d.device_id))];
   if (!valid.includes(window.__scope)) window.__scope = "all";
   sel.value = window.__scope;
 }
 window.bmSetScope = function (v) {
-  window.__scope = v || "all";
+  window.__scope = bmSid(v) || "all";
   localStorage.setItem("burnmeter_scope", window.__scope);
   const sel = $("scope-select"); if (sel && sel.value !== window.__scope) sel.value = window.__scope;
   bmRefreshHero();
@@ -1123,6 +1134,7 @@ function proSignedInHeader(st) {
     <span class="pro-badge">✦ Pro</span>
     <span class="pro-who">${esc(st.email || '')}</span>
     ${pill}
+    <span id="pro-msg" class="dim" style="font-size:11.5px"></span>
     <span style="margin-left:auto;display:flex;gap:8px">
       <button class="ghost-btn" onclick="proPush(this)">Push now</button>
       <button class="ghost-btn" onclick="proSignout()">Sign out</button>
@@ -1155,7 +1167,7 @@ function proDevicesHtml(data) {
         <div class="dim" style="font-size:11px">couldn't decrypt · different password?</div></div>`;
     }
     const me = d.device_id === data.this_device;
-    const scopeId = me ? "this" : d.device_id;
+    const scopeId = bmSid(me ? "this" : d.device_id);   // safe for inline onclick (see bmSid)
     const on = window.__scope === scopeId;
     const st = bmOnlineState(d._updated_at);
     const osi = BM_OSICON[d.os] || "🖥";
@@ -1191,7 +1203,10 @@ window.bmRenameDevice = function (btn) {
   const inp = document.createElement("input");
   inp.className = "sync-rename-in"; inp.value = nameEl.textContent; inp.maxLength = 40;
   inp.onclick = (e) => e.stopPropagation();
-  inp.onkeydown = (e) => { e.stopPropagation(); if (e.key === "Enter") bmRenameCommit(inp); else if (e.key === "Escape") { inp.dataset.done = "1"; renderSyncDevices(); } };
+  // Escape cancels. Must blur FIRST: renderSyncDevices skips while a rename input is
+  // focused (so the 10s tick can't clobber a mid-edit), and Escape/Enter don't blur
+  // a text input on their own — without the blur the revert re-render would self-skip.
+  inp.onkeydown = (e) => { e.stopPropagation(); if (e.key === "Enter") bmRenameCommit(inp); else if (e.key === "Escape") { inp.dataset.done = "1"; inp.blur(); renderSyncDevices(); } };
   inp.onblur = () => bmRenameCommit(inp);
   nameEl.replaceWith(inp);
   inp.focus(); inp.select();
@@ -1199,13 +1214,17 @@ window.bmRenameDevice = function (btn) {
 async function bmRenameCommit(inp) {
   if (inp.dataset.done) return; inp.dataset.done = "1";   // Enter then blur → commit once
   const v = (inp.value || "").trim();
-  if (!v) { renderSyncDevices(); return; }
-  inp.disabled = true;
+  if (!v) { inp.blur(); renderSyncDevices(); return; }   // empty → cancel (blur so the re-render isn't skipped)
+  inp.disabled = true;   // also drops focus so renderSyncDevices isn't skipped
+  let failed = false;
   try {
     const r = await (await fetch("/api/pro/rename", { method: "POST", headers: _proHdr, body: JSON.stringify({ label: v }) })).json();
-    if (!r.ok && r.error) console.warn("rename:", r.error);
-  } catch (e) { console.warn("rename:", e); }
-  renderSyncDevices();   // server re-pushed with the new label → refresh list + scope
+    if (!r.ok) failed = true;
+  } catch (e) { failed = true; }
+  await renderSyncDevices();   // server re-pushed with the new label → refresh list + scope
+  if (failed) {   // label IS saved locally (server persists before push) → auto-pushes within ~5 min
+    const m = $("pro-msg"); if (m) { m.style.color = "var(--warn)"; m.textContent = "rename saved on this device — will sync when back online"; }
+  }
 }
 
 async function proAuth(mode) {
@@ -1657,6 +1676,10 @@ function start() {
   setInterval(updateLiveStamp, 1000);
   setInterval(tickLive, 1000);   // canlı aktif model: saniyelik nabız/şimdi güncellemesi
   setInterval(liveGaugeTick, 5000);   // burn-rate gauge decays live (→ $0 when idle)
+  // Fleet view (online/idle dots, "ago", breakdown) is time-based; refresh it on its
+  // own cadence so it doesn't freeze while the local machine is idle. renderSyncDevices
+  // guards against clobbering an in-progress rename; /api/sync/devices is 20s-cached.
+  setInterval(() => { if (window.__lastReport && !window.__lastReport._combined) renderSyncDevices(); }, 30000);
   // Re-check for a new version every 3h so a long-open dashboard surfaces the
   // update pill on its own (not only on first load / the tray's 6h check).
   setInterval(() => {
