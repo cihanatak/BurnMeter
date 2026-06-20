@@ -28,9 +28,10 @@ from pathlib import Path
 from typing import Optional
 
 CONFIG_PATH = Path.home() / ".config" / "burnmeter" / "sync.json"
-SNAPSHOT_VERSION = 3   # v3: + os + name_source (friendly device names, not IPs).
+SNAPSHOT_VERSION = 4   # v4: + per-source by_project (cross-device project rollup).
                        # v2: bounded recent-turns tail (metadata only) for cross-device recent.
 SNAPSHOT_RECENT_MAX = 25   # last N turns per source carried in the snapshot (a few KB)
+SNAPSHOT_PROJECTS_MAX = 12  # top N projects (by cost) per source — cross-device rollup
 
 
 # ---------- friendly device names (never a raw IP) ----------
@@ -209,6 +210,17 @@ def _summarize(report: dict) -> dict:
         }
         for t in (report.get("recent_turns") or [])[:SNAPSHOT_RECENT_MAX]
     ]
+    # Top projects by cost (already sorted desc by aggregate_by_project) — the
+    # cross-device Projects rollup sums these per project label across machines.
+    by_project = [
+        {
+            "project": p.get("project_label") or p.get("project_dir") or "?",
+            "cost": round(p.get("cost_usd", 0) or 0, 2),
+            "tokens": p.get("total_tokens", 0) or 0,
+            "msgs": p.get("messages", 0) or 0,
+        }
+        for p in (report.get("by_project") or [])[:SNAPSHOT_PROJECTS_MAX]
+    ]
     return {
         "record_count": report.get("record_count", 0),
         "burn_rate_per_hour": (fc.get("burn_rate_per_hour_recent") or 0),
@@ -220,6 +232,7 @@ def _summarize(report: dict) -> dict:
         "cache_hit_rate": round(totals.get("cache_hit_rate", 0) or 0, 4),
         "rate_limit_pct": (cw.get("block_pct_used") if cw else None),
         "recent": recent,
+        "by_project": by_project,
     }
 
 

@@ -496,6 +496,10 @@ main { max-width: var(--maxw); margin:0 auto; padding: var(--page-pad);
 .dbk-li b { color:var(--text-1); font-variant-numeric:tabular-nums; }
 .dbk-dot { width:9px; height:9px; border-radius:3px; flex-shrink:0; }
 
+/* P3 cross-device project rollup: "N devices" badge on a project that spans machines */
+.proj-dev { font:700 9.5px/1 var(--font-sans); color:var(--brand); background:var(--brand-soft);
+  border-radius:var(--radius-full); padding:2px 7px; margin-left:6px; vertical-align:1px; white-space:nowrap; }
+
 /* Pro account bar (signed-in header) — modern badge + plan pill */
 .pro-bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:15px; }
 .pro-badge { font:800 11px/1 var(--font-sans); letter-spacing:.07em; text-transform:uppercase; color:#1a1205;

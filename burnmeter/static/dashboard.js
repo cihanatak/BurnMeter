@@ -399,6 +399,7 @@ function bmRefreshHero() {
   renderKPIs(h, isCodex);
   renderRecent(h);
   renderDeviceBreakdown();
+  renderProjects(rep);   // scope-aware: fleet rollup vs this-device
 }
 
 // Scope ids are interpolated into inline onclick/data-scope. A synced device_id
@@ -1348,12 +1349,57 @@ function renderDaily(rep) {
 }
 
 // ---------- projects ----------
+// Cross-device project rollup. scope "this"/no-devices → null (use local rep.by_project).
+// scope "all" → sum each project's cost/tokens across every device's snapshot for the
+// active source(s), counting how many machines run it. scope <device> → that device.
+function bmScopedProjects(localRep) {
+  const scope = window.__scope || "all";
+  if (scope === "this" || (localRep && localRep._combined)) return null;
+  const payload = window.__devicesCache;
+  const devices = (payload && payload.devices ? payload.devices.filter((d) => !d._undecryptable) : []);
+  if (!devices.length) return null;
+  const pick = scope === "all" ? devices : devices.filter((d) => d.device_id === scope);
+  if (!pick.length) return null;
+  const sources = bmActiveSources();
+  const agg = new Map();   // label → {label, cost, tokens, msgs, devSet}
+  pick.forEach((d) => sources.forEach((s) => {
+    const sp = (d.sources && d.sources[s] && d.sources[s].by_project) || [];
+    sp.forEach((p) => {
+      const key = p.project || "?";
+      const e = agg.get(key) || { label: key, cost: 0, tokens: 0, msgs: 0, devSet: new Set() };
+      e.cost += p.cost || 0; e.tokens += p.tokens || 0; e.msgs += p.msgs || 0; e.devSet.add(d.device_id);
+      agg.set(key, e);
+    });
+  }));
+  return [...agg.values()]
+    .map((e) => ({ label: e.label, cost: e.cost, tokens: e.tokens, msgs: e.msgs, devices: e.devSet.size }))
+    .sort((a, b) => b.cost - a.cost).slice(0, 12);
+}
 function renderProjects(rep) {
+  const tb = document.querySelector("#projects-tbl tbody"); if (!tb) return;
+  const titleEl = $("projects-title");
+  const scoped = bmScopedProjects(rep);
+  if (scoped) {   // fleet / single-device rollup from device snapshots
+    if (titleEl) {
+      const n = (window.__devicesCache && window.__devicesCache.devices || []).filter((d) => !d._undecryptable).length;
+      titleEl.innerHTML = window.__scope === "all"
+        ? `Projects · across ${n} devices <span class="sub">where your fleet spends</span>`
+        : `Projects · this device <span class="sub">where your spend goes</span>`;
+    }
+    if (!scoped.length) { tb.innerHTML = `<tr><td colspan="3" class="empty">no project data yet — devices sync within ~5 min</td></tr>`; return; }
+    const max = Math.max(...scoped.map((p) => p.cost), 1);
+    tb.innerHTML = scoped.map((p) =>
+      `<tr><td><div>${esc(p.label)}${p.devices > 1 ? ` <span class="proj-dev">${p.devices} devices</span>` : ""}</div><div class="cell-bar"><i style="width:${p.cost / max * 100}%"></i></div></td>
+        <td class="num">${fmtCompact(p.tokens || 0)}</td>
+        <td class="num">${fmtMoney0(p.cost)}</td></tr>`).join("");
+    return;
+  }
+  // this-device (local report) — original behavior
+  if (titleEl) titleEl.innerHTML = `Projects · lifetime <span class="sub">where your spend goes</span>`;
   const ps = (rep.by_project || []).slice(0, 12);
-  const max = Math.max(...ps.map(p => p.cost_usd || 0), 1);
-  const tb = document.querySelector("#projects-tbl tbody");
+  const max = Math.max(...ps.map((p) => p.cost_usd || 0), 1);
   if (!ps.length) { tb.innerHTML = `<tr><td colspan="3" class="empty">No data</td></tr>`; return; }
-  tb.innerHTML = ps.map(p =>
+  tb.innerHTML = ps.map((p) =>
     `<tr><td><div>${esc(p.project_label)}</div><div class="cell-bar"><i style="width:${(p.cost_usd || 0) / max * 100}%"></i></div></td>
       <td class="num">${fmtCompact(p.total_tokens || 0)}</td>
       <td class="num">${fmtMoney0(p.cost_usd)}</td></tr>`).join("");
