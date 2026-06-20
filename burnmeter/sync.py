@@ -23,6 +23,8 @@ import unicodedata
 import urllib.error
 import urllib.request
 import uuid
+
+from . import __version__
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -266,6 +268,7 @@ def build_device_snapshot(cfg: dict, projects_dir: Path, codex_dir: Optional[Pat
         "label": resolve_device_label(cfg),
         "name_source": cfg.get("name_source", "auto"),
         "os": platform.system(),
+        "app_version": __version__,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "sources": sources,
     }
@@ -297,6 +300,7 @@ def _assemble_snapshot(cfg: dict, sources: dict) -> dict:
         "label": resolve_device_label(cfg),
         "name_source": cfg.get("name_source", "auto"),
         "os": platform.system(),
+        "app_version": __version__,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "sources": sources,
     }
