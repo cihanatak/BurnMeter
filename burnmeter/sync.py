@@ -223,9 +223,13 @@ def _summarize(report: dict) -> dict:
         }
         for p in (report.get("by_project") or [])[:SNAPSHOT_PROJECTS_MAX]
     ]
+    # Per-window burn (5m/15m/1h/2h/4h/6h) so another device can show THIS device's burn
+    # at whatever window the viewer picks (the single recent value can't match the picker).
+    burn_by_h = {str(k): round(v or 0, 4) for k, v in (fc.get("burn_rates_by_hours") or {}).items()}
     return {
         "record_count": report.get("record_count", 0),
         "burn_rate_per_hour": (fc.get("burn_rate_per_hour_recent") or 0),
+        "burn_rates_by_hours": burn_by_h,
         "today_cost": round((fc.get("today", {}) or {}).get("so_far", 0) or 0, 2),
         "month_so_far": round((fc.get("month", {}) or {}).get("so_far", 0) or 0, 2),
         "month_projected": round((fc.get("month", {}) or {}).get("projected_eom", 0) or 0, 2),

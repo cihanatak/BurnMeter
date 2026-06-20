@@ -330,7 +330,11 @@ function bmDeviceAgg(dev, sources) {
   const o = { burn: 0, today: 0, month: 0, lifetime: 0, tokens: 0, records: 0, chSum: 0, chW: 0 };
   (sources || []).forEach((s) => {
     const v = (dev.sources || {})[s]; if (!v) return;
-    o.burn += v.burn_rate_per_hour || 0; o.today += v.today_cost || 0; o.month += v.month_so_far || 0;
+    // Burn at the picker's window so a remote device matches what its own gauge shows
+    // (snapshot carries burn_rates_by_hours; older snapshots only have burn_rate_per_hour).
+    const hrs = localStorage.getItem("burnmeter_burn_hours_" + s) || "2";
+    const wb = (v.burn_rates_by_hours && v.burn_rates_by_hours[hrs] != null) ? v.burn_rates_by_hours[hrs] : (v.burn_rate_per_hour || 0);
+    o.burn += wb || 0; o.today += v.today_cost || 0; o.month += v.month_so_far || 0;
     o.lifetime += v.lifetime_cost || 0; o.tokens += v.lifetime_tokens || 0; o.records += v.record_count || 0;
     o.chSum += (v.cache_hit_rate || 0) * (v.record_count || 0); o.chW += v.record_count || 0;
   });
@@ -697,7 +701,9 @@ function bmScopedHalf(localRep, source) {
       (localRep.recent_turns || []).forEach((t) => recent.push({ ...t, device: d.label }));
     } else {
       const v = (d.sources || {})[source]; if (!v) return;
-      burn += v.burn_rate_per_hour || 0; today += v.today_cost || 0; month += v.month_so_far || 0;
+      const hrs2 = localStorage.getItem("burnmeter_burn_hours_" + source) || "2";
+      const wb = (v.burn_rates_by_hours && v.burn_rates_by_hours[hrs2] != null) ? v.burn_rates_by_hours[hrs2] : (v.burn_rate_per_hour || 0);
+      burn += wb || 0; today += v.today_cost || 0; month += v.month_so_far || 0;
       lifetime += v.lifetime_cost || 0; tokens += v.lifetime_tokens || 0; records += v.record_count || 0;
       chSum += (v.cache_hit_rate || 0) * (v.record_count || 0); chW += v.record_count || 0;
       if ((v.burn_rate_per_hour || 0) > 0.01) k++;

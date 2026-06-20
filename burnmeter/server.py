@@ -229,13 +229,14 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
     # Pro sync: 20s cache for pulled remote devices (avoid hammering the relay).
     sync_cache = {"data": None, "ts": 0.0}
 
-    # Pro sync: auto-push this device's snapshot every 5 min, REUSING the cached
-    # reports (no re-parse). No-op if sync isn't configured / cryptography absent.
+    # Pro sync: auto-push this device's snapshot every 60s, REUSING the cached
+    # reports (no re-parse). 60s (was 300s) so another device sees this one's live-ish
+    # burn within ~1 min instead of up to ~5 min. No-op if sync isn't configured.
     def _sync_autopush():
         from . import sync as _sync
         from . import firebase_sync as _fb
         while True:
-            time.sleep(300)
+            time.sleep(60)
             try:
                 cfg = _fb.load_config()
                 if not _fb.is_configured(cfg):
