@@ -35,3 +35,22 @@ def test_release_only_removes_our_own_lock(tmp_path, monkeypatch):
     window._WINDOW_LOCK.write_text("12345")
     window._release_window_singleton()
     assert window._WINDOW_LOCK.exists()
+
+
+def test_steal_takes_ownership_from_a_live_non_window_pid(tmp_path, monkeypatch):
+    # A live PID owns the lock but it's NOT a Burnmeter window (crashed window +
+    # reused PID). The caller steals so the user is never left with zero windows.
+    _fresh(tmp_path, monkeypatch)
+    window._WINDOW_LOCK.write_text("99999999")
+    monkeypatch.setattr(window, "_win_pid_alive", lambda pid: True)
+    assert window._claim_window_singleton() is False        # blocked (owner "alive")
+    window._steal_window_singleton()                        # …but no real window → steal
+    import os
+    assert window._WINDOW_LOCK.read_text().strip() == str(os.getpid())
+
+
+def test_claim_reclaims_after_a_clean_release(tmp_path, monkeypatch):
+    _fresh(tmp_path, monkeypatch)
+    assert window._claim_window_singleton() is True
+    window._release_window_singleton()
+    assert window._claim_window_singleton() is True         # next launch can claim again

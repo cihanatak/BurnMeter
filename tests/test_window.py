@@ -34,9 +34,20 @@ _KW = dict(host="127.0.0.1", port=9999, projects_dir=Path("."), ttl_seconds=15,
            extra_roots=[], codex_dir=None, codex_extra_roots=[], codex_since_days=90)
 
 
+def _bypass_singleton(monkeypatch):
+    """Isolate the server-attach paths below from the single-instance guard (which
+    would otherwise detect a real Burnmeter window/lock on the test machine). The
+    guard itself is covered by test_window_singleton.py."""
+    monkeypatch.setattr(W, "_focus_existing_window", lambda: False)
+    monkeypatch.setattr(W, "_claim_window_singleton", lambda: True)
+    monkeypatch.setattr(W, "_release_window_singleton", lambda: None)
+    monkeypatch.setattr(W, "_steal_window_singleton", lambda: None)
+
+
 def test_window_attaches_to_running_server(monkeypatch):
     fake = _fake_webview()
     monkeypatch.setitem(sys.modules, "webview", fake)
+    _bypass_singleton(monkeypatch)
     monkeypatch.setattr(W, "_running_url", lambda: "http://127.0.0.1:7654")
 
     def _boom(**k):
@@ -53,6 +64,7 @@ def test_window_attaches_to_running_server(monkeypatch):
 def test_window_starts_own_when_none(monkeypatch):
     fake = _fake_webview()
     monkeypatch.setitem(sys.modules, "webview", fake)
+    _bypass_singleton(monkeypatch)
     monkeypatch.setattr(W, "_running_url", lambda: None)
 
     events = []
@@ -86,6 +98,7 @@ def test_window_ensure_background_spawns_and_attaches(monkeypatch):
     the window to it. No in-process server is hosted."""
     fake = _fake_webview()
     monkeypatch.setitem(sys.modules, "webview", fake)
+    _bypass_singleton(monkeypatch)
     monkeypatch.setattr(W, "_running_url", lambda: None)        # nothing live yet
     spawned = {"n": 0}
     monkeypatch.setattr(W, "_spawn_background_server",
@@ -108,6 +121,7 @@ def test_window_ensure_background_falls_back_in_process(monkeypatch):
     in-process so the window still works."""
     fake = _fake_webview()
     monkeypatch.setitem(sys.modules, "webview", fake)
+    _bypass_singleton(monkeypatch)
     monkeypatch.setattr(W, "_running_url", lambda: None)
     monkeypatch.setattr(W, "_spawn_background_server", lambda kw: None)
     monkeypatch.setattr(W, "_await_running_url", lambda *a, **k: None)  # never came up

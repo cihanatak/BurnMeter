@@ -33,10 +33,14 @@ def run_installer_update(url: str = INSTALLER_URL) -> bool:
     except Exception:
         return False
     try:
-        # /SILENT = small progress window; /RESTARTAPPLICATIONS re-launches the
-        # app the installer closed (paired with CloseApplications in the .iss).
+        # /SILENT = small progress window. /NORESTARTAPPLICATIONS: do NOT let the
+        # Restart Manager re-launch every process it closed — that restarted the
+        # window AND the tray (which re-opens a window) → stacked windows. The .iss
+        # [Run] entry relaunches EXACTLY ONE instance instead, and the app's single-
+        # instance guard dedupes any straggler. (A CLI restart flag overrides the
+        # .iss, so this must be explicit, not just RestartApplications=no in the .iss.)
         subprocess.Popen(
-            [dst, "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/RESTARTAPPLICATIONS"],
+            [dst, "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NORESTARTAPPLICATIONS"],
             close_fds=True)
         return True
     except Exception:

@@ -202,37 +202,58 @@ def _focus_existing_window() -> bool:
 
 
 def _claim_window_singleton() -> bool:
-    """True iff THIS process may open the window. False → a live window already owns
-    it (caller should focus that one and exit). Atomic create with a stale-lock steal
-    (a crashed window leaves a lock whose pid is dead)."""
+    """True iff THIS process won the lock and may open the window. False → a lock
+    owned by a still-alive PID exists (the caller then decides: focus the real window
+    if there is one, else steal). Race-safe: O_EXCL serializes the create, and a
+    stale lock (dead owner) is removed then RE-CLAIMED via the loop — a process that
+    loses the unlink race re-loops to the create and never falsely returns True."""
     try:
         _WINDOW_LOCK.parent.mkdir(parents=True, exist_ok=True)
     except Exception:
         return True                                   # can't lock → never block the window
-    for _ in range(2):
+    for _ in range(6):
         try:
             fd = os.open(str(_WINDOW_LOCK), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             try:
                 os.write(fd, str(os.getpid()).encode("ascii"))
             finally:
                 os.close(fd)
-            return True
+            return True                               # we created it → we own it
         except FileExistsError:
             try:
                 opid = int((_WINDOW_LOCK.read_text() or "0").strip() or "0")
+            except FileNotFoundError:
+                continue                              # vanished mid-read → retry the create
             except Exception:
                 opid = 0
             if opid == os.getpid():
                 return True
             if opid and _win_pid_alive(opid):
-                return False                          # a live window owns it
+                return False                          # a live owner holds it
             try:
-                _WINDOW_LOCK.unlink()                 # stale (dead owner) → steal + retry
+                _WINDOW_LOCK.unlink()                 # stale (dead owner) → remove…
+            except FileNotFoundError:
+                pass                                  # a peer already removed it
             except Exception:
                 return True
+            continue                                  # …and RE-CLAIM via O_EXCL (never bare True)
         except Exception:
             return True
     return True
+
+
+def _steal_window_singleton() -> None:
+    """Force this process to own the lock — used only when the lock is held by a live
+    PID that owns NO Burnmeter window (a crashed window + reused PID), so we must open
+    rather than strand the user. Best-effort; the window opening is what matters."""
+    try:
+        _WINDOW_LOCK.unlink()
+    except Exception:
+        pass
+    try:
+        _WINDOW_LOCK.write_text(str(os.getpid()))
+    except Exception:
+        pass
 
 
 def _release_window_singleton() -> None:
@@ -299,65 +320,82 @@ def run_window(open_browser: bool = False, ensure_background: bool = False, **kw
         serve(open_browser=True, **kwargs)
         return 0
 
-    # Single-instance: a real app has ONE window. If one is already open, focus it
-    # and exit — so a double-click, a tray "Open", or the update restart can never
-    # stack a second window. Race-safe (atomic lock) for the update's twin launches.
-    if not _claim_window_singleton():
-        _focus_existing_window()
+    # Single-instance: a real app has ONE window. _focus_existing_window() is the
+    # AUTHORITATIVE "is a window already open?" check (Windows); the lock is only a
+    # tiebreaker for the update restart's near-simultaneous twin launches. The cardinal
+    # rule: NEVER exit with zero windows — if we can't claim the lock AND can't surface
+    # an existing window, the lock is stale/misleading, so steal it and open ours.
+    # (Otherwise a crashed window's leftover lock — esp. with a reused PID — would
+    # silently lock the user out, which is worse than the duplicate it prevents.)
+    if _focus_existing_window():
         return 0
-
-    from .server import setup_server
+    owns_lock = _claim_window_singleton()
+    if not owns_lock:
+        if sys.platform == "win32":
+            # Lost the race: a twin launch is mid-startup. Wait briefly for its window
+            # to appear, then focus it instead of opening a second one.
+            for _ in range(12):
+                time.sleep(0.25)
+                if _focus_existing_window():
+                    return 0
+        # The owner never showed a window (it died/failed before rendering, or focus
+        # isn't available on this OS) → don't strand the user: take over and open.
+        _steal_window_singleton()
+        owns_lock = True
 
     handle = None                       # set only when WE host the server in-process
-    existing = _running_url()
-    if existing:
-        url = existing
-        sys.stderr.write(f"[burnmeter] attaching window to running server {url}\n")
-    elif ensure_background:
-        sys.stderr.write("[burnmeter] starting background server…\n")
-        _spawn_background_server(kwargs)
-        url = _await_running_url(20.0)
-        if not url:
-            # Detached server didn't come up → host in-process; this server
-            # stops when the window closes (no persistence, but it works).
-            sys.stderr.write(
-                "[burnmeter] background server didn't start — hosting in-window instead\n")
-            handle = setup_server(**kwargs)
+    try:
+        from .server import setup_server
+        existing = _running_url()
+        if existing:
+            url = existing
+            sys.stderr.write(f"[burnmeter] attaching window to running server {url}\n")
+        elif ensure_background:
+            sys.stderr.write("[burnmeter] starting background server…\n")
+            _spawn_background_server(kwargs)
+            url = _await_running_url(20.0)
+            if not url:
+                # Detached server didn't come up → host in-process; this server
+                # stops when the window closes (no persistence, but it works).
+                sys.stderr.write(
+                    "[burnmeter] background server didn't start — hosting in-window instead\n")
+                handle = setup_server(**kwargs)
+                threading.Thread(target=handle.server.serve_forever, daemon=True).start()
+                handle.start_warm()
+                url = handle.url
+        else:
+            try:
+                handle = setup_server(**kwargs)
+            except RuntimeError as e:
+                sys.stderr.write(f"[burnmeter] ERROR: {e}\n")
+                return 1
             threading.Thread(target=handle.server.serve_forever, daemon=True).start()
             handle.start_warm()
             url = handle.url
-    else:
-        try:
-            handle = setup_server(**kwargs)
-        except RuntimeError as e:
-            sys.stderr.write(f"[burnmeter] ERROR: {e}\n")
-            return 1
-        threading.Thread(target=handle.server.serve_forever, daemon=True).start()
-        handle.start_warm()
-        url = handle.url
 
-    # maximized=True is load-bearing: under pythonw.exe (the desktop-icon
-    # interpreter) pywebview's auto-centering miscomputes screen metrics and
-    # parks the window OFF-SCREEN at a huge negative coord, collapsed to a
-    # title-bar sliver. A maximized window's geometry is computed by Windows to
-    # fill the monitor, bypassing pywebview's broken positioning — so it can
-    # never land off-screen. (python.exe positions fine; pythonw does not.)
-    webview.create_window(
-        f"Burnmeter v{__version__}", url,
-        width=1280, height=860, min_size=(900, 600), maximized=True)
-    # Persist the WebView profile (localStorage: zoom level + client prefs) across
-    # restarts — private_mode=True (the default) would forget them every launch.
-    storage = Path.home() / ".burnmeter" / "webview"
-    try:
-        storage.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-    try:
-        webview.start(private_mode=False, storage_path=str(storage))
-    except TypeError:
-        webview.start()           # older pywebview without these kwargs
+        # maximized=True is load-bearing: under pythonw.exe (the desktop-icon
+        # interpreter) pywebview's auto-centering miscomputes screen metrics and
+        # parks the window OFF-SCREEN at a huge negative coord, collapsed to a
+        # title-bar sliver. A maximized window's geometry is computed by Windows to
+        # fill the monitor, bypassing pywebview's broken positioning — so it can
+        # never land off-screen. (python.exe positions fine; pythonw does not.)
+        webview.create_window(
+            f"Burnmeter v{__version__}", url,
+            width=1280, height=860, min_size=(900, 600), maximized=True)
+        # Persist the WebView profile (localStorage: zoom level + client prefs) across
+        # restarts — private_mode=True (the default) would forget them every launch.
+        storage = Path.home() / ".burnmeter" / "webview"
+        try:
+            storage.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        try:
+            webview.start(private_mode=False, storage_path=str(storage))
+        except TypeError:
+            webview.start()           # older pywebview without these kwargs
+        return 0
     finally:
-        _release_window_singleton()   # free the single-instance lock for the next launch
+        if owns_lock:
+            _release_window_singleton()   # free the single-instance lock for the next launch
         if handle is not None:    # only tear down a server WE own; never the tray
             handle.close()
-    return 0

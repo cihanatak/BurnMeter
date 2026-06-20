@@ -55,9 +55,11 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-; No skipifsilent: a SILENT in-place update must relaunch the app (exactly once).
-; postinstall keeps the "Launch Burnmeter" checkbox on a normal interactive install.
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall
+; Relaunch EXACTLY ONE instance after the upgrade. Plain "nowait" (no postinstall,
+; no skipifsilent) so it fires in a SILENT in-place update too — postinstall entries
+; are gated to the Finished page and may be skipped in silent mode. The app's single-
+; instance guard ensures this never stacks with anything still closing.
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait
 
 [UninstallDelete]
 ; the app's runtime data/caches live under the user profile (~/.burnmeter); leave
