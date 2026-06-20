@@ -489,6 +489,30 @@ def run_window(open_browser: bool = False, ensure_background: bool = False, **kw
             win.events.moved += (lambda x, y: _remember(x=x, y=y))
         except Exception:
             pass
+        # Diagnostic: log window LIFECYCLE events (not resized/moved — too noisy) to a small
+        # capped file. Lets an unexplained "window dropped to the taskbar on its own" report
+        # be traced to its trigger: a lone `minimized` with no preceding `closed`/`shown`
+        # means WebView2/OS minimized it; a `closed`→`shown` pair means our code recreated it.
+        def _wlog(ev):
+            try:
+                p = Path.home() / ".burnmeter" / "window_events.log"
+                try:
+                    if p.exists() and p.stat().st_size > 65536:
+                        p.write_text("", encoding="utf-8")   # keep it tiny
+                except Exception:
+                    pass
+                with open(p, "a", encoding="utf-8") as f:
+                    f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + ev + "\n")
+            except Exception:
+                pass
+        for _name in ("shown", "minimized", "restored", "maximized", "closing", "closed", "loaded"):
+            try:
+                evt = getattr(win.events, _name, None)
+                if evt is not None:
+                    evt += (lambda *a, _n=_name: _wlog(_n))
+            except Exception:
+                pass
+        _wlog("window-created v" + __version__)
         # Persist the WebView profile (localStorage: zoom level + client prefs) across
         # restarts — private_mode=True (the default) would forget them every launch.
         storage = Path.home() / ".burnmeter" / "webview"
