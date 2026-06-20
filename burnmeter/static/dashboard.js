@@ -337,14 +337,43 @@ function bmDeviceAgg(dev, sources) {
   o.cache = o.chW ? o.chSum / o.chW : 0;
   return o;
 }
+// Per-device aggregate, but the LOCAL device uses the LIVE report (its snapshot lags
+// up to ~5 min, so "all devices" must not show a stale burn the per-device view shows
+// as live). Remote devices use their snapshot. Burn is window-aware for the local
+// device (matches the burn-window picker), so the All gauge agrees with the This gauge.
+function bmDeviceAggFresh(dev, sources) {
+  const payload = window.__devicesCache, lr = window.__lastReport;
+  if (payload && dev.device_id === payload.this_device && lr && !lr._combined) {
+    const fc = lr.forecast || {}, tot = lr.totals || {};
+    const hrs = localStorage.getItem("burnmeter_burn_hours_" + (window.__source || "claude")) || "2";
+    const burn = (fc.burn_rates_by_hours && fc.burn_rates_by_hours[hrs] != null)
+      ? fc.burn_rates_by_hours[hrs] : (fc.burn_rate_per_hour_recent || 0);
+    return { burn: burn || 0, today: (fc.today && fc.today.so_far) || 0, month: (fc.month && fc.month.so_far) || 0,
+             lifetime: tot.cost_usd || 0, tokens: tot.total_tokens || 0, records: lr.record_count || 0,
+             cache: tot.cache_hit_rate || 0 };
+  }
+  return bmDeviceAgg(dev, sources);
+}
 function bmMergedRecent(devs, sources, n) {
   const out = [];
-  devs.forEach((d) => sources.forEach((s) => {
-    const v = (d.sources || {})[s];
-    if (v && v.recent) v.recent.forEach((t) => out.push({
-      timestamp: t.ts, project_label: t.project, model: t.model, total_tokens: t.tokens, device: d.label,
-    }));
-  }));
+  const payload = window.__devicesCache, lr = window.__lastReport;
+  devs.forEach((d) => {
+    // Local device → live recent_turns (full fields incl. cost/cache, always fresh).
+    if (payload && d.device_id === payload.this_device && lr && !lr._combined && Array.isArray(lr.recent_turns)) {
+      lr.recent_turns.forEach((t) => out.push({ ...t, device: d.label }));
+      return;
+    }
+    // Remote device → snapshot recent. Map the compact fields to what renderRecent reads
+    // (effective_tokens / cost_usd) — the old code only set total_tokens → showed 0 / $0.00.
+    sources.forEach((s) => {
+      const v = (d.sources || {})[s];
+      if (v && v.recent) v.recent.forEach((t) => out.push({
+        timestamp: t.ts, project_label: t.project, model: t.model,
+        effective_tokens: t.tokens, total_tokens: t.tokens, cost_usd: t.cost,
+        cache_hit_rate: null, device: d.label,
+      }));
+    });
+  });
   out.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
   return out.slice(0, n || 12);
 }
@@ -360,7 +389,7 @@ function bmScopedRep(localRep) {
     agg = { burn: 0, today: 0, month: 0, lifetime: 0, tokens: 0, records: 0, chSum: 0, chW: 0 };
     let active = 0;
     devices.forEach((d) => {
-      const a = bmDeviceAgg(d, sources);
+      const a = bmDeviceAggFresh(d, sources);
       agg.burn += a.burn; agg.today += a.today; agg.month += a.month; agg.lifetime += a.lifetime;
       agg.tokens += a.tokens; agg.records += a.records; agg.chSum += a.cache * a.records; agg.chW += a.records;
       if (a.burn > 0.01) active++;
@@ -412,7 +441,7 @@ function renderOverviewFleet() {
   if (devs.length < 2 || (window.__lastReport && window.__lastReport._combined)) { el.style.display = "none"; return; }
   const sources = bmActiveSources();
   const scope = window.__scope || "all";
-  const total = devs.reduce((s, d) => s + bmDeviceAgg(d, sources).month, 0);
+  const total = devs.reduce((s, d) => s + bmDeviceAggFresh(d, sources).month, 0);
   let html = `<button class="ovf-chip${scope === 'all' ? ' on' : ''}" onclick="bmSetScope('all')">` +
     `<span class="ovf-ic" aria-hidden="true">🖥</span><span class="ovf-nm">All devices</span><span class="ovf-v">${fmtMoney0(total)}</span></button>`;
   devs.forEach((d) => {
@@ -421,7 +450,7 @@ function renderOverviewFleet() {
     const ic = BM_OSICON[d.os] || "🖥";
     html += `<button class="ovf-chip${scope === id ? ' on' : ''}" data-scope="${esc(id)}" onclick="bmToggleScope('${id}')">` +
       `<span class="ovf-ic" aria-hidden="true">${ic}</span><span class="ovf-nm">${esc(d.label || 'device')}${isThis ? ' ·this' : ''}</span>` +
-      `<span class="ovf-v">${fmtMoney0(bmDeviceAgg(d, sources).month)}</span></button>`;
+      `<span class="ovf-v">${fmtMoney0(bmDeviceAggFresh(d, sources).month)}</span></button>`;
   });
   el.innerHTML = html;
   el.style.display = "";
@@ -443,14 +472,10 @@ function renderDeviceBreakdown() {
   const devs = (payload && payload.devices ? payload.devices.filter((d) => !d._undecryptable) : []);
   if (devs.length < 2 || (window.__lastReport && window.__lastReport._combined)) { el.style.display = "none"; return; }
   const sources = bmActiveSources();
-  const liveMonth = window.__lastReport?.forecast?.month?.so_far;   // live local this-month
   const parts = devs.map((d, i) => {
     const isThis = d.device_id === payload.this_device;
-    // The local device's snapshot lags between auto-pushes — use the live local month
-    // so the "this" segment matches the rest of the (live) hero, not a stale snapshot.
-    const month = (isThis && typeof liveMonth === "number") ? liveMonth : bmDeviceAgg(d, sources).month;
     return { id: bmSid(isThis ? "this" : d.device_id), label: d.label || "device",
-             val: month, color: BM_DEVCOLORS[i % BM_DEVCOLORS.length], me: isThis };
+             val: bmDeviceAggFresh(d, sources).month, color: BM_DEVCOLORS[i % BM_DEVCOLORS.length], me: isThis };
   }).sort((a, b) => b.val - a.val);
   const total = parts.reduce((s, p) => s + p.val, 0) || 1;
   const active = window.__scope;
