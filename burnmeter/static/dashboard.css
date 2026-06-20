@@ -102,6 +102,14 @@ header {
 .source-toggle button:hover { color: var(--text-1); }
 .source-toggle button.active { color:#fff; box-shadow: 0 2px 7px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.14); }
 .source-toggle button.active .dot { background:#fff; opacity:1; box-shadow:0 0 6px rgba(255,255,255,.5); }
+/* multi-device scope pill (which machines the fuel panel shows) */
+.scope-wrap { display:inline-flex; align-items:center; gap:7px; margin-left:12px; padding:3px 4px 3px 11px;
+  background: var(--bg-inset); border:1px solid var(--border-default); border-radius:11px; }
+.scope-wrap .scope-ico { font-size:13px; opacity:.8; line-height:1; }
+.scope-select { background:transparent; border:none; color: var(--text-2); cursor:pointer;
+  font:600 13.5px/1 var(--font-sans); padding:7px 8px; border-radius:8px; outline:none; max-width:200px; }
+.scope-select:hover { color: var(--text-1); }
+.scope-select option { background: var(--bg-raised); color: var(--text-1); }
 .source-toggle button[data-source="claude"].active { background: var(--brand-claude); }
 .source-toggle button[data-source="codex"].active  { background: var(--brand-codex); }
 

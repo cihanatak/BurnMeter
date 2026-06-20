@@ -317,9 +317,115 @@ async function waitForRestartAndReload(latest) {
   const el = $("update-link"); if (el) el.textContent = `✓ Updated to v${latest} — reload`;
 }
 
+// ===== multi-device scope (Pro) — the hero "fuel panel" reflects the whole fleet =====
+// The source toggle answers "which tool?"; the scope pill answers "which machine?".
+// Default = all devices combined (so adding a PC visibly changes the headline).
+window.__scope = localStorage.getItem("burnmeter_scope") || "all";
+window.__devicesCache = null;   // last /api/sync/devices payload (set by renderSyncDevices)
+
+function bmActiveSources() {
+  return window.__source === "both" ? ["claude", "codex"] : [window.__source];
+}
+function bmDeviceAgg(dev, sources) {
+  const o = { burn: 0, today: 0, month: 0, lifetime: 0, tokens: 0, records: 0, chSum: 0, chW: 0 };
+  (sources || []).forEach((s) => {
+    const v = (dev.sources || {})[s]; if (!v) return;
+    o.burn += v.burn_rate_per_hour || 0; o.today += v.today_cost || 0; o.month += v.month_so_far || 0;
+    o.lifetime += v.lifetime_cost || 0; o.tokens += v.lifetime_tokens || 0; o.records += v.record_count || 0;
+    o.chSum += (v.cache_hit_rate || 0) * (v.record_count || 0); o.chW += v.record_count || 0;
+  });
+  o.cache = o.chW ? o.chSum / o.chW : 0;
+  return o;
+}
+function bmMergedRecent(devs, sources, n) {
+  const out = [];
+  devs.forEach((d) => sources.forEach((s) => {
+    const v = (d.sources || {})[s];
+    if (v && v.recent) v.recent.forEach((t) => out.push({
+      timestamp: t.ts, project_label: t.project, model: t.model, total_tokens: t.tokens, device: d.label,
+    }));
+  }));
+  out.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+  return out.slice(0, n || 12);
+}
+// Build a hero-shaped view for scope = "all" or a remote device_id; null → use local.
+function bmScopedRep(localRep) {
+  const scope = window.__scope || "all";
+  const payload = window.__devicesCache;
+  const devices = (payload && payload.devices ? payload.devices.filter((d) => !d._undecryptable) : []);
+  if (scope === "this" || !devices.length) return null;
+  const sources = bmActiveSources();
+  let agg, label, k = 1;
+  if (scope === "all") {
+    agg = { burn: 0, today: 0, month: 0, lifetime: 0, tokens: 0, records: 0, chSum: 0, chW: 0 };
+    let active = 0;
+    devices.forEach((d) => {
+      const a = bmDeviceAgg(d, sources);
+      agg.burn += a.burn; agg.today += a.today; agg.month += a.month; agg.lifetime += a.lifetime;
+      agg.tokens += a.tokens; agg.records += a.records; agg.chSum += a.cache * a.records; agg.chW += a.records;
+      if (a.burn > 0.01) active++;
+    });
+    agg.cache = agg.chW ? agg.chSum / agg.chW : 0;
+    k = Math.max(1, active); label = "All devices";
+  } else {
+    const d = devices.find((x) => x.device_id === scope);
+    if (!d) return null;
+    agg = bmDeviceAgg(d, sources); label = d.label || "device";
+  }
+  const z0 = localRep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25, max: 50 };
+  const zones = {
+    typical: z0.typical * k, busy: z0.busy * k, heavy: z0.heavy * k,
+    max: (z0.max || 50) * k, insufficient_history: z0.insufficient_history,
+  };
+  const pick = scope === "all" ? devices : devices.filter((d) => d.device_id === scope);
+  return {
+    __scopeLabel: label,
+    _meta: localRep._meta,
+    burn_rate_zones: zones,
+    forecast: { burn_rate_per_hour_recent: agg.burn, recent_costs: null,
+                today: { so_far: agg.today }, month: { so_far: agg.month } },
+    totals: { cost_usd: agg.lifetime, total_tokens: agg.tokens, cache_hit_rate: agg.cache },
+    record_count: agg.records,
+    cache_efficiency: localRep.cache_efficiency,   // snapshot lacks usd_saved → this-device est.
+    daily: [],
+    recent_turns: bmMergedRecent(pick, sources, 12),
+  };
+}
+function bmRefreshHero() {
+  const rep = window.__lastReport; if (!rep || rep._combined) return;  // scope = single-source hero
+  const isCodex = (rep._meta?.source || "claude") === "codex";
+  const h = bmScopedRep(rep) || rep;
+  renderSpeedometer(h, isCodex);
+  renderKPIs(h, isCodex);
+  renderRecent(h);
+}
+function populateScopePill(payload) {
+  const sel = $("scope-select"), wrap = $("scope-wrap");
+  if (!sel || !wrap) return;
+  const devs = (payload && payload.devices ? payload.devices.filter((d) => !d._undecryptable) : []);
+  if (devs.length <= 1) { wrap.style.display = "none"; return; }   // only meaningful with 2+
+  wrap.style.display = "";
+  const opts = ['<option value="all">All devices</option>'];
+  devs.forEach((d) => {
+    const isThis = d.device_id === payload.this_device;
+    const val = isThis ? "this" : d.device_id;
+    opts.push(`<option value="${esc(val)}">${esc(d.label || "device")}${isThis ? " (this)" : ""}</option>`);
+  });
+  sel.innerHTML = opts.join("");
+  const valid = ["all", "this", ...devs.map((d) => d.device_id)];
+  if (!valid.includes(window.__scope)) window.__scope = "all";
+  sel.value = window.__scope;
+}
+window.bmSetScope = function (v) {
+  window.__scope = v || "all";
+  localStorage.setItem("burnmeter_scope", window.__scope);
+  bmRefreshHero();
+};
+
 function render(rep) {
   { const cv = $("combined-view"); if (cv) cv.style.display = "none";
     const mn = document.querySelector("main"); if (mn) mn.style.display = ""; }
+  const heroRep = bmScopedRep(rep) || rep;
   window.__multiDevice = Object.keys(rep.by_device || {}).length > 1;
   const src = rep._meta?.source || "claude";
   const isCodex = src === "codex";
@@ -333,9 +439,9 @@ function render(rep) {
   $("data-source").textContent = `${rep._meta?.files_scanned ?? "?"} files · ${fmtInt(rep.record_count || 0)} records`;
 
   renderWelcome(rep);
-  renderSpeedometer(rep, isCodex);
-  renderHeroAside(rep, isCodex);
-  renderKPIs(rep, isCodex);
+  renderSpeedometer(heroRep, isCodex);   // hero gauge = scoped (all devices / one device)
+  renderHeroAside(rep, isCodex);         // "Local usage" stays this-device
+  renderKPIs(heroRep, isCodex);          // KPI strip = scoped fleet totals
   renderEfficiency(rep, isCodex);
   renderCache(rep);
   renderBudget(rep, isCodex);
@@ -345,7 +451,7 @@ function render(rep) {
   renderDaily(rep);
   renderProjects(rep);
   renderHeatmap(rep);
-  renderRecent(rep);
+  renderRecent(heroRep);                 // recent reflects the scope
   renderModelTable(rep);
   renderBehavior(rep);
   renderTools(rep);
@@ -429,7 +535,7 @@ function liveGaugeTick() {
         }, r, isCodex, localStorage.getItem("burnmeter_burn_hours_" + side) || "2");
       });
     } else {
-      renderSpeedometer(rep, window.__source === "codex");
+      renderSpeedometer(bmScopedRep(rep) || rep, window.__source === "codex");
     }
   } catch (e) {}
 }
@@ -931,6 +1037,12 @@ async function renderSyncDevices() {
   try { data = await (await fetch("/api/sync/devices")).json(); }
   catch (e) { data = { error: "server" }; }
   body.innerHTML = proSignedInHeader(st) + proDevicesHtml(data);
+  // feed the multi-device scope: cache devices, fill the scope pill, re-scope the hero
+  if (data && !data.error) {
+    window.__devicesCache = data;
+    populateScopePill(data);
+    bmRefreshHero();
+  }
 }
 
 function proAuthFormHtml() {
@@ -1418,7 +1530,7 @@ function start() {
     b.addEventListener("click", () => {
       localStorage.setItem("burnmeter_burn_hours_" + window.__source, b.dataset.h);
       document.querySelectorAll("#burn-window-picker button").forEach(x => x.classList.toggle("active", x.dataset.h === b.dataset.h));
-      if (window.__lastReport) renderSpeedometer(window.__lastReport, window.__source === "codex");
+      if (window.__lastReport) renderSpeedometer(bmScopedRep(window.__lastReport) || window.__lastReport, window.__source === "codex");
     });
   });
   // trend timeframe picker (1h/4h/6h/12h/1d)

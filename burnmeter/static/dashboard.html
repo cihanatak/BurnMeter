@@ -27,6 +27,10 @@
       <button data-source="codex"><span class="dot"></span>Codex</button>
       <button data-source="both"><span class="dot"></span>Claude Code + Codex</button>
     </span>
+    <span class="scope-wrap" id="scope-wrap" style="display:none" title="which machines the fuel panel shows">
+      <span class="scope-ico" aria-hidden="true">🖥</span>
+      <select id="scope-select" class="scope-select" onchange="bmSetScope(this.value)"></select>
+    </span>
   </div>
   <div class="header-meta">
     <span class="meta-txt" id="data-source">…</span>
