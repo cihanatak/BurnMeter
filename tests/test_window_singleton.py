@@ -54,3 +54,16 @@ def test_claim_reclaims_after_a_clean_release(tmp_path, monkeypatch):
     assert window._claim_window_singleton() is True
     window._release_window_singleton()
     assert window._claim_window_singleton() is True         # next launch can claim again
+
+
+def test_geometry_roundtrip_and_bounds(tmp_path, monkeypatch):
+    monkeypatch.setattr(window, "_WINDOW_GEOM", tmp_path / "geo.json")
+    assert window._load_geometry() is None                  # nothing saved yet
+    window._save_geometry({"x": 120, "y": 60, "width": 1400, "height": 900})
+    assert window._load_geometry() == {"x": 120, "y": 60, "width": 1400, "height": 900}
+    # off-screen / disconnected-monitor coords are rejected → fall back to default
+    window._save_geometry({"x": -99999, "y": 0, "width": 1400, "height": 900})
+    assert window._load_geometry() is None
+    # absurd size rejected too
+    window._save_geometry({"x": 0, "y": 0, "width": 50, "height": 50})
+    assert window._load_geometry() is None

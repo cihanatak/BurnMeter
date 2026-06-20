@@ -275,6 +275,34 @@ def _release_window_singleton() -> None:
         pass
 
 
+# --- window geometry: reopen at the user's last position + size --------------
+_WINDOW_GEOM = Path.home() / ".burnmeter" / "window_geometry.json"
+
+
+def _load_geometry() -> Optional[dict]:
+    """Last {x,y,width,height} so a reopen restores where the user left the window.
+    Sanity-bounded — a wild value (e.g. a now-disconnected monitor) falls back to the
+    default maximized window instead of opening off-screen."""
+    try:
+        g = json.loads(_WINDOW_GEOM.read_text())
+        x, y, w, h = int(g["x"]), int(g["y"]), int(g["width"]), int(g["height"])
+        if w < 600 or h < 400 or w > 20000 or h > 20000:
+            return None
+        if x < -2000 or y < -2000 or x > 20000 or y > 20000:
+            return None
+        return {"x": x, "y": y, "width": w, "height": h}
+    except Exception:
+        return None
+
+
+def _save_geometry(g: dict) -> None:
+    try:
+        _WINDOW_GEOM.parent.mkdir(parents=True, exist_ok=True)
+        _WINDOW_GEOM.write_text(json.dumps(g))
+    except Exception:
+        pass
+
+
 def _python_for_window() -> Path:
     """python.exe next to the current interpreter — pywebview's window is broken
     under pythonw.exe (no console), so the window process must be python.exe."""
@@ -395,15 +423,33 @@ def run_window(open_browser: bool = False, ensure_background: bool = False, **kw
             handle.start_warm()
             url = handle.url
 
-        # maximized=True is load-bearing: under pythonw.exe (the desktop-icon
-        # interpreter) pywebview's auto-centering miscomputes screen metrics and
-        # parks the window OFF-SCREEN at a huge negative coord, collapsed to a
-        # title-bar sliver. A maximized window's geometry is computed by Windows to
-        # fill the monitor, bypassing pywebview's broken positioning — so it can
-        # never land off-screen. (python.exe positions fine; pythonw does not.)
-        webview.create_window(
-            f"Burnmeter v{__version__}", url,
-            width=1280, height=860, min_size=(900, 600), maximized=True)
+        # Reopen at the user's last position + size. First run (no saved geometry) →
+        # maximized=True, which is load-bearing: under pythonw.exe (the desktop-icon
+        # interpreter) pywebview's auto-centering miscomputes screen metrics and parks
+        # the window OFF-SCREEN; a maximized window's geometry is computed by Windows so
+        # it can never land off-screen. (python.exe positions fine; pythonw does not.)
+        geo = _load_geometry()
+        if geo:
+            win = webview.create_window(
+                f"Burnmeter v{__version__}", url,
+                x=geo["x"], y=geo["y"], width=max(900, geo["width"]), height=max(600, geo["height"]),
+                min_size=(900, 600))
+        else:
+            win = webview.create_window(
+                f"Burnmeter v{__version__}", url,
+                width=1280, height=860, min_size=(900, 600), maximized=True)
+        # Persist position + size on move/resize (pre-seed x/y so a first-run maximize,
+        # which may fire resized but not moved, still saves something usable).
+        _g = dict(geo) if geo else {"x": 0, "y": 0}
+        def _remember(**kw):
+            _g.update(kw)
+            if all(k in _g for k in ("x", "y", "width", "height")):
+                _save_geometry({k: int(_g[k]) for k in ("x", "y", "width", "height")})
+        try:
+            win.events.resized += (lambda w, h: _remember(width=w, height=h))
+            win.events.moved += (lambda x, y: _remember(x=x, y=y))
+        except Exception:
+            pass
         # Persist the WebView profile (localStorage: zoom level + client prefs) across
         # restarts — private_mode=True (the default) would forget them every launch.
         storage = Path.home() / ".burnmeter" / "webview"
