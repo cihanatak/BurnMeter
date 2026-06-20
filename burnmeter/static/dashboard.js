@@ -685,28 +685,35 @@ function bmScopedHalf(localRep, source) {
   if (scope === "this" || !devices.length) return localRep;
   const pick = scope === "all" ? devices : devices.filter((d) => d.device_id === scope);
   if (!pick.length) return localRep;
-  let burn = 0, today = 0, month = 0, lifetime = 0, tokens = 0, records = 0, chSum = 0, chW = 0, k = 0;
+  // Aggregate burn at EVERY window (not one) so the gauge matches each device's own gauge
+  // at any picker position AND sums across devices. CRITICAL: we null recent_costs below
+  // so liveBurnRate() reads this aggregate instead of recomputing from local turns only
+  // (that bug made "both"-tab Codex show $0 on the PC / undercount on the Mac).
+  const WINS = ["0.0833", "0.25", "1", "2", "4", "6"];
+  const hrs = localStorage.getItem("burnmeter_burn_hours_" + source) || "2";
+  const burnByH = {}; WINS.forEach((w) => (burnByH[w] = 0));
+  let today = 0, month = 0, lifetime = 0, tokens = 0, records = 0, chSum = 0, chW = 0, k = 0;
   const recent = [];
   pick.forEach((d) => {
     const isThis = payload && d.device_id === payload.this_device;
     if (isThis && localRep && !localRep._combined) {
       const fc = localRep.forecast || {}, tot = localRep.totals || {};
-      const hrs = localStorage.getItem("burnmeter_burn_hours_" + source) || "2";
-      const lb = (fc.burn_rates_by_hours && fc.burn_rates_by_hours[hrs] != null)
-        ? fc.burn_rates_by_hours[hrs] : (fc.burn_rate_per_hour_recent || 0);
-      burn += lb || 0; today += (fc.today && fc.today.so_far) || 0; month += (fc.month && fc.month.so_far) || 0;
+      const bbh = fc.burn_rates_by_hours || {};
+      WINS.forEach((w) => { if (bbh[w] != null) burnByH[w] += bbh[w] || 0; });
+      today += (fc.today && fc.today.so_far) || 0; month += (fc.month && fc.month.so_far) || 0;
       lifetime += tot.cost_usd || 0; tokens += tot.total_tokens || 0; records += localRep.record_count || 0;
       chSum += (tot.cache_hit_rate || 0) * (localRep.record_count || 0); chW += localRep.record_count || 0;
-      if ((lb || 0) > 0.01) k++;
+      if ((bbh[hrs] || 0) > 0.01) k++;
       (localRep.recent_turns || []).forEach((t) => recent.push({ ...t, device: d.label }));
     } else {
       const v = (d.sources || {})[source]; if (!v) return;
-      const hrs2 = localStorage.getItem("burnmeter_burn_hours_" + source) || "2";
-      const wb = (v.burn_rates_by_hours && v.burn_rates_by_hours[hrs2] != null) ? v.burn_rates_by_hours[hrs2] : (v.burn_rate_per_hour || 0);
-      burn += wb || 0; today += v.today_cost || 0; month += v.month_so_far || 0;
+      const bbh = v.burn_rates_by_hours || {};
+      if (Object.keys(bbh).length) WINS.forEach((w) => { if (bbh[w] != null) burnByH[w] += bbh[w] || 0; });
+      else if (v.burn_rate_per_hour) burnByH[hrs] += v.burn_rate_per_hour || 0;  // pre-0.1.63 snapshot
+      today += v.today_cost || 0; month += v.month_so_far || 0;
       lifetime += v.lifetime_cost || 0; tokens += v.lifetime_tokens || 0; records += v.record_count || 0;
       chSum += (v.cache_hit_rate || 0) * (v.record_count || 0); chW += v.record_count || 0;
-      if ((v.burn_rate_per_hour || 0) > 0.01) k++;
+      if ((bbh[hrs] != null ? bbh[hrs] : (v.burn_rate_per_hour || 0)) > 0.01) k++;
       (v.recent || []).forEach((t) => recent.push({
         timestamp: t.ts, project_label: t.project, model: t.model,
         effective_tokens: t.tokens, total_tokens: t.tokens, cost_usd: t.cost, cache_hit_rate: null, device: d.label,
@@ -719,8 +726,12 @@ function bmScopedHalf(localRep, source) {
   return {
     ...localRep,
     __scopeLabel: scope === "all" ? "All devices" : (pick[0].label || "device"),
-    forecast: { ...(localRep.forecast || {}), burn_rate_per_hour_recent: burn,
-                today: { so_far: today }, month: { so_far: month }, burn_rates_by_hours: undefined },
+    // recent_costs:null → liveBurnRate falls through to burn_rates_by_hours (the cross-device
+    // aggregate). by_model breakdown nulled — it'd otherwise show only the local device's models.
+    forecast: { ...(localRep.forecast || {}), recent_costs: null,
+                burn_rates_by_hours: burnByH, burn_rates_by_hours_by_model: {},
+                burn_rate_per_hour_recent: burnByH[hrs] || 0,
+                today: { so_far: today }, month: { so_far: month } },
     totals: { ...(localRep.totals || {}), cost_usd: lifetime, total_tokens: tokens, cache_hit_rate: chW ? chSum / chW : 0 },
     record_count: records,
     burn_rate_zones: { typical: z0.typical * kk, busy: z0.busy * kk, heavy: z0.heavy * kk,
