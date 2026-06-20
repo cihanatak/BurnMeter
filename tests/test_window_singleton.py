@@ -58,12 +58,16 @@ def test_claim_reclaims_after_a_clean_release(tmp_path, monkeypatch):
 
 def test_geometry_roundtrip_and_bounds(tmp_path, monkeypatch):
     monkeypatch.setattr(window, "_WINDOW_GEOM", tmp_path / "geo.json")
+    monkeypatch.setattr(window, "_virtual_screen", lambda: None)   # portable: skip screen check
     assert window._load_geometry() is None                  # nothing saved yet
     window._save_geometry({"x": 120, "y": 60, "width": 1400, "height": 900})
-    assert window._load_geometry() == {"x": 120, "y": 60, "width": 1400, "height": 900}
-    # off-screen / disconnected-monitor coords are rejected → fall back to default
+    assert window._load_geometry() == {"x": 120, "y": 60, "width": 1400, "height": 900, "maximized": False}
+    # absurd coord rejected → fall back to default maximized
     window._save_geometry({"x": -99999, "y": 0, "width": 1400, "height": 900})
     assert window._load_geometry() is None
     # absurd size rejected too
     window._save_geometry({"x": 0, "y": 0, "width": 50, "height": 50})
     assert window._load_geometry() is None
+    # a maximized session round-trips the flag
+    window._save_geometry({"x": 0, "y": 0, "width": 2560, "height": 1440, "maximized": True})
+    assert window._load_geometry()["maximized"] is True

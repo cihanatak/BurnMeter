@@ -279,18 +279,52 @@ def _release_window_singleton() -> None:
 _WINDOW_GEOM = Path.home() / ".burnmeter" / "window_geometry.json"
 
 
+def _virtual_screen():
+    """(x, y, w, h) of the whole virtual desktop (all monitors) on Windows, else None.
+    Used to reject a saved position that's now off-screen (monitor unplugged / resolution
+    change) so the window never reopens where the user can't see it."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        u = ctypes.windll.user32
+        return (u.GetSystemMetrics(76), u.GetSystemMetrics(77),   # SM_X/YVIRTUALSCREEN
+                u.GetSystemMetrics(78), u.GetSystemMetrics(79))    # SM_CX/CYVIRTUALSCREEN
+    except Exception:
+        return None
+
+
+def _is_maximized(w: int, h: int) -> bool:
+    """Heuristic: a window roughly the size of the primary monitor is 'maximized'."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        u = ctypes.windll.user32
+        return w >= u.GetSystemMetrics(0) - 24 and h >= u.GetSystemMetrics(1) - 96
+    except Exception:
+        return False
+
+
 def _load_geometry() -> Optional[dict]:
-    """Last {x,y,width,height} so a reopen restores where the user left the window.
-    Sanity-bounded — a wild value (e.g. a now-disconnected monitor) falls back to the
-    default maximized window instead of opening off-screen."""
+    """Last window placement so a reopen restores where the user left it. Returns
+    {x,y,width,height,maximized} or None (→ default maximized) when the saved spot is no
+    longer visible on the current monitor layout."""
     try:
         g = json.loads(_WINDOW_GEOM.read_text())
         x, y, w, h = int(g["x"]), int(g["y"]), int(g["width"]), int(g["height"])
+        maximized = bool(g.get("maximized"))
         if w < 600 or h < 400 or w > 20000 or h > 20000:
             return None
-        if x < -2000 or y < -2000 or x > 20000 or y > 20000:
+        if abs(x) > 50000 or abs(y) > 50000:          # absurd coord (corrupt / portable guard)
             return None
-        return {"x": x, "y": y, "width": w, "height": h}
+        vs = _virtual_screen()
+        if vs and not maximized:
+            vx, vy, vw, vh = vs
+            # require a visible chunk of the title bar on some monitor
+            if (x + w) < vx + 80 or x > (vx + vw - 80) or y < vy - 1 or y > (vy + vh - 40):
+                return None
+        return {"x": x, "y": y, "width": w, "height": h, "maximized": maximized}
     except Exception:
         return None
 
@@ -429,22 +463,27 @@ def run_window(open_browser: bool = False, ensure_background: bool = False, **kw
         # the window OFF-SCREEN; a maximized window's geometry is computed by Windows so
         # it can never land off-screen. (python.exe positions fine; pythonw does not.)
         geo = _load_geometry()
-        if geo:
+        if geo and not geo.get("maximized"):
             win = webview.create_window(
                 f"Burnmeter v{__version__}", url,
                 x=geo["x"], y=geo["y"], width=max(900, geo["width"]), height=max(600, geo["height"]),
                 min_size=(900, 600))
         else:
+            # First run OR last session was maximized → maximized (also dodges pythonw's
+            # broken off-screen auto-centering).
             win = webview.create_window(
                 f"Burnmeter v{__version__}", url,
-                width=1280, height=860, min_size=(900, 600), maximized=True)
-        # Persist position + size on move/resize (pre-seed x/y so a first-run maximize,
-        # which may fire resized but not moved, still saves something usable).
+                width=(geo["width"] if geo else 1280), height=(geo["height"] if geo else 860),
+                min_size=(900, 600), maximized=True)
+        # Persist placement on move/resize. Track maximized so a maximized session reopens
+        # maximized (not a screen-sized floating window). Pre-seed from geo / 0,0.
         _g = dict(geo) if geo else {"x": 0, "y": 0}
         def _remember(**kw):
             _g.update(kw)
             if all(k in _g for k in ("x", "y", "width", "height")):
-                _save_geometry({k: int(_g[k]) for k in ("x", "y", "width", "height")})
+                _save_geometry({"x": int(_g["x"]), "y": int(_g["y"]),
+                                "width": int(_g["width"]), "height": int(_g["height"]),
+                                "maximized": _is_maximized(int(_g["width"]), int(_g["height"]))})
         try:
             win.events.resized += (lambda w, h: _remember(width=w, height=h))
             win.events.moved += (lambda x, y: _remember(x=x, y=y))
