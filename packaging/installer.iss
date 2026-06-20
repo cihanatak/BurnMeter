@@ -31,10 +31,14 @@ UninstallDisplayName={#MyAppName}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-; Auto-update: let a silent in-place upgrade close the running app and restart it
-; (the app's frozen updater runs this installer with /SILENT /RESTARTAPPLICATIONS).
+; Auto-update: CloseApplications closes the running app (frees the files for an
+; in-place upgrade). RestartApplications is OFF on purpose — the Restart Manager
+; restarts EVERY process it closed (window + tray), and the tray re-opens a window,
+; so it stacked multiple windows. Instead the [Run] entry below relaunches EXACTLY
+; ONE instance after the upgrade (and the app's own single-instance guard dedupes
+; any stragglers), so an update is a clean single-window restart.
 CloseApplications=yes
-RestartApplications=yes
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -51,7 +55,9 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
+; No skipifsilent: a SILENT in-place update must relaunch the app (exactly once).
+; postinstall keeps the "Launch Burnmeter" checkbox on a normal interactive install.
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall
 
 [UninstallDelete]
 ; the app's runtime data/caches live under the user profile (~/.burnmeter); leave

@@ -1,0 +1,37 @@
+"""Single-instance window lock: one native window only. Race-safe atomic claim
+with a stale-lock steal (a crashed window must not block the next launch)."""
+import burnmeter.window as window
+
+
+def _fresh(tmp_path, monkeypatch):
+    monkeypatch.setattr(window, "_WINDOW_LOCK", tmp_path / "window.lock")
+
+
+def test_claim_then_blocks_a_live_other_owner(tmp_path, monkeypatch):
+    _fresh(tmp_path, monkeypatch)
+    # first claim by us → succeeds and writes our pid
+    assert window._claim_window_singleton() is True
+    assert window._WINDOW_LOCK.exists()
+    # simulate a DIFFERENT, still-alive window owning the lock
+    window._WINDOW_LOCK.write_text("99999999")
+    monkeypatch.setattr(window, "_win_pid_alive", lambda pid: True)
+    assert window._claim_window_singleton() is False     # blocked → caller focuses + exits
+
+
+def test_steals_a_stale_lock(tmp_path, monkeypatch):
+    _fresh(tmp_path, monkeypatch)
+    window._WINDOW_LOCK.write_text("99999999")            # owner from a crashed run
+    monkeypatch.setattr(window, "_win_pid_alive", lambda pid: False)   # …which is dead
+    assert window._claim_window_singleton() is True       # steal + take over
+    assert window._WINDOW_LOCK.read_text().strip() == str(__import__("os").getpid())
+
+
+def test_release_only_removes_our_own_lock(tmp_path, monkeypatch):
+    _fresh(tmp_path, monkeypatch)
+    assert window._claim_window_singleton() is True
+    window._release_window_singleton()
+    assert not window._WINDOW_LOCK.exists()
+    # a lock owned by someone else is left alone
+    window._WINDOW_LOCK.write_text("12345")
+    window._release_window_singleton()
+    assert window._WINDOW_LOCK.exists()

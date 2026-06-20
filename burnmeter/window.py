@@ -126,6 +126,123 @@ def _spawn_background_server(kwargs) -> None:
                          start_new_session=True, close_fds=True, cwd=home)
 
 
+# --- single-instance: never stack a 2nd native window ----------------------
+# A real app has ONE window. Every launch path (desktop icon, tray "Open", the
+# update restart, the installer's relaunch) routes through run_window; the guard
+# below makes any launch-while-open just FOCUS the existing window instead of
+# opening another. Race-safe (atomic O_EXCL lock) so the update restart — which
+# can fire two launches at once — still yields exactly one window.
+_WINDOW_LOCK = Path.home() / ".burnmeter" / "window.lock"
+
+
+def _win_pid_alive(pid: int) -> bool:
+    """Reliable 'is this pid running?' — Windows via ctypes OpenProcess + exit-code
+    (tasklist is flaky), POSIX via os.kill(pid, 0). Used to detect a stale lock left
+    by a crashed window so the next launch can steal it."""
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            k32 = ctypes.windll.kernel32
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if not h:
+                return False
+            try:
+                code = ctypes.c_ulong()
+                if not k32.GetExitCodeProcess(h, ctypes.byref(code)):
+                    return True            # advisory: don't falsely steal a live lock
+                return code.value == 259   # STILL_ACTIVE
+            finally:
+                k32.CloseHandle(h)
+        except Exception:
+            return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def _focus_existing_window() -> bool:
+    """Bring an already-open Burnmeter window to the front (Windows-only, ctypes
+    EnumWindows matched by the "Burnmeter v…" title). Returns True if one was found."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        hits = []
+
+        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        def _cb(hwnd, _lp):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            n = user32.GetWindowTextLengthW(hwnd)
+            if n:
+                buf = ctypes.create_unicode_buffer(n + 1)
+                user32.GetWindowTextW(hwnd, buf, n + 1)
+                if buf.value.startswith("Burnmeter v"):
+                    hits.append(hwnd)
+                    return False           # stop enumerating
+            return True
+
+        user32.EnumWindows(_cb, 0)
+        if hits:
+            user32.ShowWindow(hits[0], 9)            # SW_RESTORE (un-minimize)
+            user32.SetForegroundWindow(hits[0])
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _claim_window_singleton() -> bool:
+    """True iff THIS process may open the window. False → a live window already owns
+    it (caller should focus that one and exit). Atomic create with a stale-lock steal
+    (a crashed window leaves a lock whose pid is dead)."""
+    try:
+        _WINDOW_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return True                                   # can't lock → never block the window
+    for _ in range(2):
+        try:
+            fd = os.open(str(_WINDOW_LOCK), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            try:
+                os.write(fd, str(os.getpid()).encode("ascii"))
+            finally:
+                os.close(fd)
+            return True
+        except FileExistsError:
+            try:
+                opid = int((_WINDOW_LOCK.read_text() or "0").strip() or "0")
+            except Exception:
+                opid = 0
+            if opid == os.getpid():
+                return True
+            if opid and _win_pid_alive(opid):
+                return False                          # a live window owns it
+            try:
+                _WINDOW_LOCK.unlink()                 # stale (dead owner) → steal + retry
+            except Exception:
+                return True
+        except Exception:
+            return True
+    return True
+
+
+def _release_window_singleton() -> None:
+    try:
+        if _WINDOW_LOCK.exists() and (_WINDOW_LOCK.read_text() or "").strip() == str(os.getpid()):
+            _WINDOW_LOCK.unlink()
+    except Exception:
+        pass
+
+
 def _python_for_window() -> Path:
     """python.exe next to the current interpreter — pywebview's window is broken
     under pythonw.exe (no console), so the window process must be python.exe."""
@@ -182,6 +299,13 @@ def run_window(open_browser: bool = False, ensure_background: bool = False, **kw
         serve(open_browser=True, **kwargs)
         return 0
 
+    # Single-instance: a real app has ONE window. If one is already open, focus it
+    # and exit — so a double-click, a tray "Open", or the update restart can never
+    # stack a second window. Race-safe (atomic lock) for the update's twin launches.
+    if not _claim_window_singleton():
+        _focus_existing_window()
+        return 0
+
     from .server import setup_server
 
     handle = None                       # set only when WE host the server in-process
@@ -233,6 +357,7 @@ def run_window(open_browser: bool = False, ensure_background: bool = False, **kw
     except TypeError:
         webview.start()           # older pywebview without these kwargs
     finally:
+        _release_window_singleton()   # free the single-instance lock for the next launch
         if handle is not None:    # only tear down a server WE own; never the tray
             handle.close()
     return 0
