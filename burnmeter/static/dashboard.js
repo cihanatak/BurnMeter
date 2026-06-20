@@ -398,6 +398,36 @@ function bmRefreshHero() {
   renderSpeedometer(h, isCodex);
   renderKPIs(h, isCodex);
   renderRecent(h);
+  renderDeviceBreakdown();
+}
+
+// Per-device share of the headline (this month $) — a stacked bar under the hero.
+// The breakdown IS the picker: click a segment/legend to scope the hero to it.
+const BM_DEVCOLORS = ["#5E6AD2", "#10A37F", "#D97757", "#F5A623", "#2BD96B", "#9b6dff", "#e0567f", "#4cb3ff"];
+function renderDeviceBreakdown() {
+  const el = $("device-breakdown"); if (!el) return;
+  const payload = window.__devicesCache;
+  const devs = (payload && payload.devices ? payload.devices.filter((d) => !d._undecryptable) : []);
+  if (devs.length < 2 || (window.__lastReport && window.__lastReport._combined)) { el.style.display = "none"; return; }
+  const sources = bmActiveSources();
+  const parts = devs.map((d, i) => {
+    const isThis = d.device_id === payload.this_device;
+    return { id: isThis ? "this" : d.device_id, label: d.label || "device",
+             val: bmDeviceAgg(d, sources).month, color: BM_DEVCOLORS[i % BM_DEVCOLORS.length], me: isThis };
+  }).sort((a, b) => b.val - a.val);
+  const total = parts.reduce((s, p) => s + p.val, 0) || 1;
+  const active = window.__scope;
+  el.style.display = "";
+  el.innerHTML =
+    `<div class="dbk-head"><span class="dbk-t">This month by device</span>` +
+    `<span class="dbk-sum">${fmtMoney0(total)} · ${devs.length} devices</span></div>` +
+    `<div class="dbk-bar">` + parts.map((p) =>
+      `<span class="dbk-seg${active === p.id ? ' on' : ''}" style="width:${Math.max(2, p.val / total * 100).toFixed(1)}%;background:${p.color}" title="${esc(p.label)} · ${fmtMoney(p.val)}" onclick="bmToggleScope('${p.id}')"></span>`).join("") +
+    `</div><div class="dbk-legend">` +
+    `<span class="dbk-li${active === 'all' ? ' on' : ''}" onclick="bmSetScope('all')"><span class="dbk-dot" style="background:linear-gradient(90deg,#5E6AD2,#10A37F)"></span>All devices</span>` +
+    parts.map((p) =>
+      `<span class="dbk-li${active === p.id ? ' on' : ''}" onclick="bmToggleScope('${p.id}')"><span class="dbk-dot" style="background:${p.color}"></span>${esc(p.label)}${p.me ? ' ·this' : ''} <b>${fmtMoney0(p.val)}</b></span>`).join("") +
+    `</div>`;
 }
 function populateScopePill(payload) {
   const sel = $("scope-select"), wrap = $("scope-wrap");
@@ -419,8 +449,16 @@ function populateScopePill(payload) {
 window.bmSetScope = function (v) {
   window.__scope = v || "all";
   localStorage.setItem("burnmeter_scope", window.__scope);
+  const sel = $("scope-select"); if (sel && sel.value !== window.__scope) sel.value = window.__scope;
   bmRefreshHero();
+  bmHighlightScope();
 };
+// Click a device card / breakdown segment again to go back to the whole fleet.
+window.bmToggleScope = function (id) { bmSetScope(window.__scope === id ? "all" : id); };
+function bmHighlightScope() {
+  document.querySelectorAll("[data-scope]").forEach((el) =>
+    el.classList.toggle("scoped", el.getAttribute("data-scope") === window.__scope));
+}
 
 function render(rep) {
   { const cv = $("combined-view"); if (cv) cv.style.display = "none";
@@ -1027,6 +1065,9 @@ const _proHdr = { "Content-Type": "application/json", "X-Burnmeter-Pro": "1" };
 async function renderSyncDevices() {
   const body = $("sync-devices-body");
   if (!body) return;
+  // Don't blow away an in-progress rename on the 10s render tick.
+  const ae = document.activeElement;
+  if (ae && ae.classList && ae.classList.contains("sync-rename-in")) return;
   let st;
   try { st = await (await fetch("/api/pro/status")).json(); }
   catch (e) { return; }   // server may be old → skip silently
@@ -1095,6 +1136,14 @@ async function proPush(btn) {
 }
 window.proPush = proPush;
 
+const BM_OSICON = { Windows: "🪟", Darwin: "🍎", Linux: "🐧" };
+function bmOnlineState(iso) {
+  if (!iso) return { cls: "off", txt: "—" };
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 360) return { cls: "live", txt: "online" };       // pushed within ~6 min
+  if (s < 86400) return { cls: "idle", txt: "idle" };
+  return { cls: "off", txt: "offline" };
+}
 function proDevicesHtml(data) {
   if (data && data.error) return `<div class="dim" style="font-size:12px;color:var(--warn)">couldn't reach Firebase: ${esc(String(data.error))}</div>`;
   const devs = (data && data.devices) || [];
@@ -1106,11 +1155,16 @@ function proDevicesHtml(data) {
         <div class="dim" style="font-size:11px">couldn't decrypt · different password?</div></div>`;
     }
     const me = d.device_id === data.this_device;
+    const scopeId = me ? "this" : d.device_id;
+    const on = window.__scope === scopeId;
+    const st = bmOnlineState(d._updated_at);
+    const osi = BM_OSICON[d.os] || "🖥";
     const srcs = d.sources || {};
     const rows = Object.keys(srcs).map(s => {
       const v = srcs[s] || {};
       return `<div class="sync-src"><span class="sync-srcname ${s === 'codex' ? 'fam-gpt' : 'fam-opus'}">${esc(s)}</span>
         <span class="sync-amt">~${fmtMoney(v.month_so_far || 0)}<small>this month</small></span>
+        <span class="sync-amt">~${fmtMoney(v.burn_rate_per_hour || 0)}<small>/hr now</small></span>
         <span class="sync-cnt">${fmtInt(v.record_count || 0)}<small>records</small></span></div>`;
     }).join("") || `<div class="dim" style="font-size:11px">no data</div>`;
     const recent = Object.keys(srcs)
@@ -1122,10 +1176,36 @@ function proDevicesHtml(data) {
       `<span class="sync-rmodel ${t._src === 'codex' ? 'fam-gpt' : 'fam-opus'}">${esc(modelDisplay(t.model))}</span>` +
       `<span class="sync-rtok num">${fmtInt(t.tokens || 0)}</span></div>`
     ).join("") + `</div>` : "";
-    return `<div class="sync-dev${me ? ' me' : ''}">
-      <div class="sync-dev-head"><span class="sync-dot live"></span><b>${esc(d.label || "?")}</b>${me ? '<span class="sync-badge">this device</span>' : ''}<span class="sync-ago dim">${ago(d._updated_at)}</span></div>
+    const pencil = me ? `<button class="sync-rename" title="rename this device" onclick="event.stopPropagation();bmRenameDevice(this)">✎</button>` : "";
+    return `<div class="sync-dev${me ? ' me' : ''}${on ? ' scoped' : ''}" data-scope="${esc(scopeId)}" title="show only this device in the fuel panel" onclick="bmToggleScope('${scopeId}')">
+      <div class="sync-dev-head"><span class="sync-dot ${st.cls}"></span><span class="sync-os" title="${esc(d.os || '')}">${osi}</span><b>${esc(d.label || "?")}</b>${me ? '<span class="sync-badge">this device</span>' : ''}${pencil}<span class="sync-ago dim">${st.txt} · ${ago(d._updated_at)}</span></div>
       ${rows}${recentHtml}</div>`;
   }).join("") + `</div>`;
+}
+
+// Inline rename of THIS device (pencil on the this-device card). Avoids window.prompt
+// (unreliable under pywebview) — swaps the name for an input, commits on Enter/blur.
+window.bmRenameDevice = function (btn) {
+  const head = btn.closest(".sync-dev-head"); if (!head) return;
+  const nameEl = head.querySelector("b"); if (!nameEl || head.querySelector(".sync-rename-in")) return;
+  const inp = document.createElement("input");
+  inp.className = "sync-rename-in"; inp.value = nameEl.textContent; inp.maxLength = 40;
+  inp.onclick = (e) => e.stopPropagation();
+  inp.onkeydown = (e) => { e.stopPropagation(); if (e.key === "Enter") bmRenameCommit(inp); else if (e.key === "Escape") { inp.dataset.done = "1"; renderSyncDevices(); } };
+  inp.onblur = () => bmRenameCommit(inp);
+  nameEl.replaceWith(inp);
+  inp.focus(); inp.select();
+};
+async function bmRenameCommit(inp) {
+  if (inp.dataset.done) return; inp.dataset.done = "1";   // Enter then blur → commit once
+  const v = (inp.value || "").trim();
+  if (!v) { renderSyncDevices(); return; }
+  inp.disabled = true;
+  try {
+    const r = await (await fetch("/api/pro/rename", { method: "POST", headers: _proHdr, body: JSON.stringify({ label: v }) })).json();
+    if (!r.ok && r.error) console.warn("rename:", r.error);
+  } catch (e) { console.warn("rename:", e); }
+  renderSyncDevices();   // server re-pushed with the new label → refresh list + scope
 }
 
 async function proAuth(mode) {

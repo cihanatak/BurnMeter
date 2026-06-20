@@ -334,7 +334,7 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 threading.Thread(target=_go, daemon=True).start()
                 return
 
-            if path in ("/api/pro/connect", "/api/pro/disconnect", "/api/pro/resend", "/api/pro/push"):
+            if path in ("/api/pro/connect", "/api/pro/disconnect", "/api/pro/resend", "/api/pro/push", "/api/pro/rename"):
                 # Pro account actions from the dashboard, backed by Firebase Auth. The
                 # password is used ONLY here on localhost — to sign in to Firebase and to
                 # derive the E2E key — never stored, never sent anywhere except Firebase
@@ -373,6 +373,40 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                             pass
                     res = _fb.push_snapshot(cfg2, _sync.snapshot_from_reports(cfg2, reports))
                     _json_response(self, 200 if res.get("ok") else 400, res)
+                    return
+                if path == "/api/pro/rename":
+                    # Rename THIS device. Sets a user label (name_source='user' so the
+                    # auto-IP migration never overwrites it) and re-pushes immediately so
+                    # the new name shows on every machine. Cross-device rename isn't here:
+                    # a remote device re-stamps its own label on its next push.
+                    from . import sync as _sync
+                    try:
+                        length = int(self.headers.get("Content-Length", 0) or 0)
+                        body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+                    except Exception:
+                        _json_response(self, 400, {"ok": False, "error": "bad request"})
+                        return
+                    label = (body.get("label") or "").strip()[:40]
+                    if not label:
+                        _json_response(self, 400, {"ok": False, "error": "name required"})
+                        return
+                    cfg3 = _fb.load_config()
+                    if not _fb.is_configured(cfg3):
+                        _json_response(self, 400, {"ok": False, "error": "not signed in"})
+                        return
+                    cfg3["label"] = label
+                    cfg3["name_source"] = "user"
+                    _fb.save_config(cfg3)
+                    reports = {}
+                    for s in ("claude", "codex"):
+                        if s == "codex" and codex_cache is None:
+                            continue
+                        try:
+                            reports[s] = build_for(s, None)
+                        except Exception:
+                            pass
+                    res = _fb.push_snapshot(cfg3, _sync.snapshot_from_reports(cfg3, reports))
+                    _json_response(self, 200 if res.get("ok") else 400, {"ok": bool(res.get("ok")), "label": label, "error": res.get("error")})
                     return
                 try:
                     length = int(self.headers.get("Content-Length", 0) or 0)
