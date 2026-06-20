@@ -256,6 +256,17 @@ def _steal_window_singleton() -> None:
         pass
 
 
+def _lock_owner_alive() -> bool:
+    """True if the lock is currently held by a still-running OTHER process. Used by a
+    launch that lost the race to decide: keep waiting for the winner's window (owner
+    alive) vs take over (owner gone)."""
+    try:
+        opid = int((_WINDOW_LOCK.read_text() or "0").strip() or "0")
+    except Exception:
+        return False
+    return bool(opid) and opid != os.getpid() and _win_pid_alive(opid)
+
+
 def _release_window_singleton() -> None:
     try:
         if _WINDOW_LOCK.exists() and (_WINDOW_LOCK.read_text() or "").strip() == str(os.getpid()):
@@ -332,16 +343,27 @@ def run_window(open_browser: bool = False, ensure_background: bool = False, **kw
     owns_lock = _claim_window_singleton()
     if not owns_lock:
         if sys.platform == "win32":
-            # Lost the race: a twin launch is mid-startup. Wait briefly for its window
-            # to appear, then focus it instead of opening a second one.
-            for _ in range(12):
-                time.sleep(0.25)
+            # Lost the race to a concurrent launch. Its window can take many seconds to
+            # appear on a COLD start (it spawns + awaits the background server), so wait
+            # as long as that winner is ALIVE — focus its window the moment it shows.
+            # Only take over if the winner vanishes before rendering (so we never
+            # strand the user) or after a generous cap (a wedged winner).
+            deadline = time.monotonic() + 25.0
+            while time.monotonic() < deadline:
                 if _focus_existing_window():
                     return 0
-        # The owner never showed a window (it died/failed before rendering, or focus
-        # isn't available on this OS) → don't strand the user: take over and open.
-        _steal_window_singleton()
-        owns_lock = True
+                if not _lock_owner_alive():
+                    break                 # winner died before showing a window → we take over
+                time.sleep(0.3)
+            _steal_window_singleton()
+            owns_lock = True
+        else:
+            # No reliable cross-process window focus here — if a live instance owns the
+            # lock, defer to it (one window); only open if its owner is gone.
+            if _lock_owner_alive():
+                return 0
+            _steal_window_singleton()
+            owns_lock = True
 
     handle = None                       # set only when WE host the server in-process
     try:
