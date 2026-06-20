@@ -19,11 +19,11 @@ INSTALLER_URL = (
 
 
 def run_installer_update(url: str = INSTALLER_URL) -> bool:
-    """Download the latest installer and launch a SILENT in-place upgrade.
+    """Download the latest installer and run a clean in-place upgrade: close the app,
+    replace it, relaunch ONE window (which restores the last position + section).
 
-    Returns True once the installer process is launched (it will close, upgrade,
-    and relaunch the app via the Restart Manager); False on download/launch
-    failure. Windows-only (the frozen target)."""
+    Returns True once the updater is launched; False on download/launch failure.
+    Windows-only (the frozen target)."""
     if sys.platform != "win32":
         return False
     try:
@@ -33,15 +33,20 @@ def run_installer_update(url: str = INSTALLER_URL) -> bool:
     except Exception:
         return False
     try:
-        # /SILENT = small progress window. /NORESTARTAPPLICATIONS: do NOT let the
-        # Restart Manager re-launch every process it closed — that restarted the
-        # window AND the tray (which re-opens a window) → stacked windows. The .iss
-        # [Run] entry relaunches EXACTLY ONE instance instead, and the app's single-
-        # instance guard dedupes any straggler. (A CLI restart flag overrides the
-        # .iss, so this must be explicit, not just RestartApplications=no in the .iss.)
-        subprocess.Popen(
-            [dst, "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NORESTARTAPPLICATIONS"],
-            close_fds=True)
+        # The Restart Manager can't close the pywebview app, so a plain silent install
+        # over the running app aborts (Inno exit 5) — the update silently fails. Instead
+        # a DETACHED cmd CLOSES the app itself (taskkill all Burnmeter.exe — geometry &
+        # section are already persisted, so nothing is lost), waits for the file handles
+        # to free, then runs the installer with nothing holding the files. The installer's
+        # [Run] entry relaunches EXACTLY ONE window, which reopens at the saved position +
+        # section. cmd survives the kill (detached, and it isn't a Burnmeter.exe).
+        DETACHED = 0x00000008 | 0x00000200 | 0x08000000  # DETACHED|NEW_GROUP|NO_WINDOW
+        cmdline = (
+            'taskkill /F /IM Burnmeter.exe >nul 2>&1 & '
+            'ping -n 2 127.0.0.1 >nul & '
+            f'"{dst}" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NORESTARTAPPLICATIONS'
+        )
+        subprocess.Popen(["cmd", "/c", cmdline], creationflags=DETACHED, close_fds=True)
         return True
     except Exception:
         return False
