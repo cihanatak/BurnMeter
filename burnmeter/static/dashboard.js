@@ -775,6 +775,9 @@ function renderCombined(cl, cx) {
   const b = $("cv-codex");  if (b) b.innerHTML = halfStructure(scx, true, "codex");
   paintCombinedSide("claude", scl, false);
   paintCombinedSide("codex", scx, true);
+  // "both" mode never runs render()/renderSyncDevices, so load the fleet once here so
+  // the device selector + all-devices merge work (it re-renders this view when ready).
+  if (!window.__devicesCache) renderSyncDevices();
 }
 
 // her yarıda GERÇEK burn-rate speedometer (kendi tab'larındaki gibi) + 15dk/1h/2h/4h/6h picker
@@ -1226,18 +1229,20 @@ async function renderSyncDevices() {
   let st;
   try { st = await (await fetch("/api/pro/status")).json(); }
   catch (e) { return; }   // server may be old → skip silently
-  if (!st.configured) { body.innerHTML = proAuthFormHtml(); return; }
-  if (!st.verified) { body.innerHTML = proVerifyHtml(st.email); return; }
+  if (!st.configured) { body.innerHTML = proAuthFormHtml(); window.__devicesCache = { devices: [] }; return; }
+  if (!st.verified) { body.innerHTML = proVerifyHtml(st.email); window.__devicesCache = { devices: [] }; return; }
   // signed in + verified → show devices
   let data;
   try { data = await (await fetch("/api/sync/devices")).json(); }
   catch (e) { data = { error: "server" }; }
   body.innerHTML = proSignedInHeader(st) + proDevicesHtml(data);
-  // feed the multi-device scope: cache devices, fill the scope pill, re-scope the hero
+  // feed the multi-device scope: cache devices, fill the scope pill, re-scope whatever
+  // view is showing (the combined "both" view OR the single-source hero).
   if (data && !data.error) {
     window.__devicesCache = data;
     populateScopePill(data);
-    bmRefreshHero();
+    if (window.__lastReport && window.__lastReport._combined) renderCombined(window.__lastReport.claude, window.__lastReport.codex);
+    else bmRefreshHero();
   }
 }
 
@@ -1895,7 +1900,7 @@ function start() {
   // Fleet view (online/idle dots, "ago", breakdown) is time-based; refresh it on its
   // own cadence so it doesn't freeze while the local machine is idle. renderSyncDevices
   // guards against clobbering an in-progress rename; /api/sync/devices is 20s-cached.
-  setInterval(() => { if (window.__lastReport && !window.__lastReport._combined) renderSyncDevices(); }, 30000);
+  setInterval(() => { if (window.__lastReport) renderSyncDevices(); }, 30000);   // refresh fleet (incl. "both" mode)
   // Re-check for a new version every 3h so a long-open dashboard surfaces the
   // update pill on its own (not only on first load / the tray's 6h check).
   setInterval(() => {
