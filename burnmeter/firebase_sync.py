@@ -238,7 +238,7 @@ def push_snapshot(cfg: dict, snapshot: dict) -> dict:
     blob = _sync.encrypt_snapshot(snapshot, cfg)   # uses cfg["enc_key"]
     doc = {"fields": {
         "blob": {"stringValue": base64.b64encode(blob).decode("ascii")},
-        "label": {"stringValue": cfg.get("label") or socket.gethostname()},
+        "label": {"stringValue": snapshot.get("label") or cfg.get("label") or _sync.friendly_device_name()},
         "updated_at": {"timestampValue": _now_iso()},
     }}
     url = f"{_FIRESTORE}/{_devices_collection(cfg['uid'])}/{cfg['device_id']}"

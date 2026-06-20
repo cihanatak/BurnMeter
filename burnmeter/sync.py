@@ -14,7 +14,11 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
+import platform
+import re
 import socket
+import subprocess
 import unicodedata
 import urllib.error
 import urllib.request
@@ -24,9 +28,89 @@ from pathlib import Path
 from typing import Optional
 
 CONFIG_PATH = Path.home() / ".config" / "burnmeter" / "sync.json"
-SNAPSHOT_VERSION = 2   # v2: + bounded recent-turns tail (metadata only) so cross-device
-                       # "recent activity" works WITHOUT mirroring raw logs.
+SNAPSHOT_VERSION = 3   # v3: + os + name_source (friendly device names, not IPs).
+                       # v2: bounded recent-turns tail (metadata only) for cross-device recent.
 SNAPSHOT_RECENT_MAX = 25   # last N turns per source carried in the snapshot (a few KB)
+
+
+# ---------- friendly device names (never a raw IP) ----------
+_IPV4_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
+
+
+def _looks_like_ip(s: Optional[str]) -> bool:
+    if not s:
+        return True
+    s = s.strip()
+    if _IPV4_RE.match(s):
+        return True
+    # IPv6-ish (only hex, colons, dots)
+    if ":" in s and all(c in "0123456789abcdefABCDEF:." for c in s):
+        return True
+    return False
+
+
+def _clean_name(s: Optional[str]) -> Optional[str]:
+    if not s:
+        return None
+    s = s.strip()
+    for suf in (".local", ".lan", ".home", ".localdomain"):
+        if s.lower().endswith(suf):
+            s = s[: -len(suf)].strip()
+    if not s or len(s) < 2 or _looks_like_ip(s):
+        return None
+    return s
+
+
+def friendly_device_name() -> str:
+    """A human device name per OS — never a bare IP. macOS: ComputerName
+    ('Cihan's MacBook'); Windows: %COMPUTERNAME%; Linux: pretty hostname."""
+    sysname = platform.system()
+    cands = []
+    try:
+        if sysname == "Darwin":
+            try:
+                r = subprocess.run(["scutil", "--get", "ComputerName"],
+                                   capture_output=True, text=True, timeout=3)
+                if r.returncode == 0:
+                    cands.append(r.stdout)
+            except Exception:
+                pass
+            cands.append(platform.node())
+        elif sysname == "Windows":
+            cands.append(os.environ.get("COMPUTERNAME"))
+            cands.append(platform.node())
+        else:
+            try:
+                r = subprocess.run(["hostnamectl", "--pretty"],
+                                   capture_output=True, text=True, timeout=3)
+                if r.returncode == 0:
+                    cands.append(r.stdout)
+            except Exception:
+                pass
+            cands.append(socket.gethostname())
+            cands.append(platform.node())
+    except Exception:
+        pass
+    for c in cands:
+        n = _clean_name(c)
+        if n:
+            return n
+    return {"Darwin": "Mac", "Windows": "Windows PC", "Linux": "Linux device"}.get(
+        sysname, "Device")
+
+
+def resolve_device_label(cfg: dict) -> str:
+    """Label to push. Migrates an IP-ish AUTO label to a friendly name — fixes
+    devices saved as an IP by the old gethostname(). Mutates cfg in-memory only
+    (the caller owns persistence; the firebase path stores a different file), and
+    re-derives every push so the name stays friendly even if the stored one is an IP.
+    A user-set name (name_source='user') is never overwritten."""
+    label = cfg.get("label")
+    if cfg.get("name_source") != "user" and (not label or _looks_like_ip(label)):
+        label = friendly_device_name()
+        cfg["label"] = label
+        cfg.setdefault("name_source", "auto")
+    return label or friendly_device_name()
 
 
 # ---------- config ----------
@@ -166,7 +250,9 @@ def build_device_snapshot(cfg: dict, projects_dir: Path, codex_dir: Optional[Pat
     return {
         "v": SNAPSHOT_VERSION,
         "device_id": cfg["device_id"],
-        "label": cfg.get("label") or socket.gethostname(),
+        "label": resolve_device_label(cfg),
+        "name_source": cfg.get("name_source", "auto"),
+        "os": platform.system(),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "sources": sources,
     }
@@ -195,7 +281,9 @@ def _assemble_snapshot(cfg: dict, sources: dict) -> dict:
     return {
         "v": SNAPSHOT_VERSION,
         "device_id": cfg["device_id"],
-        "label": cfg.get("label") or socket.gethostname(),
+        "label": resolve_device_label(cfg),
+        "name_source": cfg.get("name_source", "auto"),
+        "os": platform.system(),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "sources": sources,
     }
@@ -242,8 +330,10 @@ def account(cfg: dict) -> dict:
 def ensure_device_id(cfg: dict) -> dict:
     if not cfg.get("device_id"):
         cfg["device_id"] = uuid.uuid4().hex[:12]
-    if not cfg.get("label"):
-        cfg["label"] = socket.gethostname()
+    if not cfg.get("label") or _looks_like_ip(cfg.get("label")):
+        if cfg.get("name_source") != "user":
+            cfg["label"] = friendly_device_name()
+            cfg.setdefault("name_source", "auto")
     return cfg
 
 
