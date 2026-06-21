@@ -914,6 +914,12 @@ function paintCombinedActive(side, rep) {
 // "stuck", and never 0 when no project ran). Falls back to the server-computed
 // value for reports from an older server with no recent_costs.
 function liveBurnRate(fc, hoursStr) {
+  // Prefer the server's per-window value — it's the SAME source the model breakdown, the
+  // all-devices aggregate, and each device's contribution use. Recomputing from recent_costs
+  // here made the needle live-decay (browser clock) out of step with those frozen values
+  // between 10s refreshes (gauge $13 vs breakdown/all-devices $16 on one screen).
+  const byh = fc.burn_rates_by_hours;
+  if (byh && byh[hoursStr] != null) return byh[hoursStr];
   const rc = fc.recent_costs, hours = parseFloat(hoursStr) || 2;
   if (Array.isArray(rc)) {
     const cut = Date.now() / 1000 - hours * 3600;
@@ -921,7 +927,7 @@ function liveBurnRate(fc, hoursStr) {
     for (let i = 0; i < rc.length; i++) if (rc[i][0] >= cut) cost += rc[i][1];
     return cost / hours;
   }
-  return (fc.burn_rates_by_hours || {})[hoursStr] ?? fc.burn_rate_per_hour_recent ?? 0;
+  return fc.burn_rate_per_hour_recent ?? 0;
 }
 
 function computeGaugeSpec(rep, isCodex, hoursStr) {
@@ -1137,11 +1143,17 @@ function renderKPIs(rep, isCodex) {
   const fc = rep.forecast || {}, t = rep.totals || {}, ce = rep.cache_efficiency || {};
   const daily = rep.daily || [];
   const todayE = daily[daily.length - 1] || {};
-  const burn = fc.burn_rate_per_hour_recent ?? 0;
   const est = isCodex ? " (est.)" : "";
+  // Burn rate KPI = the SAME window the gauge shows (the picker), not a fixed 2h — else the
+  // card and the gauge disagree on one screen. scope=all → bmScopedRep has no
+  // burn_rates_by_hours but burn_rate_per_hour_recent is already the picker-window aggregate.
+  const bhrs = localStorage.getItem("burnmeter_burn_hours_" + (rep._meta?.source || "claude")) || "2";
+  const burn = (fc.burn_rates_by_hours && fc.burn_rates_by_hours[bhrs] != null)
+    ? fc.burn_rates_by_hours[bhrs] : (fc.burn_rate_per_hour_recent ?? 0);
+  const bwin = bhrs === "0.0833" ? "5m" : bhrs === "0.25" ? "15m" : bhrs + "h";
   const kpis = [
     { l: "Spent today", v: "~" + fmtMoney(fc.today?.so_far ?? 0), s: `${fmtInt(todayE.messages || 0)} prompts`, spark: daily.slice(-14).map(d => d.cost_usd || 0) },
-    { l: "Burn rate", v: "~" + fmtMoney(burn), unit: "/hr", s: "avg over last 2h" + est, spark: null },
+    { l: "Burn rate", v: "~" + fmtMoney(burn), unit: "/hr", s: `avg over last ${bwin}` + est, spark: null },
     { l: "Cache savings", v: "~" + fmtMoney0(ce.usd_saved || 0), s: `~${Math.round((ce.discount_pct || 0) * 100)}% cheaper than no-cache · all-time est.`, spark: null },
     { l: "Total spent", v: "~" + fmtMoney0(t.cost_usd || 0), s: `${fmtCompact(t.total_tokens || 0)} tokens · all-time${est}`, spark: daily.slice(-14).map(d => d.cost_usd || 0) },
   ];

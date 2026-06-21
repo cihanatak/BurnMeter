@@ -213,4 +213,12 @@ assert.ok(macRun && macRun.project_dir === "/Users/cihan/dev/Decentralized_AI",
   `remote live model must carry project_dir, got ${macRun && macRun.project_dir}`);
 passed += 1;
 
+// === TEST 9: liveBurnRate uses the frozen per-window value, not the live recent_costs recompute ===
+// (keeps the gauge needle == the breakdown == the all-devices contribution — no drift)
+const fcMix = { burn_rates_by_hours: { "2": 50 }, recent_costs: [[Date.now() / 1000 - 60, 999]], burn_rate_per_hour_recent: 7 };
+assert.equal(liveBurnRate(fcMix, "2"), 50, "must use burn_rates_by_hours[window], not recompute from recent_costs");
+const fcNoByh = { recent_costs: [[Date.now() / 1000 - 60, 10]], burn_rate_per_hour_recent: 7 };
+assert.ok(liveBurnRate(fcNoByh, "1") > 0, "falls back to recent_costs when burn_rates_by_hours absent");
+passed += 2;
+
 console.log(`dashboard_render: ${passed} assertions passed`);
