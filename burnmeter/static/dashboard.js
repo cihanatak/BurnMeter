@@ -207,10 +207,39 @@ function deviceBadge(dev) {
 function deviceName(dev) {
   return ({ pc: "PC", mac: "Mac", linux: "Linux" }[String(dev || "").toLowerCase()] || dev || "");
 }
+// Split a project dir into { name (basename, shown big), sub (compact parent path, shown
+// small underneath), full (the whole path, for the hover tooltip) }. So the user sees WHICH
+// repo, not just an ambiguous "repo". Handles both / and \ and trims a long parent to the
+// last 2 segments with a leading "…".
+function bmPathParts(dir, label) {
+  const raw = String(dir || "").trim();
+  let name = label || "";
+  if (!name && raw) name = raw.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "";
+  name = name || "unknown";
+  if (!raw) return { name, sub: "", full: "" };
+  const segs = raw.replace(/\\/g, "/").replace(/\/+$/, "").split("/").filter(Boolean);
+  if (segs.length && segs[segs.length - 1] === name) segs.pop();   // drop basename → parent
+  let sub = segs.slice(-2).join("/");
+  if (segs.length > 2) sub = "…/" + sub;
+  return { name, sub, full: raw };
+}
+// Project cell: folder name (big) + compact path (small, gray) underneath + optional device.
+function bmProjCell(dir, label, device) {
+  const pp = bmPathParts(dir, label);
+  const badge = device ? " " + deviceBadge(device) : "";
+  return `<div class="bm-proj" title="${esc(pp.full || pp.name)}">`
+    + `<span class="bm-proj-name">${esc(pp.name)}</span>${badge}`
+    + (pp.sub ? `<span class="bm-proj-sub">${esc(pp.sub)}</span>` : "")
+    + `</div>`;
+}
 function liveWhere(m) {
   const dev = deviceName(m.device);
-  const proj = m.project ? esc(m.project) : "unknown project";
-  return `<span class="am-proj"><span class="am-proj-icon">📂</span>${proj}${dev ? `<span class="am-dev">${esc(dev)}</span>` : ""}</span>`;
+  const pp = bmPathParts(m.project_dir, m.project);
+  return `<span class="am-where" title="${esc(pp.full || pp.name)}">`
+    + `<span class="am-proj"><span class="am-proj-icon">📂</span><span class="am-projname">${esc(pp.name)}</span>`
+    + `${dev ? `<span class="am-dev">${esc(dev)}</span>` : ""}</span>`
+    + (pp.sub ? `<span class="am-projpath">${esc(pp.sub)}</span>` : "")
+    + `</span>`;
 }
 
 // ---------- in-dashboard update check ----------
@@ -372,7 +401,7 @@ function bmMergedRecent(devs, sources, n) {
     sources.forEach((s) => {
       const v = (d.sources || {})[s];
       if (v && v.recent) v.recent.forEach((t) => out.push({
-        timestamp: t.ts, project_label: t.project, model: t.model,
+        timestamp: t.ts, project_label: t.project, project_dir: t.project_dir, model: t.model,
         effective_tokens: t.tokens, total_tokens: t.tokens, cost_usd: t.cost,
         cache_hit_rate: null, device: d.label,
       }));
@@ -768,7 +797,7 @@ function bmMergeLive(localLAM, pick, source, thisId) {
         const ssl = isFinite(ls) ? Math.max(0, (now - ls) / 1000) : 9e9;
         if (ssl > lim) return;
         models.push({
-          model_id: m.model_id, device: d.label, project: m.project,
+          model_id: m.model_id, device: d.label, project: m.project, project_dir: m.project_dir,
           tokens_per_min: m.tokens_per_min || 0, messages: m.messages || 0,
           cost_per_hour: m.cost_per_hour || 0, last_seen: m.last_seen,
           seconds_since_last: Math.round(ssl),
@@ -1567,18 +1596,22 @@ function bmScopedProjects(localRep) {
   const pick = scope === "all" ? devices : devices.filter((d) => d.device_id === scope);
   if (!pick.length) return null;
   const sources = bmActiveSources();
-  const agg = new Map();   // label → {label, cost, tokens, msgs, devSet}
+  const agg = new Map();   // label → {label, cost, tokens, msgs, devSet, dirs}
   pick.forEach((d) => sources.forEach((s) => {
     const sp = (d.sources && d.sources[s] && d.sources[s].by_project) || [];
     sp.forEach((p) => {
       const key = p.project || "?";
-      const e = agg.get(key) || { label: key, cost: 0, tokens: 0, msgs: 0, devSet: new Set() };
+      const e = agg.get(key) || { label: key, cost: 0, tokens: 0, msgs: 0, devSet: new Set(), dirs: new Set() };
       e.cost += p.cost || 0; e.tokens += p.tokens || 0; e.msgs += p.msgs || 0; e.devSet.add(d.device_id);
+      if (p.project_dir) e.dirs.add(p.project_dir);
       agg.set(key, e);
     });
   }));
   return [...agg.values()]
-    .map((e) => ({ label: e.label, cost: e.cost, tokens: e.tokens, msgs: e.msgs, devices: e.devSet.size }))
+    // Show the path only when it's unambiguous (one machine / same path); across devices
+    // the same label can be different folders → fall back to just the name.
+    .map((e) => ({ label: e.label, cost: e.cost, tokens: e.tokens, msgs: e.msgs, devices: e.devSet.size,
+                   project_dir: e.dirs.size === 1 ? [...e.dirs][0] : null }))
     .sort((a, b) => b.cost - a.cost).slice(0, 12);
 }
 function renderProjects(rep) {
@@ -1595,7 +1628,7 @@ function renderProjects(rep) {
     if (!scoped.length) { tb.innerHTML = `<tr><td colspan="3" class="empty">no project data yet — devices sync within ~5 min</td></tr>`; return; }
     const max = Math.max(...scoped.map((p) => p.cost), 1);
     tb.innerHTML = scoped.map((p) =>
-      `<tr><td><div>${esc(p.label)}${p.devices > 1 ? ` <span class="proj-dev">${p.devices} devices</span>` : ""}</div><div class="cell-bar"><i style="width:${p.cost / max * 100}%"></i></div></td>
+      `<tr><td><div class="proj-cell">${bmProjCell(p.project_dir, p.label)}${p.devices > 1 ? ` <span class="proj-dev">${p.devices} devices</span>` : ""}</div><div class="cell-bar"><i style="width:${p.cost / max * 100}%"></i></div></td>
         <td class="num">${fmtCompact(p.tokens || 0)}</td>
         <td class="num">${fmtMoney0(p.cost)}</td></tr>`).join("");
     return;
@@ -1606,7 +1639,7 @@ function renderProjects(rep) {
   const max = Math.max(...ps.map((p) => p.cost_usd || 0), 1);
   if (!ps.length) { tb.innerHTML = `<tr><td colspan="3" class="empty">No data</td></tr>`; return; }
   tb.innerHTML = ps.map((p) =>
-    `<tr><td><div>${esc(p.project_label)}</div><div class="cell-bar"><i style="width:${(p.cost_usd || 0) / max * 100}%"></i></div></td>
+    `<tr><td>${bmProjCell(p.project_dir, p.project_label)}<div class="cell-bar"><i style="width:${(p.cost_usd || 0) / max * 100}%"></i></div></td>
       <td class="num">${fmtCompact(p.total_tokens || 0)}</td>
       <td class="num">${fmtMoney0(p.cost_usd)}</td></tr>`).join("");
 }
@@ -1623,7 +1656,7 @@ function renderRecent(rep) {
     const fam = modelToFamily(t.model);
     return `<tr>
       <td>${relTime(t.timestamp)}</td>
-      <td><div>${esc(t.project_label)} ${deviceBadge(t.device)}</div></td>
+      <td>${bmProjCell(t.project_dir, t.project_label, t.device)}</td>
       <td><span class="pill ${fam}">${modelDisplay(t.model)}</span></td>
       <td class="num">${fmtInt(t.effective_tokens)}</td>
       <td class="num">${fmtMoney(t.cost_usd)}</td>

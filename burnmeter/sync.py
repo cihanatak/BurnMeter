@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Optional
 
 CONFIG_PATH = Path.home() / ".config" / "burnmeter" / "sync.json"
-SNAPSHOT_VERSION = 5   # v5: + per-source live (cross-device "Live active model"). v4: by_project.
+SNAPSHOT_VERSION = 6   # v6: + project_dir on recent/live/by_project (cross-device project paths).
                        # v2: bounded recent-turns tail (metadata only) for cross-device recent.
 SNAPSHOT_RECENT_MAX = 25   # last N turns per source carried in the snapshot (a few KB)
 SNAPSHOT_PROJECTS_MAX = 12  # top N projects (by cost) per source — cross-device rollup
@@ -207,6 +207,7 @@ def _summarize(report: dict) -> dict:
         {
             "ts": t.get("timestamp"),
             "project": t.get("project_label"),
+            "project_dir": t.get("project_dir"),
             "model": t.get("model"),
             "tokens": t.get("total_tokens", 0) or 0,
             "cost": round(t.get("cost_usd", 0) or 0, 4),
@@ -218,6 +219,7 @@ def _summarize(report: dict) -> dict:
     by_project = [
         {
             "project": p.get("project_label") or p.get("project_dir") or "?",
+            "project_dir": p.get("project_dir"),
             "cost": round(p.get("cost_usd", 0) or 0, 2),
             "tokens": p.get("total_tokens", 0) or 0,
             "msgs": p.get("messages", 0) or 0,
@@ -239,6 +241,7 @@ def _summarize(report: dict) -> dict:
             "cost_per_hour": round(m.get("cost_per_hour") or 0, 2),
             "last_seen": m.get("last_seen"),
             "project": m.get("project"),
+            "project_dir": m.get("project_dir"),
         }
         for m in lam15
         if m.get("model_id") and not str(m.get("model_id")).startswith("<")

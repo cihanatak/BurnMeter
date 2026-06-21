@@ -69,10 +69,10 @@ globalThis.location = windowStub.location;
 // Evaluate dashboard.js and capture the pure functions under test. Function declarations
 // are local to the wrapper; the appended assignment captures them out.
 const run = new Function(
-  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate };"
+  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts };"
 );
 run();
-const { bmScopedHalf, bmScopedRep, liveBurnRate } = globalThis.__BM;
+const { bmScopedHalf, bmScopedRep, liveBurnRate, bmPathParts } = globalThis.__BM;
 
 // ---- fixture: 2 devices. PC (this) runs Claude only; Mac runs Codex only. ----
 const WINS = ["0.0833", "0.25", "1", "2", "4", "6"];
@@ -105,8 +105,8 @@ const devicesCache = {
 const recentISO = new Date(Date.now() - 30_000).toISOString();
 const oldISO = new Date(Date.now() - 600_000).toISOString();
 devicesCache.devices[1].sources.codex.live = [
-  { model_id: "gpt-5.5", tokens_per_min: 28000, messages: 5, cost_per_hour: 24, last_seen: recentISO, project: "Decentralized_AI" },
-  { model_id: "gpt-5.5-mini", tokens_per_min: 1000, messages: 1, cost_per_hour: 2, last_seen: oldISO, project: "Decentralized_AI" },
+  { model_id: "gpt-5.5", tokens_per_min: 28000, messages: 5, cost_per_hour: 24, last_seen: recentISO, project: "Decentralized_AI", project_dir: "/Users/cihan/dev/Decentralized_AI" },
+  { model_id: "gpt-5.5-mini", tokens_per_min: 1000, messages: 1, cost_per_hour: 2, last_seen: oldISO, project: "Decentralized_AI", project_dir: "/Users/cihan/dev/Decentralized_AI" },
 ];
 window.__devicesCache = devicesCache;
 
@@ -189,6 +189,28 @@ const sr = bmScopedRep(cxLocal);
 const sr5 = ((sr.live_active_models_by_window || {})["5"] || {}).models || [];
 assert.ok(sr5.find((m) => m.device === "Mac" && m.model_id === "gpt-5.5"),
   "single-tab scoped rep must also include the Mac's running model (refresh/picker paths use it)");
+passed += 1;
+
+// === TEST 7: bmPathParts splits dir into folder name + compact path + full (hover) ===
+const pp1 = bmPathParts("/Users/cihan/dev/BURNMETER/repo", "repo");
+assert.equal(pp1.name, "repo", "name = basename");
+assert.equal(pp1.sub, "…/dev/BURNMETER", `sub should be last-2 parent segments, got ${pp1.sub}`);
+assert.equal(pp1.full, "/Users/cihan/dev/BURNMETER/repo", "full = whole path for hover");
+const pp2 = bmPathParts("C:\\work\\repo", "repo");
+assert.equal(pp2.sub, "C:/work", `backslash parent (last-2 segments), got ${pp2.sub}`);
+const pp3 = bmPathParts("", "repo");
+assert.ok(pp3.name === "repo" && pp3.sub === "", "empty dir → name only, no sub");
+const pp4 = bmPathParts(null, null);
+assert.equal(pp4.name, "unknown", "null dir+label → 'unknown', no throw");
+passed += 5;
+
+// === TEST 8: project_dir flows through the live-model merge (path shown cross-device) ===
+window.__scope = "all"; window.__source = "codex";
+window.__lastReport = { _combined: true, claude: clLocal, codex: cxLocal };
+const cxHalf3 = bmScopedHalf(cxLocal, "codex");
+const macRun = (((cxHalf3.live_active_models_by_window || {})["5"] || {}).models || []).find((m) => m.device === "Mac");
+assert.ok(macRun && macRun.project_dir === "/Users/cihan/dev/Decentralized_AI",
+  `remote live model must carry project_dir, got ${macRun && macRun.project_dir}`);
 passed += 1;
 
 console.log(`dashboard_render: ${passed} assertions passed`);

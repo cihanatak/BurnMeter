@@ -1381,6 +1381,7 @@ def live_active_models(records: list[UsageRecord], lookback_min: int = 15) -> di
         "messages": 0,
         "last_seen": None,
         "project": None,
+        "project_dir": None,
     })
 
     for r in records:
@@ -1404,6 +1405,7 @@ def live_active_models(records: list[UsageRecord], lookback_min: int = 15) -> di
         if m["last_seen"] is None or r.timestamp > m["last_seen"]:
             m["last_seen"] = r.timestamp
             m["project"] = r.project_label or m["project"]   # project of the most-recent turn
+            m["project_dir"] = r.project_dir or m["project_dir"]
 
     out = []
     elapsed_hours = elapsed_min / 60.0
@@ -1413,6 +1415,7 @@ def live_active_models(records: list[UsageRecord], lookback_min: int = 15) -> di
             "model_id": model_id,
             "device": device,
             "project": stats["project"],
+            "project_dir": stats["project_dir"],
             "billable_tokens_recent": stats["billable_tokens"],
             "tokens_per_min": round(stats["billable_tokens"] / elapsed_min, 0) if elapsed_min else 0,
             "messages": stats["messages"],
@@ -1789,6 +1792,7 @@ def build_report(
                 "turn_id": tid,
                 "session_id": r.session_id,
                 "project_label": r.project_label,
+                "project_dir": r.project_dir,
                 "model": r.model,
                 "device": getattr(r, "device", "mac"),
                 "last_ts": r.timestamp,
@@ -1821,6 +1825,7 @@ def build_report(
             "turn_id":         b["turn_id"],
             "session_id":      b["session_id"],
             "project_label":   b["project_label"],
+            "project_dir":     b["project_dir"],
             "model":           b["model"],
             "device":          b["device"],
             "effective_tokens": b["eff"],

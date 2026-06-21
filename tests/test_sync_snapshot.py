@@ -20,8 +20,9 @@ def test_summary_includes_by_project_compact():
     s = sync._summarize(_report_with_projects(3))
     assert "by_project" in s
     p = s["by_project"][0]
-    assert set(p.keys()) == {"project", "cost", "tokens", "msgs"}     # compact fields only
+    assert set(p.keys()) == {"project", "project_dir", "cost", "tokens", "msgs"}   # compact fields only
     assert p["project"] == "proj0" and p["cost"] == 3.0              # preserves order + label
+    assert p["project_dir"] == "/p/0"                               # full path for the UI
 
 
 def test_summary_caps_projects():
