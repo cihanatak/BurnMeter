@@ -479,8 +479,11 @@ function bmScopedRep(localRep) {
   const thisId = payload && payload.this_device;
   // Staleness: oldest REMOTE snapshot in scope (local device is live). updateLiveStamp shows
   // "synced Xm ago" so a remote/fleet view doesn't masquerade as live "now".
+  // Staleness label ONLY for a specific REMOTE device (all its data is as-of-last-sync). For
+  // "all" the local half is LIVE, so labeling the whole view "synced Xm ago" reads as a false
+  // delay — keep the live local stamp there (each device card still shows its own "ago").
   let asOf = null;
-  pick.forEach((d) => { if (d.device_id !== thisId && d._updated_at && (!asOf || d._updated_at < asOf)) asOf = d._updated_at; });
+  if (scope !== "all") pick.forEach((d) => { if (d.device_id !== thisId && d._updated_at && (!asOf || d._updated_at < asOf)) asOf = d._updated_at; });
   window.__scopedAsOf = asOf;
   return {
     __scopeLabel: label,
@@ -502,6 +505,8 @@ function bmRefreshHero() {
   const h = bmScopedRep(rep) || rep;
   renderSpeedometer(h, isCodex);
   renderKPIs(h, isCodex);
+  renderCache(h);        // MUST re-render on scope change too — else the cache card freezes at
+  renderDaily(h);        // the this-device value while the KPI shows fleet (a visible mismatch).
   renderRecent(h);
   renderDeviceBreakdown();
   renderOverviewFleet();

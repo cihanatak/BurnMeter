@@ -234,10 +234,19 @@ assert.ok(near(srAll.cache_efficiency.usd_saved, 150),
 assert.ok(srAll.cache_efficiency.discount_pct > 0, "fleet discount_pct recomputed from sum");
 assert.ok(srAll.daily.length === 1 && near(srAll.daily[0].cost_usd, 11),
   `fleet daily must sum per-date (PC 7 + Mac 4 = 11), got ${JSON.stringify(srAll.daily)}`);
-assert.ok(window.__scopedAsOf, "fleet scope sets __scopedAsOf (oldest remote snapshot) for staleness label");
-passed += 4;
+assert.ok(window.__scopedAsOf === null, "ALL scope must NOT set __scopedAsOf (local half is live → no false 'synced Xm ago')");
+passed += 3;
+window.__scope = "MAC"; bmScopedRep(clLocal);
+assert.ok(window.__scopedAsOf, "a specific REMOTE device scope DOES set __scopedAsOf (all data is as-of-last-sync)");
 window.__scope = "this"; bmScopedRep(clLocal);
 assert.ok(window.__scopedAsOf === null, "scope=this clears __scopedAsOf (local data is live)");
-passed += 1;
+passed += 2;
+
+// === TEST 11: bmRefreshHero (scope-change re-render) MUST re-render the cache card + daily chart
+// — else they freeze at the this-device value while the KPI shows fleet (the v0.1.71 regression). ===
+const brh = code.slice(code.indexOf("function bmRefreshHero"), code.indexOf("function bmRefreshHero") + 600);
+assert.ok(/renderCache\(\s*h\s*\)/.test(brh), "bmRefreshHero must call renderCache(h) so the card matches the scoped KPI");
+assert.ok(/renderDaily\(\s*h\s*\)/.test(brh), "bmRefreshHero must call renderDaily(h) so the chart matches the scoped KPI");
+passed += 2;
 
 console.log(`dashboard_render: ${passed} assertions passed`);
