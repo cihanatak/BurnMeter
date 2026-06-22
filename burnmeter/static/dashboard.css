@@ -431,13 +431,15 @@ main { flex:1; padding: var(--page-pad); }
 @media (max-width:760px){ .budget-grid{ grid-template-columns:1fr; gap:16px } .budget-verdict{ text-align:left } }
 
 /* ── SPEEDOMETER (araba göstergesi) — burn rate car gauge ──────────── */
-.speedo-wrap { display:flex; align-items:center; gap:var(--s6); }
-@media (max-width:640px){ .speedo-wrap{ flex-direction:column; } }
-/* max-height:100% lets the gauge SHRINK to fit a short/resized hero card instead
-   of overflowing and getting clipped (preserveAspectRatio="meet" keeps it round).
-   Width trimmed slightly so the default 5-row card never overflows either. */
+/* Top-align so the gauge stays put while the verdict text below it grows/shrinks — it must
+   NOT re-center (which moved the gauge) as the text length changes between refreshes/scopes. */
+.speedo-wrap { display:flex; align-items:flex-start; gap:var(--s6); }
+@media (max-width:640px){ .speedo-wrap{ flex-direction:column; align-items:center; } }
+/* FIXED size: width is responsive to the window (vw), height follows the viewBox aspect.
+   It must NOT depend on the card/row height (no max-height:100%), or the gauge grows and
+   shrinks as the verdict/breakdown text changes — GridStack (which needed the fill) is gone. */
 #speedo-svg { width:clamp(280px, 22vw, 440px); max-width:100%; height:auto;
-  max-height:100%; flex-shrink:0; }
+  align-self:flex-start; flex-shrink:0; }
 .speedo-zone-green  { stroke:var(--good); opacity:.9; }
 .speedo-zone-yellow { stroke:var(--warn); opacity:.9; }
 .speedo-zone-orange { stroke:#f0883e; opacity:.9; }
