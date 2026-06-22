@@ -331,7 +331,21 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 _json_response(self, 200, {"ok": True, "message": "Updating — Burnmeter will restart…"})
                 def _go():
                     time.sleep(0.6)        # let the response flush first
-                    _spawn_update(host, port)
+                    # Don't swallow a spawn failure silently — the UI already got 200 and is
+                    # polling /api/health, so log WHY no restart happened (else "updating…"
+                    # hangs forever with no diagnostic).
+                    try:
+                        if not _spawn_update(host, port):
+                            raise RuntimeError("_spawn_update returned False")
+                    except Exception as e:
+                        try:
+                            from datetime import datetime as _dt
+                            p = Path.home() / ".burnmeter" / "update_error.log"
+                            p.parent.mkdir(parents=True, exist_ok=True)
+                            with open(p, "a", encoding="utf-8") as f:
+                                f.write(_dt.now().isoformat() + " update spawn failed: " + repr(e) + "\n")
+                        except Exception:
+                            pass
                 threading.Thread(target=_go, daemon=True).start()
                 return
 

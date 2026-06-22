@@ -88,17 +88,21 @@ const mkLocal = (bbh, source) => ({
   totals: { cost_usd: 100, total_tokens: 1e6, cache_hit_rate: 0.9 },
   burn_rate_zones: { typical: 4, busy: 12, heavy: 25, max: 50 },
   recent_turns: [],
+  cache_efficiency: { usd_saved: 100, usd_on_cache: 10, full_equiv_usd: 110, discount_pct: 0.909 },
+  daily: [{ date: "2026-06-21", cost_usd: 7 }],
 });
 const mkSnap = (bbh) => ({
   burn_rates_by_hours: { ...bbh }, burn_rate_per_hour: bbh["2"],
   today_cost: 1, month_so_far: 10, lifetime_cost: 100, lifetime_tokens: 1e6,
   cache_hit_rate: 0.9, record_count: 1000, recent: [],
+  cache_efficiency: { usd_saved: 50, usd_on_cache: 5, full_equiv_usd: 55, discount_pct: 0.909 },
+  daily: [{ d: "2026-06-21", c: 4 }],
 });
 const devicesCache = {
   this_device: "PC",
   devices: [
-    { device_id: "PC", label: "PC", os: "Windows", sources: { claude: mkSnap(pcClaudeBBH), codex: mkSnap(zero) } },
-    { device_id: "MAC", label: "Mac", os: "Darwin", sources: { claude: mkSnap(zero), codex: mkSnap(macCodexBBH) } },
+    { device_id: "PC", label: "PC", os: "Windows", _updated_at: new Date(Date.now() - 5000).toISOString(), sources: { claude: mkSnap(pcClaudeBBH), codex: mkSnap(zero) } },
+    { device_id: "MAC", label: "Mac", os: "Darwin", _updated_at: new Date(Date.now() - 90_000).toISOString(), sources: { claude: mkSnap(zero), codex: mkSnap(macCodexBBH) } },
   ],
 };
 // Mac is actively running a Codex model (30s ago) + ran another 10min ago.
@@ -220,5 +224,20 @@ assert.equal(liveBurnRate(fcMix, "2"), 50, "must use burn_rates_by_hours[window]
 const fcNoByh = { recent_costs: [[Date.now() / 1000 - 60, 10]], burn_rate_per_hour_recent: 7 };
 assert.ok(liveBurnRate(fcNoByh, "1") > 0, "falls back to recent_costs when burn_rates_by_hours absent");
 passed += 2;
+
+// === TEST 10: fleet Cache savings + daily sparkline SUM across devices; staleness set ===
+window.__scope = "all"; window.__source = "claude"; window.__lastReport = clLocal;
+store.set("burnmeter_burn_hours_claude", "2");
+const srAll = bmScopedRep(clLocal);
+assert.ok(near(srAll.cache_efficiency.usd_saved, 150),
+  `fleet cache usd_saved must SUM (PC 100 + Mac 50 = 150), got ${srAll.cache_efficiency.usd_saved}`);
+assert.ok(srAll.cache_efficiency.discount_pct > 0, "fleet discount_pct recomputed from sum");
+assert.ok(srAll.daily.length === 1 && near(srAll.daily[0].cost_usd, 11),
+  `fleet daily must sum per-date (PC 7 + Mac 4 = 11), got ${JSON.stringify(srAll.daily)}`);
+assert.ok(window.__scopedAsOf, "fleet scope sets __scopedAsOf (oldest remote snapshot) for staleness label");
+passed += 4;
+window.__scope = "this"; bmScopedRep(clLocal);
+assert.ok(window.__scopedAsOf === null, "scope=this clears __scopedAsOf (local data is live)");
+passed += 1;
 
 console.log(`dashboard_render: ${passed} assertions passed`);

@@ -1741,7 +1741,8 @@ def usage_heatmap(records: list[UsageRecord]) -> dict:
             lt = r.timestamp.astimezone()
         except (ValueError, OSError, OverflowError):
             continue
-        grid[lt.weekday()][lt.hour] += (r.input_tokens or 0) + (r.output_tokens or 0) + (r.cache_read_tokens or 0)
+        grid[lt.weekday()][lt.hour] += ((r.input_tokens or 0) + (r.output_tokens or 0)
+                                        + (r.cache_creation_tokens or 0) + (r.cache_read_tokens or 0))
     return {"grid": grid, "max": max((max(row) for row in grid), default=0)}
 
 

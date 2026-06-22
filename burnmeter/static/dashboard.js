@@ -410,12 +410,47 @@ function bmMergedRecent(devs, sources, n) {
   out.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
   return out.slice(0, n || 12);
 }
+// Fleet cache-savings: SUM usd_saved across the picked devices (local from the live report,
+// remote from each snapshot's cache_efficiency) so the KPI is the FLEET total, not local-only.
+function bmMergeCache(pick, sources, thisId, localRep) {
+  let usd_saved = 0, usd_on_cache = 0, full_equiv_usd = 0;
+  (pick || []).forEach((d) => {
+    if (d.device_id === thisId && localRep && localRep.cache_efficiency) {
+      const ce = localRep.cache_efficiency;
+      usd_saved += ce.usd_saved || 0; usd_on_cache += ce.usd_on_cache || 0; full_equiv_usd += ce.full_equiv_usd || 0;
+    } else {
+      sources.forEach((s) => {
+        const ce = ((d.sources || {})[s] || {}).cache_efficiency;
+        if (ce) { usd_saved += ce.usd_saved || 0; usd_on_cache += ce.usd_on_cache || 0; full_equiv_usd += ce.full_equiv_usd || 0; }
+      });
+    }
+  });
+  return { usd_saved, usd_on_cache, full_equiv_usd, discount_pct: full_equiv_usd ? usd_saved / full_equiv_usd : 0 };
+}
+// Fleet daily cost: sum per-day cost across devices (local full daily[], remote snapshot daily
+// [{d,c}]) so the KPI sparklines show the FLEET trend instead of going blank in fleet scope.
+function bmMergedDaily(pick, sources, n, thisId, localRep) {
+  const byDate = new Map();
+  (pick || []).forEach((d) => {
+    if (d.device_id === thisId && localRep && Array.isArray(localRep.daily)) {
+      localRep.daily.forEach((dd) => byDate.set(dd.date, (byDate.get(dd.date) || 0) + (dd.cost_usd || 0)));
+    } else {
+      sources.forEach((s) => {
+        const dl = ((d.sources || {})[s] || {}).daily;
+        if (Array.isArray(dl)) dl.forEach((dd) => byDate.set(dd.d, (byDate.get(dd.d) || 0) + (dd.c || 0)));
+      });
+    }
+  });
+  return [...byDate.entries()].filter(([k]) => k)
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0]))).slice(-(n || 30))
+    .map(([date, cost_usd]) => ({ date, cost_usd }));
+}
 // Build a hero-shaped view for scope = "all" or a remote device_id; null → use local.
 function bmScopedRep(localRep) {
   const scope = window.__scope || "all";
   const payload = window.__devicesCache;
   const devices = (payload && payload.devices ? payload.devices.filter((d) => !d._undecryptable) : []);
-  if (scope === "this" || !devices.length) return null;
+  if (scope === "this" || !devices.length) { window.__scopedAsOf = null; return null; }
   const sources = bmActiveSources();
   let agg, label, k = 1;
   if (scope === "all") {
@@ -440,6 +475,12 @@ function bmScopedRep(localRep) {
     max: (z0.max || 50) * k, insufficient_history: z0.insufficient_history,
   };
   const pick = scope === "all" ? devices : devices.filter((d) => d.device_id === scope);
+  const thisId = payload && payload.this_device;
+  // Staleness: oldest REMOTE snapshot in scope (local device is live). updateLiveStamp shows
+  // "synced Xm ago" so a remote/fleet view doesn't masquerade as live "now".
+  let asOf = null;
+  pick.forEach((d) => { if (d.device_id !== thisId && d._updated_at && (!asOf || d._updated_at < asOf)) asOf = d._updated_at; });
+  window.__scopedAsOf = asOf;
   return {
     __scopeLabel: label,
     _meta: localRep._meta,
@@ -448,10 +489,10 @@ function bmScopedRep(localRep) {
                 today: { so_far: agg.today }, month: { so_far: agg.month } },
     totals: { cost_usd: agg.lifetime, total_tokens: agg.tokens, cache_hit_rate: agg.cache },
     record_count: agg.records,
-    cache_efficiency: localRep.cache_efficiency,   // snapshot lacks usd_saved → this-device est.
-    daily: [],
+    cache_efficiency: bmMergeCache(pick, sources, thisId, localRep),   // FLEET cache savings (sum)
+    daily: bmMergedDaily(pick, sources, 30, thisId, localRep),         // FLEET daily trend (sparkline)
     recent_turns: bmMergedRecent(pick, sources, 12),
-    live_active_models_by_window: bmMergeLive(localRep.live_active_models_by_window, pick, sources[0], payload && payload.this_device),
+    live_active_models_by_window: bmMergeLive(localRep.live_active_models_by_window, pick, sources[0], thisId),
   };
 }
 function bmRefreshHero() {
@@ -1777,7 +1818,15 @@ function updateLiveStamp() {
   const last = window.__lastRefreshMs; if (!last) return;
   const s = Math.floor((Date.now() - last) / 1000);
   const dot = $("live-dot");
-  $("last-updated").textContent = s < 2 ? "now" : s < 60 ? s + "s ago" : Math.floor(s / 60) + "m ago";
+  const localTxt = s < 2 ? "now" : s < 60 ? s + "s ago" : Math.floor(s / 60) + "m ago";
+  // For a fleet/remote scope, the headline data is as-of the oldest remote snapshot — say so
+  // instead of letting it read as live "now".
+  let txt = localTxt;
+  if (window.__scopedAsOf) {
+    const ra = Math.floor((Date.now() - new Date(window.__scopedAsOf).getTime()) / 1000);
+    if (isFinite(ra) && ra >= 0) txt = "synced " + (ra < 60 ? ra + "s" : Math.floor(ra / 60) + "m") + " ago";
+  }
+  $("last-updated").textContent = txt;
   if (dot) { dot.classList.toggle("live", s < 30); dot.classList.toggle("stale", s >= 30); }
 }
 

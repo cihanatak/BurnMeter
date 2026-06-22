@@ -30,11 +30,12 @@ from pathlib import Path
 from typing import Optional
 
 CONFIG_PATH = Path.home() / ".config" / "burnmeter" / "sync.json"
-SNAPSHOT_VERSION = 6   # v6: + project_dir on recent/live/by_project (cross-device project paths).
+SNAPSHOT_VERSION = 7   # v7: + cache_efficiency + daily14 (fleet Cache-savings KPI + fleet sparkline).
                        # v2: bounded recent-turns tail (metadata only) for cross-device recent.
 SNAPSHOT_RECENT_MAX = 25   # last N turns per source carried in the snapshot (a few KB)
 SNAPSHOT_PROJECTS_MAX = 12  # top N projects (by cost) per source — cross-device rollup
 SNAPSHOT_LIVE_MAX = 4       # top N currently-active models per source — cross-device live panel
+SNAPSHOT_DAILY_MAX = 14     # last N days of cost per source — cross-device KPI sparkline
 
 
 # ---------- friendly device names (never a raw IP) ----------
@@ -247,6 +248,19 @@ def _summarize(report: dict) -> dict:
         if m.get("model_id") and not str(m.get("model_id")).startswith("<")
         and (m.get("seconds_since_last") is None or m.get("seconds_since_last") <= 900)
     ][:SNAPSHOT_LIVE_MAX]
+    # Cache-efficiency $ (so another device can sum FLEET cache savings, not just show local).
+    ce = report.get("cache_efficiency") or {}
+    cache_eff = {
+        "usd_saved": round(ce.get("usd_saved", 0) or 0, 2),
+        "usd_on_cache": round(ce.get("usd_on_cache", 0) or 0, 2),
+        "full_equiv_usd": round(ce.get("full_equiv_usd", 0) or 0, 2),
+        "discount_pct": round(ce.get("discount_pct", 0) or 0, 4),
+    }
+    # Last 14 days of cost so the fleet KPI sparkline can sum per-day across devices.
+    daily14 = [
+        {"d": d.get("date"), "c": round(d.get("cost_usd", 0) or 0, 2)}
+        for d in (report.get("daily") or [])[-SNAPSHOT_DAILY_MAX:]
+    ]
     return {
         "record_count": report.get("record_count", 0),
         "burn_rate_per_hour": (fc.get("burn_rate_per_hour_recent") or 0),
@@ -261,6 +275,8 @@ def _summarize(report: dict) -> dict:
         "recent": recent,
         "by_project": by_project,
         "live": live,
+        "cache_efficiency": cache_eff,
+        "daily": daily14,
     }
 
 
