@@ -254,7 +254,7 @@ def _summarize(report: dict) -> dict:
         "usd_saved": round(ce.get("usd_saved", 0) or 0, 2),
         "usd_on_cache": round(ce.get("usd_on_cache", 0) or 0, 2),
         "full_equiv_usd": round(ce.get("full_equiv_usd", 0) or 0, 2),
-        "discount_pct": round(ce.get("discount_pct", 0) or 0, 4),
+        "discount_pct": round(min(1.0, ce.get("discount_pct", 0) or 0), 4),
     }
     # Last 14 days of cost so the fleet KPI sparkline can sum per-day across devices.
     daily14 = [

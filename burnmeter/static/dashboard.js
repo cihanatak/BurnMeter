@@ -431,13 +431,14 @@ function bmMergeCache(pick, sources, thisId, localRep) {
 // [{d,c}]) so the KPI sparklines show the FLEET trend instead of going blank in fleet scope.
 function bmMergedDaily(pick, sources, n, thisId, localRep) {
   const byDate = new Map();
+  const dk = (x) => String(x || "").slice(0, 10);   // normalize to YYYY-MM-DD so local/remote keys align
   (pick || []).forEach((d) => {
     if (d.device_id === thisId && localRep && Array.isArray(localRep.daily)) {
-      localRep.daily.forEach((dd) => byDate.set(dd.date, (byDate.get(dd.date) || 0) + (dd.cost_usd || 0)));
+      localRep.daily.forEach((dd) => { const k = dk(dd.date); if (k) byDate.set(k, (byDate.get(k) || 0) + (dd.cost_usd || 0)); });
     } else {
       sources.forEach((s) => {
         const dl = ((d.sources || {})[s] || {}).daily;
-        if (Array.isArray(dl)) dl.forEach((dd) => byDate.set(dd.d, (byDate.get(dd.d) || 0) + (dd.c || 0)));
+        if (Array.isArray(dl)) dl.forEach((dd) => { const k = dk(dd.d); if (k) byDate.set(k, (byDate.get(k) || 0) + (dd.c || 0)); });
       });
     }
   });
@@ -489,7 +490,7 @@ function bmScopedRep(localRep) {
                 today: { so_far: agg.today }, month: { so_far: agg.month } },
     totals: { cost_usd: agg.lifetime, total_tokens: agg.tokens, cache_hit_rate: agg.cache },
     record_count: agg.records,
-    cache_efficiency: bmMergeCache(pick, sources, thisId, localRep),   // FLEET cache savings (sum)
+    cache_efficiency: Object.assign(bmMergeCache(pick, sources, thisId, localRep), { hit_rate: agg.cache }),  // FLEET cache savings (sum) + fleet weighted hit-rate
     daily: bmMergedDaily(pick, sources, 30, thisId, localRep),         // FLEET daily trend (sparkline)
     recent_turns: bmMergedRecent(pick, sources, 12),
     live_active_models_by_window: bmMergeLive(localRep.live_active_models_by_window, pick, sources[0], thisId),
@@ -621,13 +622,13 @@ function render(rep) {
   renderSpeedometer(heroRep, isCodex);   // hero gauge = scoped (all devices / one device)
   renderHeroAside(rep, isCodex);         // "Local usage" stays this-device
   renderKPIs(heroRep, isCodex);          // KPI strip = scoped fleet totals
-  renderEfficiency(rep, isCodex);
-  renderCache(rep);
+  renderEfficiency(rep, isCodex);        // per-device deep-dive (fuel_efficiency not in snapshot)
+  renderCache(heroRep);                  // cache card = scoped → matches the fleet KPI $
   renderBudget(rep, isCodex);
   renderSyncDevices();
-  renderTrend(rep, isCodex);
+  renderTrend(rep, isCodex);             // burn HISTORY (timeseries not in snapshot) → this-device
   renderModels(rep);
-  renderDaily(rep);
+  renderDaily(heroRep);                  // daily bars = scoped → matches the fleet KPI sparkline
   renderProjects(rep);
   renderHeatmap(rep);
   renderRecent(heroRep);                 // recent reflects the scope
