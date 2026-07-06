@@ -22,7 +22,8 @@
     "files": ["main.js", "preload.js", "package.json"],
     "extraResources": [
       { "from": "../dist/burnmeter-server", "to": "server" },
-      { "from": "../burnmeter/assets/burnmeter.png", "to": "burnmeter.png" }
+      { "from": "../burnmeter/assets/burnmeter.png", "to": "burnmeter.png" },
+      { "from": "../burnmeter/assets/burnmeter.ico", "to": "burnmeter.ico" }
     ],
     "win": {
       "icon": "../burnmeter/assets/burnmeter.ico",

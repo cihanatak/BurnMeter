@@ -21,6 +21,39 @@ const PORT = Number(process.env.BURNMETER_PORT || 7654);   // same port as the s
 const BASE = `http://${HOST}:${PORT}`;
 const STATE_FILE = () => path.join(app.getPath("userData"), "window-state.json");
 
+// ---------- assets: dev (repo) vs packaged (resourcesPath) ----------
+// In the packaged app __dirname lives inside app.asar; the repo layout doesn't exist.
+// extraResources puts the icons at resources/burnmeter.png + resources/burnmeter.ico.
+function assetPath(name) {
+  const devP = path.join(__dirname, "..", "burnmeter", "assets", name);
+  if (fs.existsSync(devP)) return devP;
+  const prodP = path.join(process.resourcesPath || "", name);
+  return fs.existsSync(prodP) ? prodP : null;
+}
+function loadIcon(preferIco) {
+  const names = preferIco && process.platform === "win32"
+    ? ["burnmeter.ico", "burnmeter.png"] : ["burnmeter.png", "burnmeter.ico"];
+  for (const n of names) {
+    const p = assetPath(n);
+    if (p) {
+      const img = nativeImage.createFromPath(p);
+      if (!img.isEmpty()) return img;
+    }
+  }
+  return nativeImage.createEmpty();
+}
+
+// The shell GUARANTEES its own chrome: the drag region is injected here, so the window
+// is movable no matter which server version it attaches to (an older installed server
+// serves CSS without the body.electron rules — that made the window unmovable once).
+const DRAG_CSS = `
+  .topbar { -webkit-app-region: drag; padding-right: 150px; }
+  .topbar button, .topbar a, .topbar select, .topbar input,
+  .topbar .picker, .topbar .zoom-ctl, .topbar .icon-btn { -webkit-app-region: no-drag; }
+  .sidebar .side-brand { -webkit-app-region: drag; }
+  .sidebar .side-brand * { -webkit-app-region: no-drag; }
+`;
+
 let pyProc = null;        // sidecar process IF we spawned it (else null = attached)
 let win = null;
 let tray = null;
@@ -108,7 +141,7 @@ function createWindow() {
     show: false,                                  // no white flash — show on ready
     backgroundColor: "#0F1011",                   // matches --bg-base
     title: "Burnmeter",
-    icon: path.join(__dirname, "..", "burnmeter", "assets", "burnmeter.png"),
+    icon: loadIcon(true),
     autoHideMenuBar: true,
     // Premium: hidden native titlebar; Chromium draws overlay window controls in our
     // dark palette; the app's own topbar becomes the drag region (body.electron CSS).
@@ -124,6 +157,10 @@ function createWindow() {
   if (st && st.maximized) win.maximize();
   win.once("ready-to-show", () => win.show());
   win.loadURL(`${BASE}/`);
+  // Inject the drag region on EVERY load — never depend on the server's CSS version.
+  win.webContents.on("did-finish-load", () => {
+    win.webContents.insertCSS(DRAG_CSS).catch(() => {});
+  });
 
   ["resized", "moved", "maximize", "unmaximize"].forEach((ev) => win.on(ev, saveState));
   win.on("close", (e) => {
@@ -148,8 +185,8 @@ function showWindow() {
 
 // ---------- tray ----------
 function createTray() {
-  const icon = nativeImage.createFromPath(path.join(__dirname, "..", "burnmeter", "assets", "burnmeter.png"))
-    .resize({ width: 16, height: 16 });
+  let icon = loadIcon(true);                       // .ico preferred on Windows (crisp tray)
+  if (!icon.isEmpty() && process.platform !== "win32") icon = icon.resize({ width: 16, height: 16 });
   tray = new Tray(icon);
   tray.setToolTip(`Burnmeter — ${BASE}`);
   tray.setContextMenu(Menu.buildFromTemplate([
