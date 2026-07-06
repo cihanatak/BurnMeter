@@ -344,6 +344,17 @@ main { flex:1; padding: var(--page-pad); }
 .topbar { z-index:30; }
 .topbar .header-meta { margin-left:auto; }
 
+/* ---------- Electron shell (body.electron set by preload.js) ----------
+   Hidden native titlebar → the app's own topbar doubles as the DRAG region, and the
+   right edge leaves room for Chromium's overlay window buttons (min/max/close, h=42).
+   -webkit-app-region is inert in pywebview/browser → zero regression outside Electron. */
+body.electron .topbar { -webkit-app-region: drag; padding-right: 150px; }
+body.electron .topbar button, body.electron .topbar a, body.electron .topbar select,
+body.electron .topbar input, body.electron .topbar .picker, body.electron .topbar .zoom-ctl,
+body.electron .topbar .icon-btn { -webkit-app-region: no-drag; }
+body.electron .sidebar .side-brand { -webkit-app-region: drag; }   /* brand row drags too */
+body.electron .sidebar .side-brand * { -webkit-app-region: no-drag; }
+
 /* ---------- Settings section ---------- */
 .settings-list { display:flex; flex-direction:column; }
 .set-row { display:flex; align-items:center; gap:16px; padding:14px 2px; border-bottom:1px solid var(--border-subtle); }
