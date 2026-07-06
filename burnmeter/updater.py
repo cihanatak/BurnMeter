@@ -56,11 +56,15 @@ def run_installer_update(url: str = INSTALLER_URL) -> bool:
         # Burnmeter.exe).
         DETACHED = 0x00000008 | 0x00000200 | 0x08000000  # DETACHED|NEW_GROUP|NO_WINDOW
         exe = sys.executable
+        # /S first: the NSIS (electron-builder) installer honors /S and ignores the Inno
+        # flags; Inno Setup honors its own flags and ignores the unknown /S. One command
+        # line stays FULLY SILENT across both installer generations (pywebview-era Inno
+        # and the Electron-era NSIS served under the same stable asset name).
         cmdline = (
             'taskkill /F /IM Burnmeter.exe >nul 2>&1 & '
             'del "%USERPROFILE%\\.burnmeter\\window.lock" >nul 2>&1 & '
             'ping -n 4 127.0.0.1 >nul & '
-            f'"{dst}" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NORESTARTAPPLICATIONS '
+            f'"{dst}" /S /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NORESTARTAPPLICATIONS '
             f'|| start "" "{exe}"'
         )
         subprocess.Popen(["cmd", "/c", cmdline], creationflags=DETACHED, close_fds=True)
