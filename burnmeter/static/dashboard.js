@@ -223,22 +223,28 @@ function bmPathParts(dir, label) {
   if (segs.length > 2) sub = "…/" + sub;
   return { name, sub, full: raw };
 }
-// Project cell: folder name (big) + compact path (small, gray) underneath + optional device.
-function bmProjCell(dir, label, device) {
+// Project cell. With a CHAT TITLE (sohbet adı — what the user sees in the desktop sidebar):
+// chat big, "folder · path" small below — one workspace hosts many chats, so the folder
+// alone is ambiguous. Without a title (CLI-only session / Codex): folder big, path below.
+function bmProjCell(dir, label, device, chat) {
   const pp = bmPathParts(dir, label);
   const badge = device ? " " + deviceBadge(device) : "";
+  const name = chat || pp.name;
+  const sub = chat ? [pp.name, pp.sub].filter(Boolean).join(" · ") : pp.sub;
   return `<div class="bm-proj" title="${esc(pp.full || pp.name)}">`
-    + `<span class="bm-proj-name">${esc(pp.name)}</span>${badge}`
-    + (pp.sub ? `<span class="bm-proj-sub">${esc(pp.sub)}</span>` : "")
+    + `<span class="bm-proj-name">${esc(name)}</span>${badge}`
+    + (sub ? `<span class="bm-proj-sub">${esc(sub)}</span>` : "")
     + `</div>`;
 }
 function liveWhere(m) {
   const dev = deviceName(m.device);
   const pp = bmPathParts(m.project_dir, m.project);
+  const name = m.chat || pp.name;
+  const sub = m.chat ? [pp.name, pp.sub].filter(Boolean).join(" · ") : pp.sub;
   return `<span class="am-where" title="${esc(pp.full || pp.name)}">`
-    + `<span class="am-proj"><span class="am-proj-icon">📂</span><span class="am-projname">${esc(pp.name)}</span>`
+    + `<span class="am-proj"><span class="am-proj-icon">${m.chat ? "💬" : "📂"}</span><span class="am-projname">${esc(name)}</span>`
     + `${dev ? `<span class="am-dev">${esc(dev)}</span>` : ""}</span>`
-    + (pp.sub ? `<span class="am-projpath">${esc(pp.sub)}</span>` : "")
+    + (sub ? `<span class="am-projpath">${esc(sub)}</span>` : "")
     + `</span>`;
 }
 
@@ -401,7 +407,7 @@ function bmMergedRecent(devs, sources, n) {
     sources.forEach((s) => {
       const v = (d.sources || {})[s];
       if (v && v.recent) v.recent.forEach((t) => out.push({
-        timestamp: t.ts, project_label: t.project, project_dir: t.project_dir, model: t.model,
+        timestamp: t.ts, project_label: t.project, project_dir: t.project_dir, chat: t.chat, model: t.model,
         effective_tokens: t.tokens, total_tokens: t.tokens, cost_usd: t.cost,
         cache_hit_rate: null, device: d.label,
       }));
@@ -844,7 +850,7 @@ function bmMergeLive(localLAM, pick, source, thisId) {
         const ssl = isFinite(ls) ? Math.max(0, (now - ls) / 1000) : 9e9;
         if (ssl > lim) return;
         models.push({
-          model_id: m.model_id, device: d.label, project: m.project, project_dir: m.project_dir,
+          model_id: m.model_id, device: d.label, project: m.project, project_dir: m.project_dir, chat: m.chat,
           tokens_per_min: m.tokens_per_min || 0, messages: m.messages || 0,
           cost_per_hour: m.cost_per_hour || 0, last_seen: m.last_seen,
           seconds_since_last: Math.round(ssl),
@@ -1059,7 +1065,7 @@ function halfStructure(rep, isCodex, side) {
   const amPicker = [["live", "● Live"], ["1", "1m"], ["5", "5m"], ["15", "15m"]]
     .map(([v, l]) => `<button data-w="${v}"${v === aw ? ' class="active"' : ""}>${l}</button>`).join("");
   const recent = (rep.recent_turns || []).filter(t => !String(t.model || "").startsWith("<")).slice(0, 6);
-  const recRows = recent.length ? recent.map(t => `<div class="cvr-row"><span class="cvr-when dim">${ago(t.timestamp)}</span><span class="cvr-proj"><span class="cvr-projname">${esc(t.project_label || "?")}</span>${deviceBadge(t.device)}</span><span class="cvr-model ${modelToFamily(t.model)}">${esc(modelDisplay(t.model))}</span><span class="cvr-tok num">${fmtInt(t.total_tokens || 0)}</span></div>`).join("") : `<div class="dim" style="padding:6px 0">no activity</div>`;
+  const recRows = recent.length ? recent.map(t => `<div class="cvr-row"><span class="cvr-when dim">${ago(t.timestamp)}</span><span class="cvr-proj" title="${esc(t.project_dir || t.project_label || "")}"><span class="cvr-projname">${esc(t.chat || t.project_label || "?")}</span>${deviceBadge(t.device)}</span><span class="cvr-model ${modelToFamily(t.model)}">${esc(modelDisplay(t.model))}</span><span class="cvr-tok num">${fmtInt(t.total_tokens || 0)}</span></div>`).join("") : `<div class="dim" style="padding:6px 0">no activity</div>`;
   return `<div class="cv-head"><span class="cv-logo">${isCodex ? "⌬" : "◔"}</span><span class="cv-title">${isCodex ? "Codex" : "Claude Code"}</span><span class="cv-sub dim">${fmtInt(rep.record_count || 0)} records</span></div>
     <div class="cvb cv-herobox">
       <div class="cvb-trow"><span class="cvb-t dim">Burn rate · burning too fast?</span><span class="picker cv-picker">${picker}</span></div>
@@ -1715,7 +1721,7 @@ function renderRecent(rep) {
     const fam = modelToFamily(t.model);
     return `<tr>
       <td>${relTime(t.timestamp)}</td>
-      <td>${bmProjCell(t.project_dir, t.project_label, t.device)}</td>
+      <td>${bmProjCell(t.project_dir, t.project_label, t.device, t.chat)}</td>
       <td><span class="pill ${fam}">${modelDisplay(t.model)}</span></td>
       <td class="num">${fmtInt(t.effective_tokens)}</td>
       <td class="num">${fmtMoney(t.cost_usd)}</td>

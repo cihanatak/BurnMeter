@@ -223,6 +223,13 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
             rep["_meta"] = {**stats, "source": source}
             if source == "codex" and stats.get("rate_limits"):
                 rep["codex_rate_limits"] = stats["rate_limits"]
+            # Chat titles (sohbet adı) from the desktop app's session store — the folder
+            # name alone is ambiguous (one workspace hosts many chats). Fail-silent.
+            try:
+                from .chat_titles import enrich_report
+                enrich_report(rep)
+            except Exception:
+                pass
             return rep
         return sel.get_report(_build, key=(source, plan), force=force)
 

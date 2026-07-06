@@ -69,10 +69,10 @@ globalThis.location = windowStub.location;
 // Evaluate dashboard.js and capture the pure functions under test. Function declarations
 // are local to the wrapper; the appended assignment captures them out.
 const run = new Function(
-  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts };"
+  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere };"
 );
 run();
-const { bmScopedHalf, bmScopedRep, liveBurnRate, bmPathParts } = globalThis.__BM;
+const { bmScopedHalf, bmScopedRep, liveBurnRate, bmPathParts, bmProjCell, liveWhere } = globalThis.__BM;
 
 // ---- fixture: 2 devices. PC (this) runs Claude only; Mac runs Codex only. ----
 const WINS = ["0.0833", "0.25", "1", "2", "4", "6"];
@@ -109,7 +109,7 @@ const devicesCache = {
 const recentISO = new Date(Date.now() - 30_000).toISOString();
 const oldISO = new Date(Date.now() - 600_000).toISOString();
 devicesCache.devices[1].sources.codex.live = [
-  { model_id: "gpt-5.5", tokens_per_min: 28000, messages: 5, cost_per_hour: 24, last_seen: recentISO, project: "Decentralized_AI", project_dir: "/Users/cihan/dev/Decentralized_AI" },
+  { model_id: "gpt-5.5", tokens_per_min: 28000, messages: 5, cost_per_hour: 24, last_seen: recentISO, project: "Decentralized_AI", project_dir: "/Users/cihan/dev/Decentralized_AI", chat: "DAI Agent Training" },
   { model_id: "gpt-5.5-mini", tokens_per_min: 1000, messages: 1, cost_per_hour: 2, last_seen: oldISO, project: "Decentralized_AI", project_dir: "/Users/cihan/dev/Decentralized_AI" },
 ];
 window.__devicesCache = devicesCache;
@@ -248,5 +248,21 @@ const brh = code.slice(code.indexOf("function bmRefreshHero"), code.indexOf("fun
 assert.ok(/renderCache\(\s*h\s*\)/.test(brh), "bmRefreshHero must call renderCache(h) so the card matches the scoped KPI");
 assert.ok(/renderDaily\(\s*h\s*\)/.test(brh), "bmRefreshHero must call renderDaily(h) so the chart matches the scoped KPI");
 passed += 2;
+
+// === TEST 12: chat title (sohbet adı) flows through merge + renders big with folder·path sub ===
+window.__scope = "all"; window.__source = "codex";
+window.__lastReport = { _combined: true, claude: clLocal, codex: cxLocal };
+const cxHalf4 = bmScopedHalf(cxLocal, "codex");
+const macLive = (((cxHalf4.live_active_models_by_window || {})["5"] || {}).models || []).find((m) => m.device === "Mac");
+assert.equal(macLive && macLive.chat, "DAI Agent Training", "remote live model must carry the chat title through bmMergeLive");
+const lw = liveWhere(macLive);
+assert.ok(lw.includes("DAI Agent Training"), "liveWhere must show the chat title");
+assert.ok(lw.includes("Decentralized_AI"), "liveWhere sub must still show the folder");
+const cell = bmProjCell("/x/y/repo", "repo", null, "World Intelligence");
+assert.ok(cell.includes('bm-proj-name">World Intelligence<'), "bmProjCell: chat title is the BIG name");
+assert.ok(/bm-proj-sub">repo/.test(cell), "bmProjCell: folder moves to the sub line under the chat");
+const cellNoChat = bmProjCell("/x/y/repo", "repo", null, null);
+assert.ok(cellNoChat.includes('bm-proj-name">repo<') && !cellNoChat.includes("World"), "no chat → folder-big fallback unchanged");
+passed += 5;
 
 console.log(`dashboard_render: ${passed} assertions passed`);

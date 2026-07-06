@@ -1382,6 +1382,7 @@ def live_active_models(records: list[UsageRecord], lookback_min: int = 15) -> di
         "last_seen": None,
         "project": None,
         "project_dir": None,
+        "session_id": None,
     })
 
     for r in records:
@@ -1406,6 +1407,7 @@ def live_active_models(records: list[UsageRecord], lookback_min: int = 15) -> di
             m["last_seen"] = r.timestamp
             m["project"] = r.project_label or m["project"]   # project of the most-recent turn
             m["project_dir"] = r.project_dir or m["project_dir"]
+            m["session_id"] = r.session_id or m["session_id"]  # → chat title lookup
 
     out = []
     elapsed_hours = elapsed_min / 60.0
@@ -1416,6 +1418,7 @@ def live_active_models(records: list[UsageRecord], lookback_min: int = 15) -> di
             "device": device,
             "project": stats["project"],
             "project_dir": stats["project_dir"],
+            "session_id": stats["session_id"],
             "billable_tokens_recent": stats["billable_tokens"],
             "tokens_per_min": round(stats["billable_tokens"] / elapsed_min, 0) if elapsed_min else 0,
             "messages": stats["messages"],

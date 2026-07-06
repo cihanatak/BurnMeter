@@ -128,7 +128,7 @@ def test_snapshot_recent_tail_bounded_and_metadata_only():
     s = sync._summarize(report)
     assert isinstance(s.get("recent"), list)
     assert len(s["recent"]) == sync.SNAPSHOT_RECENT_MAX == 25                 # bounded
-    assert set(s["recent"][0]) == {"ts", "project", "project_dir", "model", "tokens", "cost"}  # metadata only
+    assert set(s["recent"][0]) == {"ts", "project", "project_dir", "chat", "model", "tokens", "cost"}  # metadata only
     dump = repr(s["recent"])
     assert "secret message body" not in dump and "XXXX" not in dump          # no raw content
     assert len(repr(s)) < 8000                                               # whole summary stays tiny
