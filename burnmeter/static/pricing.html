@@ -1,8 +1,8 @@
 <!doctype html>
-<html lang="tr">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Burnmeter Pro — fiyatlar</title>
+  <title>Burnmeter Pro — pricing</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="/static/dashboard.css?v=20260531z" />
   <style>
@@ -47,72 +47,73 @@
     <div class="pr-top">
       <div class="pr-logo">◔</div>
       <span class="pr-name">Burnmeter</span>
-      <a class="pr-back" href="/landing">Tanıtım</a>
+      <a class="pr-back" href="https://burnmeter.dev">Website</a>
       <a class="pr-back" href="/" style="margin-left:0">← Dashboard</a>
     </div>
 
     <div class="pr-hero">
-      <h1>Local dashboard sonsuza dek ücretsiz.<br>Pro, makineler arasını birbirine bağlar.</h1>
-      <p>Open-core (AGPL-3.0). <strong>Yeteneği paywall'lamıyoruz</strong> — local dashboard + tüm
-        agent'lar (Claude Code, Codex, gelecekte daha fazlası) hep bedava. Sadece tek makinenin
-        sağlayamayacağı <strong>servisleri</strong> (cihazlar arası sync, akıllı uyarılar, ekip görünümü) ücretlendiriyoruz.
-        Veri her zaman senin diskinde; Pro sync uçtan-uca şifreli, relay yalnızca ciphertext görür.</p>
+      <h1>The local dashboard is free forever.<br>Pro connects your machines.</h1>
+      <p>Open-core (AGPL-3.0). <strong>We never paywall capability</strong> — the local dashboard and
+        every agent (Claude Code, Codex, more to come) are free for good. We only charge for
+        <strong>services one machine can't provide alone</strong>: cross-device sync, smart alerts,
+        a team view. Your data always stays on your disk; Pro sync is end-to-end encrypted — the
+        relay only ever sees ciphertext.</p>
     </div>
 
     <div class="pr-grid">
       <div class="tier">
         <div class="tier-name">Free</div>
-        <div class="tier-price">$0 <span>· sonsuza dek</span></div>
-        <div class="tier-sub">OSS çekirdek — dağıtım + güven motoru.</div>
+        <div class="tier-price">$0 <span>· forever</span></div>
+        <div class="tier-sub">The OSS core — our distribution & trust engine.</div>
         <ul>
-          <li>Canlı local web dashboard (tüm paneller)</li>
-          <li><strong>Her</strong> agent — Claude Code, Codex, gelecek (hiç gate'lenmez)</li>
-          <li>Session / gün / proje / model kırılımları</li>
-          <li>Rate-limit hero (5sa + haftalık), burn-rate, projeksiyon</li>
-          <li>Cache verimliliği + aylık bütçe + aktivite ısı haritası</li>
-          <li>Git commit/branch atıfı — hangi commit ne kadar yaktı</li>
-          <li>CSV/JSON export · son 30 gün geçmiş · statusline CLI</li>
-          <li>Config-dosyası uyarı kuralları (self-host)</li>
+          <li>Live local dashboard (every panel)</li>
+          <li><strong>Every</strong> agent — Claude Code, Codex, future ones (never gated)</li>
+          <li>Session / day / project / model breakdowns</li>
+          <li>Rate-limit hero (5h + weekly), burn rate, projections</li>
+          <li>Cache efficiency + monthly budget + activity heatmap</li>
+          <li>Git commit/branch attribution — what each commit burned</li>
+          <li>CSV/JSON export · 30-day history · statusline CLI</li>
+          <li>Config-file alert rules (self-hosted)</li>
         </ul>
       </div>
 
       <div class="tier pro">
-        <span class="tier-badge">En popüler</span>
+        <span class="tier-badge">Most popular</span>
         <div class="tier-name">Pro</div>
-        <div class="tier-price">~$6 <span>/ay · $60/yıl</span></div>
-        <div class="tier-sub">Birden çok makinede çalışan power-user için. Launch: $99 lifetime.</div>
+        <div class="tier-price">$6 <span>/mo · $60/yr</span></div>
+        <div class="tier-sub">For power users on more than one machine. Launch deal: $99 lifetime.</div>
         <ul>
-          <li><strong>Hosted sync</strong> — relay'i biz çalıştırırız; cihazlar arası E2E-şifreli geçmiş</li>
-          <li><strong>Kalıcı geçmiş</strong> — sync sayesinde sağlayıcı logları silinse de kalır</li>
-          <li><strong>Akıllı uyarılar</strong> <span style="opacity:.55">· yakında</span> — Slack / e-posta / webhook, tab kapalıyken bile</li>
-          <li>Öncelikli destek + erken erişim</li>
+          <li><strong>Hosted sync</strong> — we run the service; E2E-encrypted history across your devices</li>
+          <li><strong>Durable history</strong> — survives even when provider logs get pruned</li>
+          <li><strong>Smart alerts</strong> <span style="opacity:.55">· soon</span> — Slack / email / webhook, even with the app closed</li>
+          <li>Priority support + early access</li>
         </ul>
       </div>
 
       <div class="tier">
         <div class="tier-name">Team</div>
-        <div class="tier-price">~$12 <span>/koltuk · min 3</span></div>
-        <div class="tier-sub">$200 Max/Pro koltuk harcayan + denetim isteyen eng. yöneticisi için.</div>
+        <div class="tier-price">$12 <span>/seat · min 3</span></div>
+        <div class="tier-sub">For the eng manager paying for $200 Max/Pro seats who wants visibility.</div>
         <ul>
-          <li>Pro'daki her şey</li>
-          <li><strong>Ekip dashboard'u</strong> — toplu maliyet (yalnız metrik, kod/içerik asla)</li>
-          <li>Maliyet-atıf raporları — dev/proje/sprint, CSV</li>
-          <li>Admin — ekip bütçe cap'leri, uyarı yönlendirme</li>
-          <li>SSO / SAML (~10+ koltuk), fatura</li>
-          <li class="muted">Anthropic Enterprise Analytics yalnız Enterprise'a — küçük ekipler boşlukta. Burası biz.</li>
+          <li>Everything in Pro</li>
+          <li><strong>Team dashboard</strong> — aggregate cost (metrics only, never code or content)</li>
+          <li>Cost-attribution reports — per dev/project/sprint, CSV</li>
+          <li>Admin — team budget caps, alert routing</li>
+          <li>SSO / SAML (~10+ seats), invoicing</li>
+          <li class="muted">Anthropic's Enterprise Analytics is Enterprise-only — small teams are left out. That's us.</li>
         </ul>
       </div>
     </div>
 
-    <div class="pr-h2">Pro sync'i şimdi dene (self-host)</div>
+    <div class="pr-h2">Try Pro sync today (self-host)</div>
     <div class="pr-note">
-      Billing henüz canlı değil; ama sync mekanizması <strong>çalışıyor ve self-host edilebilir</strong> — kendi relay'ini çalıştır:
-      <div class="pr-cmd-block">pip install "burnmeter[sync]"            # E2E için cryptography
-burnmeter sync-relay --port 8899          # relay (VPS / Tailscale node) — yalnızca ciphertext saklar
-# her makinede (AYNI passphrase):
-burnmeter sync login --relay http://&lt;relay&gt;:8899 --token &lt;ortak-token&gt;
-burnmeter sync push                       # bu cihazın özetini şifreleyip gönder</div>
-      Sonra dashboard'daki <strong>Cihazlar</strong> kartında tüm makinelerini görürsün. Detay
+      Billing isn't live yet — but the sync engine <strong>works and is self-hostable</strong>. Run your own relay:
+      <div class="pr-cmd-block">pip install "burnmeter[sync]"            # cryptography for E2E
+burnmeter sync-relay --port 8899          # relay (VPS / Tailscale node) — stores ciphertext only
+# on every machine (SAME passphrase):
+burnmeter sync login --relay http://&lt;relay&gt;:8899 --token &lt;shared-token&gt;
+burnmeter sync push                       # encrypt & push this device's summary</div>
+      Your machines then appear in the dashboard's <strong>Devices</strong> card. Details in
       <code>docs/SYNC.md</code> + <code>PRICING.md</code>.
     </div>
   </div>

@@ -1401,7 +1401,13 @@ async function renderSyncDevices() {
 function proAuthFormHtml() {
   return `<div style="max-width:560px">
     <div style="font-size:14.5px;font-weight:600;color:var(--text-1);margin-bottom:4px">Connect Pro <span style="color:var(--brand)">✦</span></div>
-    <div class="dim" style="font-size:12.5px;line-height:1.55;margin-bottom:12px">See all your machines in one view — end-to-end encrypted (only summaries sync; your raw logs never leave your machine). Create an account or sign in with your <b>email + password</b>.</div>
+    <div class="dim" style="font-size:12.5px;line-height:1.55;margin-bottom:10px">See all your machines in one view — end-to-end encrypted (only summaries sync; your raw logs never leave your machine). Create an account or sign in with your <b>email + password</b>.</div>
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:10px 14px;background:var(--bg-inset);border:1px solid var(--border-default);border-radius:var(--radius-md)">
+      <span class="num" style="font-size:20px;font-weight:700;color:var(--text-1)">$6<span class="dim" style="font-size:12px;font-weight:500">/mo</span></span>
+      <span class="dim" style="font-size:12px">or $60/yr</span>
+      <span style="font-size:11px;font-weight:700;color:var(--brand);background:var(--brand-soft);border-radius:var(--radius-full);padding:3px 9px">Launch: $99 lifetime</span>
+      <span class="dim" style="font-size:11px;margin-left:auto">free while billing is in beta — early accounts keep a launch discount</span>
+    </div>
     <div class="pro-form">
       <input id="pro-email" type="email" placeholder="email" value="${esc(localStorage.getItem('bm_pro_email') || '')}">
       <input id="pro-pass" type="password" placeholder="password (min 10 chars)">
@@ -1607,12 +1613,27 @@ function renderTrend(rep, isCodex) {
 }
 
 // ---------- model donut ----------
+// Brand color for a model family — charts must speak the SAME color language the source
+// toggle/pills teach (Claude = brand orange, Codex/GPT = brand teal), not a random palette.
+function bmBrandColor(varName, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  return v || fallback;
+}
+function bmModelColor(modelId, i) {
+  const fam = modelToFamily(modelId);
+  const claude = bmBrandColor("--brand-claude", "#D97757"), codex = bmBrandColor("--brand-codex", "#10A37F");
+  // Same family, distinguishable shades: step down alpha within the family hue (hex-alpha).
+  const shade = ["", "C8", "90", "58"][i % 4];
+  if (fam.startsWith("gpt")) return codex + shade;
+  if (["opus", "sonnet", "haiku", "fable"].includes(fam)) return claude + shade;
+  return ["#8A8F98", "#5E6AD2", "#E0A3FF", "#5BD6E0"][i % 4];    // unknown → neutrals
+}
 function renderModels(rep) {
   const bmf = (rep.by_model_full || []).filter(m => !String(m.model_id || "").startsWith("<")).slice(0, 8);
   const labels = bmf.map(m => modelDisplay(m.model_id));
   const data = bmf.map(m => m.cost_usd || 0);
   const total = data.reduce((a, b) => a + b, 0);
-  const palette = ["#5E6AD2", "#02B8CC", "#2BD96B", "#E0A3FF", "#F5A623", "#F2555A", "#7C8CF0", "#5BD6E0"];
+  const palette = bmf.map((m, i) => bmModelColor(m.model_id, i));
   const ctx = $("chart-models");
   if (window.__charts.models) window.__charts.models.destroy();
   window.__charts.models = new Chart(ctx, {
@@ -1633,7 +1654,10 @@ function renderDaily(rep) {
   const labels = daily.map(d => (d.date || "").slice(5));
   const data = daily.map(d => d.cost_usd || 0);
   const today = labels.length - 1;
-  const colors = data.map((_, i) => i === today ? "#5E6AD2" : "rgba(98,102,109,0.5)");
+  // Today's bar = the ACTIVE source's brand color (--brand follows claude/codex/both),
+  // history bars stay neutral — the chart reinforces the same color language as the toggle.
+  const brand = bmBrandColor("--brand", "#D97757");
+  const colors = data.map((_, i) => i === today ? brand : "rgba(98,102,109,0.5)");
   $("daily-sub").textContent = daily.length ? `total ~${fmtMoney0(data.reduce((a, b) => a + b, 0))} (est.)` : "";
   const ctx = $("chart-daily");
   if (window.__charts.daily) window.__charts.daily.destroy();
@@ -1719,12 +1743,18 @@ function renderRecent(rep) {
   if (!turns.length) { tb.innerHTML = `<tr><td colspan="6" class="empty">No activity yet</td></tr>`; return; }
   tb.innerHTML = turns.map(t => {
     const fam = modelToFamily(t.model);
+    // A ~free turn reads as BROKEN data ("0 tokens · $0.00") unless we say WHY it's free.
+    // If the turn moved real tokens but cost ≈ nothing and cache did the work → "cached".
+    const freeByCache = (t.cost_usd || 0) < 0.005 && (t.total_tokens || 0) > 0 && (t.cache_hit_rate == null || t.cache_hit_rate > 0.8);
+    const costCell = freeByCache
+      ? `<span class="pill-cached" title="~free — served almost entirely from cache">cached</span>`
+      : fmtMoney(t.cost_usd);
     return `<tr>
       <td>${relTime(t.timestamp)}</td>
       <td>${bmProjCell(t.project_dir, t.project_label, t.device, t.chat)}</td>
       <td><span class="pill ${fam}">${modelDisplay(t.model)}</span></td>
       <td class="num">${fmtInt(t.effective_tokens)}</td>
-      <td class="num">${fmtMoney(t.cost_usd)}</td>
+      <td class="num">${costCell}</td>
       <td class="num">${fmtPct(t.cache_hit_rate)}</td></tr>`;
   }).join("");
 }

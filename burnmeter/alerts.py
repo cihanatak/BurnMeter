@@ -42,6 +42,7 @@ CONFIG_PATH = Path.home() / ".config" / "burnmeter" / "alerts.json"
 RATE_LIMIT_WARN = 85     # % of account rate-limit (Codex)
 RATE_LIMIT_CRIT = 95     # %
 BURN_HEAVY_MULT = 1.6    # Claude: warn when burn-rate >= 'heavy' zone * this
+WEEK_OVER_P95_MULT = 1.2  # budget pace: warn when this week's spend > heaviest week * this
 
 LEVEL_NAMES = {0: "ok", 2: "warn", 3: "crit"}
 
@@ -84,6 +85,7 @@ def evaluate(report: dict, source: str) -> tuple[int, str]:
     - Claude (no account limit): burn-rate vs the 'heavy' reference zone —
       >= heavy * 1.6 warning.
     """
+    level, msg = 0, ""
     if source == "codex":
         rls = report.get("codex_rate_limits") or {}
         if rls:
@@ -92,22 +94,36 @@ def evaluate(report: dict, source: str) -> tuple[int, str]:
             secondary = (dev.get("secondary") or {}).get("used_percent") or 0
             bp = max(primary, secondary)
             if bp >= RATE_LIMIT_CRIT:
-                return 3, f"\U0001f534 Codex limiti %{round(bp)} — throttle ÇOK YAKIN"
-            if bp >= RATE_LIMIT_WARN:
-                return 2, f"\U0001f7e0 Codex limiti %{round(bp)} — duvara yaklaşıyorsun"
-        return 0, ""
+                level, msg = 3, f"\U0001f534 Codex limit at {round(bp)}% — throttle is IMMINENT"
+            elif bp >= RATE_LIMIT_WARN:
+                level, msg = 2, f"\U0001f7e0 Codex limit at {round(bp)}% — approaching the wall"
+    else:
+        # claude — no account limit, so we warn on excessive burn rate
+        fc = report.get("forecast") or {}
+        zones = report.get("burn_rate_zones") or {}
+        by_hours = fc.get("burn_rates_by_hours") or {}
+        rate = by_hours.get("2")
+        if rate is None:
+            rate = fc.get("burn_rate_per_hour_recent") or 0
+        heavy = zones.get("heavy")
+        if heavy and rate >= heavy * BURN_HEAVY_MULT:
+            level, msg = 2, f"\U0001f7e0 Burn rate is very high: {_money(rate)}/hr"
 
-    # claude — no account limit, so we warn on excessive burn rate
-    fc = report.get("forecast") or {}
-    zones = report.get("burn_rate_zones") or {}
-    by_hours = fc.get("burn_rates_by_hours") or {}
-    rate = by_hours.get("2")
-    if rate is None:
-        rate = fc.get("burn_rate_per_hour_recent") or 0
-    heavy = zones.get("heavy")
-    if heavy and rate >= heavy * BURN_HEAVY_MULT:
-        return 2, f"\U0001f7e0 Burn rate çok yüksek: {_money(rate)}/sa"
-    return 0, ""
+    # Budget pace (any source) — the math was ALWAYS computed by analytics (weekly_cap +
+    # forecast.month) but never read here; this is the "you're on pace to overspend" alert.
+    # Fire only vs the user's OWN history (p95 of their heaviest week) — no invented budgets.
+    wc = report.get("weekly_cap") or {}
+    week = wc.get("rolling_7d_cost") or 0
+    p95 = wc.get("historical_7d_p95") or 0
+    if p95 > 0 and week >= p95 * WEEK_OVER_P95_MULT:
+        eom = ((report.get("forecast") or {}).get("month") or {}).get("projected_eom")
+        pace = (f"\U0001f4c8 Spending pace: {_money(week)} this week — "
+                f"{round(week / p95 * 100 - 100)}% above your heaviest week ({_money(p95)})")
+        if eom:
+            pace += f". On pace for {_money(eom)} this month."
+        if 2 > level:
+            level, msg = 2, pace
+    return level, msg
 
 
 # ---------- senders (stdlib only) ----------
@@ -203,5 +219,5 @@ def send_test(cfg: Optional[dict] = None) -> list[str]:
     gating) so users can verify their setup."""
     cfg = cfg if cfg is not None else load_config()
     return dispatch(cfg, 2,
-                    "\U0001f514 Burnmeter test uyarısı — bildirim hedeflerin çalışıyor.",
+                    "\U0001f514 Burnmeter test alert — your notification destinations work.",
                     "test")

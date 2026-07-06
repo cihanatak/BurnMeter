@@ -242,6 +242,10 @@ main.gs-active { display:block; }
 .bm-proj-sub { font:400 11px/1.2 var(--font-mono); color:var(--text-3);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .proj-cell { display:flex; align-items:center; gap:6px; flex-wrap:wrap; min-width:0; }
+/* "~free because cache did the work" — a $0.00 row must not read as broken data */
+.pill-cached { font:600 10.5px/1 var(--font-sans); letter-spacing:.03em; color:var(--good);
+  background:color-mix(in srgb, var(--good) 12%, transparent); border:1px solid color-mix(in srgb, var(--good) 35%, transparent);
+  border-radius:var(--radius-full); padding:3px 8px; }
 .am-tpm, .am-rate { font-variant-numeric:tabular-nums; color:var(--text-2); }
 .am-msg { font-size:11.5px; }
 .am-seen { font-size:11.5px; text-align:right; min-width:56px; color:var(--text-3); }
@@ -316,7 +320,8 @@ main { flex:1; padding: var(--page-pad); }
   transition:background .15s, color .15s; }
 .nav-item:hover { background:var(--bg-inset); color:var(--text-1); }
 .nav-item.active { background:var(--brand-soft); color:var(--brand); }
-.nav-ico { font-size:16px; width:20px; text-align:center; flex-shrink:0; }
+.nav-ico { font-size:16px; width:20px; text-align:center; flex-shrink:0; display:inline-flex; align-items:center; justify-content:center; }
+.nav-ico svg { width:18px; height:18px; display:block; }   /* SVG icons inherit currentColor (hover/active states work) */
 .nav-lbl { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .nav-badge { margin-left:auto; font:700 10.5px/1 var(--font-mono); background:var(--bg-inset); color:var(--text-2);
   border-radius:var(--radius-full); padding:2px 7px; }
