@@ -223,13 +223,9 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
             rep["_meta"] = {**stats, "source": source}
             if source == "codex" and stats.get("rate_limits"):
                 rep["codex_rate_limits"] = stats["rate_limits"]
-            # Chat titles (sohbet adı) from the desktop app's session store — the folder
-            # name alone is ambiguous (one workspace hosts many chats). Fail-silent.
-            try:
-                from .chat_titles import enrich_report
-                enrich_report(rep)
-            except Exception:
-                pass
+            # NOTE: chat-title enrichment lives INSIDE build_report (analytics) — the single
+            # choke point. Do NOT hook it here: with worker_config set this callback is only
+            # the fallback path and the worker build would miss it (bit us in 0.1.73 dev).
             return rep
         return sel.get_report(_build, key=(source, plan), force=force)
 

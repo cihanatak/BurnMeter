@@ -52,3 +52,25 @@ def test_enrich_report_no_titles_is_noop():
 
 def test_missing_store_root_is_safe(tmp_path):
     assert load_chat_titles(roots=[tmp_path / "does-not-exist"]) == {}
+
+
+def test_build_report_attaches_chat_titles(monkeypatch):
+    """build_report is the SINGLE choke point every build path goes through (worker
+    subprocess, in-process, statusline, sync auto-push). Hooking enrichment only in the
+    server callback missed the worker path (0.1.73 dev bug) — guard it HERE."""
+    from datetime import datetime, timezone
+    import burnmeter.chat_titles as ct
+    from burnmeter.analytics import build_report
+    from burnmeter.parser import UsageRecord
+
+    monkeypatch.setattr(ct, "load_chat_titles", lambda roots=None: {"sess": "World Intelligence"})
+    rec = UsageRecord(
+        timestamp=datetime.now(timezone.utc), session_id="sess", project_dir="/p",
+        project_label="proj", git_branch="main", model="claude-opus-4-8", message_id="t1",
+        input_tokens=100, output_tokens=10, cache_creation_tokens=0, cache_read_tokens=0,
+        tool_names=[], source_file="", uuid="t1", parent_uuid="", turn_id="t1", device="pc",
+    )
+    rep = build_report([rec])
+    assert rep["recent_turns"][0]["chat"] == "World Intelligence"
+    lam = rep["live_active_models_by_window"]["5"]["models"]
+    assert lam and lam[0].get("chat") == "World Intelligence"

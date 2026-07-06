@@ -1904,7 +1904,7 @@ def build_report(
         }
 
     bmf = aggregate_by_specific_model(records)
-    return {
+    rep = {
         "recent_turns": recent_turns_data,
         "by_device": by_device_totals,
         "totals": totals_dict,
@@ -1956,3 +1956,13 @@ def build_report(
         "industry_reference": INDUSTRY_REFERENCE,
         "record_count": len(records),
     }
+    # Chat titles (sohbet adı) MUST be attached HERE — build_report is the single choke
+    # point every build path goes through (worker subprocess, in-process fallback,
+    # statusline, sync auto-push). Hooking it only in the server's _build callback missed
+    # the worker path entirely (the frozen app always uses the worker). Fail-silent.
+    try:
+        from .chat_titles import enrich_report
+        enrich_report(rep)
+    except Exception:
+        pass
+    return rep
