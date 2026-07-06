@@ -10,7 +10,7 @@
 // Window model matches the product's: closing the window HIDES to tray (the meter
 // keeps collecting); Quit lives in the tray menu. We only kill the sidecar on quit
 // if WE spawned it — never someone else's server.
-const { app, BrowserWindow, Menu, Tray, shell, nativeImage, screen } = require("electron");
+const { app, BrowserWindow, Menu, Tray, shell, nativeImage, nativeTheme, screen } = require("electron");
 const { spawn } = require("child_process");
 const http = require("http");
 const fs = require("fs");
@@ -43,16 +43,19 @@ function loadIcon(preferIco) {
   return nativeImage.createEmpty();
 }
 
-// The shell GUARANTEES its own chrome: the drag region is injected here, so the window
-// is movable no matter which server version it attaches to (an older installed server
-// serves CSS without the body.electron rules — that made the window unmovable once).
+// The shell GUARANTEES its own chrome: the drag region + dark color-scheme are injected
+// here, so the window behaves no matter which server version it attaches to (an older
+// installed server serves CSS without the body.electron rules — that made the window
+// unmovable once; a page without color-scheme:dark gets LIGHT Chromium scrollbars).
 const DRAG_CSS = `
-  .topbar { -webkit-app-region: drag; padding-right: 150px; }
+  html { color-scheme: dark; }
+  .topbar { -webkit-app-region: drag; padding-right: 160px; }
   .topbar button, .topbar a, .topbar select, .topbar input,
   .topbar .picker, .topbar .zoom-ctl, .topbar .icon-btn { -webkit-app-region: no-drag; }
   .sidebar .side-brand { -webkit-app-region: drag; }
   .sidebar .side-brand * { -webkit-app-region: no-drag; }
 `;
+const OVERLAY = { color: "#141516", symbolColor: "#9BA1A6", height: 42 };
 
 let pyProc = null;        // sidecar process IF we spawned it (else null = attached)
 let win = null;
@@ -146,7 +149,7 @@ function createWindow() {
     // Premium: hidden native titlebar; Chromium draws overlay window controls in our
     // dark palette; the app's own topbar becomes the drag region (body.electron CSS).
     titleBarStyle: "hidden",
-    titleBarOverlay: { color: "#141516", symbolColor: "#9BA1A6", height: 42 },
+    titleBarOverlay: OVERLAY,
     webPreferences: {
       contextIsolation: true,
       preload: path.join(__dirname, "preload.js"),
@@ -155,7 +158,12 @@ function createWindow() {
   });
   Menu.setApplicationMenu(null);
   if (st && st.maximized) win.maximize();
-  win.once("ready-to-show", () => win.show());
+  win.once("ready-to-show", () => {
+    win.show();
+    // Belt & braces: re-assert the dark overlay after show — on some Windows builds the
+    // construction-time overlay color is ignored until reapplied (white strip bug).
+    try { win.setTitleBarOverlay(OVERLAY); } catch { /* non-Windows / older Electron */ }
+  });
   win.loadURL(`${BASE}/`);
   // Inject the drag region on EVERY load — never depend on the server's CSS version.
   win.webContents.on("did-finish-load", () => {
@@ -199,6 +207,7 @@ function createTray() {
 }
 
 // ---------- lifecycle ----------
+nativeTheme.themeSource = "dark";   // dark window chrome + dark UA scrollbars everywhere
 app.whenReady().then(() => {
   healthCheck((alreadyUp) => {
     if (!alreadyUp) startSidecar();
