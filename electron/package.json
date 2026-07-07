@@ -1,5 +1,5 @@
 {
-  "name": "burnmeter-desktop",
+  "name": "burnmeter",
   "productName": "Burnmeter",
   "version": "0.2.0",
   "description": "Burnmeter desktop (Electron shell over the Python sidecar)",

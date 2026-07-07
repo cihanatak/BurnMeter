@@ -360,7 +360,14 @@ main { flex:1; padding: var(--page-pad); }
    Hidden native titlebar → the app's own topbar doubles as the DRAG region, and the
    right edge leaves room for Chromium's overlay window buttons (min/max/close, h=42).
    -webkit-app-region is inert in pywebview/browser → zero regression outside Electron. */
-body.electron .topbar { -webkit-app-region: drag; padding-right: 150px; }
+body.electron .topbar {
+  position: sticky; top: 0; z-index: 80;
+  background: var(--bg-base);
+  box-shadow: 0 1px 0 var(--border-subtle);
+  -webkit-app-region: drag;
+  /* exact window-controls width via WCO env vars — DPI/scale-proof */
+  padding-right: calc(100vw - env(titlebar-area-width, calc(100vw - 170px)));
+}
 body.electron .topbar button, body.electron .topbar a, body.electron .topbar select,
 body.electron .topbar input, body.electron .topbar .picker, body.electron .topbar .zoom-ctl,
 body.electron .topbar .icon-btn { -webkit-app-region: no-drag; }

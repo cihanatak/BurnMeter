@@ -49,13 +49,21 @@ function loadIcon(preferIco) {
 // unmovable once; a page without color-scheme:dark gets LIGHT Chromium scrollbars).
 const DRAG_CSS = `
   html { color-scheme: dark; }
-  .topbar { -webkit-app-region: drag; padding-right: 160px; }
+  .topbar {
+    position: sticky; top: 0; z-index: 80;
+    background: var(--bg-base, #0F1011);
+    box-shadow: 0 1px 0 var(--border-subtle, rgba(255,255,255,.06));
+    -webkit-app-region: drag;
+    /* Exact window-controls width via Chromium's WCO env vars — DPI/scale-proof.
+       (A fixed px pad overlapped the refresh button on scaled displays.) */
+    padding-right: calc(100vw - env(titlebar-area-width, calc(100vw - 170px)));
+  }
   .topbar button, .topbar a, .topbar select, .topbar input,
   .topbar .picker, .topbar .zoom-ctl, .topbar .icon-btn { -webkit-app-region: no-drag; }
   .sidebar .side-brand { -webkit-app-region: drag; }
   .sidebar .side-brand * { -webkit-app-region: no-drag; }
 `;
-const OVERLAY = { color: "#141516", symbolColor: "#9BA1A6", height: 42 };
+const OVERLAY = { color: "#0F1011", symbolColor: "#9BA1A6", height: 42 };  // = --bg-base (seamless bar)
 
 let pyProc = null;        // sidecar process IF we spawned it (else null = attached)
 let win = null;
