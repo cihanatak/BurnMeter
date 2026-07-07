@@ -352,6 +352,55 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 threading.Thread(target=_go, daemon=True).start()
                 return
 
+            if path == "/api/alerts/config":
+                # Save alert destinations from the dashboard (webhook / Slack / SMTP email).
+                # Same CSRF+Host guards as the Pro endpoints (may carry an SMTP password).
+                if self.headers.get("X-Burnmeter-Alerts") != "1":
+                    _json_response(self, 403, {"ok": False, "error": "forbidden"})
+                    return
+                if self.headers.get("Host", "").rsplit(":", 1)[0] not in ("127.0.0.1", "localhost", "::1"):
+                    _json_response(self, 403, {"ok": False, "error": "forbidden host"})
+                    return
+                try:
+                    from . import alerts as _alerts
+                    length = int(self.headers.get("Content-Length", 0) or 0)
+                    body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+                    old = _alerts.load_config()
+                    dests = body.get("destinations") or {}
+                    email = dests.get("email") or {}
+                    # Empty password on save = "keep the stored one" (the UI never reads it back).
+                    if email and not email.get("password"):
+                        old_pw = ((old.get("destinations") or {}).get("email") or {}).get("password")
+                        if old_pw:
+                            email["password"] = old_pw
+                    cfg = {
+                        "enabled": bool(body.get("enabled")),
+                        "sources": body.get("sources") or ["claude", "codex"],
+                        "destinations": {k: v for k, v in {
+                            "webhook_url": (dests.get("webhook_url") or "").strip(),
+                            "slack_webhook_url": (dests.get("slack_webhook_url") or "").strip(),
+                            "email": email if email.get("to") else None,
+                        }.items() if v},
+                    }
+                    _alerts.save_config(cfg)
+                    _json_response(self, 200, {"ok": True})
+                except Exception as e:
+                    _json_response(self, 500, {"ok": False, "error": str(e)})
+                return
+
+            if path == "/api/alerts/test":
+                # Fire a test alert at every configured destination (ignores thresholds).
+                if self.headers.get("X-Burnmeter-Alerts") != "1":
+                    _json_response(self, 403, {"ok": False, "error": "forbidden"})
+                    return
+                try:
+                    from . import alerts as _alerts
+                    results = _alerts.send_test()
+                    _json_response(self, 200, {"ok": True, "results": results})
+                except Exception as e:
+                    _json_response(self, 500, {"ok": False, "error": str(e)})
+                return
+
             if path in ("/api/pro/connect", "/api/pro/disconnect", "/api/pro/resend", "/api/pro/push", "/api/pro/rename"):
                 # Pro account actions from the dashboard, backed by Firebase Auth. The
                 # password is used ONLY here on localhost — to sign in to Firebase and to
@@ -525,6 +574,27 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 report["_meta"]["version"] = __version__
                 report["_meta"]["served_at"] = time.time()
                 _json_response(self, 200, report)
+                return
+
+            if path == "/api/alerts/config":
+                # Alert destinations for the Alerts settings card. SECRETS MASKED: the SMTP
+                # password is never sent back — only has_password so the UI can say "saved".
+                if self.headers.get("Host", "").rsplit(":", 1)[0] not in ("127.0.0.1", "localhost", "::1"):
+                    _json_response(self, 403, {"error": "forbidden host"})
+                    return
+                try:
+                    from . import alerts as _alerts
+                    cfg = _alerts.load_config()
+                    dests = dict(cfg.get("destinations") or {})
+                    email = dict(dests.get("email") or {})
+                    if email:
+                        email["has_password"] = bool(email.pop("password", None))
+                        dests["email"] = email
+                    _json_response(self, 200, {"enabled": bool(cfg.get("enabled")),
+                                               "sources": cfg.get("sources") or ["claude", "codex"],
+                                               "destinations": dests})
+                except Exception as e:
+                    _json_response(self, 500, {"error": str(e)})
                 return
 
             if path == "/api/pro/status":

@@ -25,6 +25,9 @@
     <symbol id="i-projects" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <path d="M3.5 6.2A1.7 1.7 0 0 1 5.2 4.5h4l2 2.3h7.6a1.7 1.7 0 0 1 1.7 1.7v9.3a1.7 1.7 0 0 1-1.7 1.7H5.2a1.7 1.7 0 0 1-1.7-1.7z"/>
     </symbol>
+    <symbol id="i-chats" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20 11.4c0 3.8-3.6 6.9-8 6.9-1 0-2-.16-2.9-.46L4.5 19l1.3-3.1A6.4 6.4 0 0 1 4 11.4c0-3.8 3.6-6.9 8-6.9s8 3.1 8 6.9z"/>
+    </symbol>
     <symbol id="i-trends" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <path d="M4 19h16"/><path d="M5 15l4.2-5 3.6 3.2L19 6.5"/><path d="M15.5 6.5H19V10"/>
     </symbol>
@@ -49,9 +52,10 @@
     <a id="update-link" class="update-pill" target="_blank" rel="noopener" style="display:none"></a>
     <nav class="side-nav" id="side-nav">
       <button class="nav-item active" data-section="overview" aria-label="Overview"><span class="nav-ico" aria-hidden="true"><svg><use href="#i-overview"/></svg></span><span class="nav-lbl">Overview</span></button>
-      <button class="nav-item" data-section="devices" aria-label="Devices"><span class="nav-ico" aria-hidden="true"><svg><use href="#i-devices"/></svg></span><span class="nav-lbl">Devices</span><span class="nav-badge" id="nav-dev-count" style="display:none"></span></button>
+      <button class="nav-item" data-section="chats" aria-label="Chats"><span class="nav-ico" aria-hidden="true"><svg><use href="#i-chats"/></svg></span><span class="nav-lbl">Chats</span></button>
       <button class="nav-item" data-section="projects" aria-label="Projects"><span class="nav-ico" aria-hidden="true"><svg><use href="#i-projects"/></svg></span><span class="nav-lbl">Projects</span></button>
-      <button class="nav-item" data-section="trends" aria-label="Trends"><span class="nav-ico" aria-hidden="true"><svg><use href="#i-trends"/></svg></span><span class="nav-lbl">Trends</span></button>
+      <button class="nav-item" data-section="trends" aria-label="Insights"><span class="nav-ico" aria-hidden="true"><svg><use href="#i-trends"/></svg></span><span class="nav-lbl">Insights</span></button>
+      <button class="nav-item" data-section="devices" aria-label="Devices"><span class="nav-ico" aria-hidden="true"><svg><use href="#i-devices"/></svg></span><span class="nav-lbl">Devices</span><span class="nav-badge" id="nav-dev-count" style="display:none"></span></button>
       <button class="nav-item" data-section="alerts" aria-label="Alerts"><span class="nav-ico" aria-hidden="true"><svg><use href="#i-alerts"/></svg></span><span class="nav-lbl">Alerts</span></button>
     </nav>
     <div class="side-foot">
@@ -147,6 +151,20 @@
 
       </div>
 
+      <!-- ===== CHATS (per-conversation cost — the atomic unit of AI work) ===== -->
+      <div class="section" data-section="chats">
+        <section class="card col-12" data-card="chats">
+          <div class="card-title">Chats · what each conversation cost
+            <span class="picker" id="chats-sort">
+              <button data-s="recent" class="active">Recent</button><button data-s="cost">Most $</button>
+            </span>
+          </div>
+          <div class="scroll chats-scroll"><table class="tbl" id="chats-tbl">
+            <thead><tr><th>chat</th><th>goal (first prompt)</th><th>when</th><th class="num">duration</th><th>models</th><th class="num">tokens</th><th class="num">$ (est.)</th><th class="num">cache</th></tr></thead>
+            <tbody></tbody></table></div>
+        </section>
+      </div>
+
       <!-- ===== DEVICES (fleet) ===== -->
       <div class="section" data-section="devices">
         <section class="card col-12" data-card="sync-devices">
@@ -161,6 +179,12 @@
           <div class="card-title" id="projects-title">Projects · lifetime <span class="sub">where your spend goes</span></div>
           <div class="scroll"><table class="tbl" id="projects-tbl">
             <thead><tr><th>project</th><th class="num">tokens</th><th class="num">$ (est.)</th></tr></thead>
+            <tbody></tbody></table></div>
+        </section>
+        <section class="card col-12" data-card="commits">
+          <div class="card-title">Cost per commit <span class="sub" id="commits-sub">what each commit burned (sessions matched to git history)</span></div>
+          <div class="scroll"><table class="tbl" id="commits-tbl">
+            <thead><tr><th>when</th><th>commit</th><th>project</th><th class="num">tokens</th><th class="num">$ (est.)</th></tr></thead>
             <tbody></tbody></table></div>
         </section>
       </div>
@@ -220,22 +244,47 @@
           <div id="heatmap-body"></div>
         </section>
 
-        <section class="card col-6" data-card="behavior">
-          <div class="card-title">Errors · last 24h <span class="sub" id="behavior-sub"></span></div>
-          <div id="behavior-body"></div>
-        </section>
-        <section class="card col-6" data-card="tools">
+        <section class="card col-12" data-card="tools">
           <div class="card-title">Tool usage · lifetime <span class="sub" id="tools-sub"></span></div>
           <div id="tools-body"></div>
         </section>
 
       </div>
 
-      <!-- ===== ALERTS (budget + limits) ===== -->
+      <!-- ===== ALERTS (rules + destinations + what fired) ===== -->
       <div class="section" data-section="alerts">
         <section class="card col-12" data-card="budget">
           <div class="card-title">Monthly budget <span class="sub">spent this month vs your budget · all figures are estimates</span></div>
           <div id="budget-body"></div>
+        </section>
+        <section class="card col-6" data-card="alert-dest">
+          <div class="card-title">Notifications · where alerts reach you <span class="sub">works while the dashboard is closed (app in tray)</span></div>
+          <div id="alert-dest-body" class="alert-form">
+            <label class="af-row"><input type="checkbox" id="af-enabled"> <b>Enable alerts</b> <span class="dim">— rate-limit walls, heavy burn, spending pace</span></label>
+            <div class="af-field"><span class="af-k">Slack webhook</span><input type="url" id="af-slack" placeholder="https://hooks.slack.com/services/…"></div>
+            <div class="af-field"><span class="af-k">Webhook URL</span><input type="url" id="af-webhook" placeholder="https://example.com/hook (JSON POST)"></div>
+            <div class="af-grid">
+              <div class="af-field"><span class="af-k">SMTP host</span><input id="af-eh" placeholder="smtp.gmail.com"></div>
+              <div class="af-field"><span class="af-k">Port</span><input id="af-ep" placeholder="587" inputmode="numeric"></div>
+              <div class="af-field"><span class="af-k">Username</span><input id="af-eu" placeholder="you@gmail.com"></div>
+              <div class="af-field"><span class="af-k">Password</span><input type="password" id="af-epw" placeholder="app password"></div>
+              <div class="af-field"><span class="af-k">From</span><input id="af-ef" placeholder="you@gmail.com"></div>
+              <div class="af-field"><span class="af-k">To</span><input id="af-et" placeholder="you@gmail.com"></div>
+            </div>
+            <div class="af-actions">
+              <button class="get-pro-btn" id="af-save" onclick="alertCfgSave()">Save</button>
+              <button class="ghost-btn" id="af-test" onclick="alertCfgTest()">Send test</button>
+              <span id="af-msg" class="dim" style="font-size:12px"></span>
+            </div>
+          </div>
+        </section>
+        <section class="card col-6" data-card="anomalies">
+          <div class="card-title">Spending spikes <span class="sub">days that broke your pattern</span></div>
+          <div id="anomalies-body"></div>
+        </section>
+        <section class="card col-12" data-card="behavior">
+          <div class="card-title">Errors · last 24h <span class="sub" id="behavior-sub"></span></div>
+          <div id="behavior-body"></div>
         </section>
       </div>
 

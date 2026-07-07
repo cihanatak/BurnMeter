@@ -37,11 +37,14 @@ def test_enrich_report_attaches_chat_to_recent_and_live():
     rep = {
         "recent_turns": [{"session_id": "sid-1"}, {"session_id": "unknown"}],
         "live_active_models_by_window": {"5": {"models": [{"session_id": "sid-1"}]}},
+        "by_session": [{"session_id": "sid-1"}, {"session_id": "nope"}],
     }
     enrich_report(rep, titles={"sid-1": "World Intelligence"})
     assert rep["recent_turns"][0]["chat"] == "World Intelligence"
     assert "chat" not in rep["recent_turns"][1]          # unknown session → no key (UI falls back)
     assert rep["live_active_models_by_window"]["5"]["models"][0]["chat"] == "World Intelligence"
+    assert rep["by_session"][0]["chat"] == "World Intelligence"   # the Chats view's source
+    assert "chat" not in rep["by_session"][1]
 
 
 def test_enrich_report_no_titles_is_noop():

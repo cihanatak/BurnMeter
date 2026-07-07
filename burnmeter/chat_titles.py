@@ -83,4 +83,8 @@ def enrich_report(rep: dict, titles: dict[str, str] | None = None) -> dict:
             c = t.get(m.get("session_id") or "")
             if c:
                 m["chat"] = c
+    for s in rep.get("by_session") or []:
+        c = t.get(s.get("session_id") or "")
+        if c:
+            s["chat"] = c
     return rep

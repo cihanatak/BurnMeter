@@ -254,6 +254,46 @@ main.gs-active { display:block; }
 .bm-proj-sub { font:400 11px/1.2 var(--font-mono); color:var(--text-3);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .proj-cell { display:flex; align-items:center; gap:6px; flex-wrap:wrap; min-width:0; }
+/* ---------- CHATS (per-conversation cost) ---------- */
+.chats-scroll { max-height:none; height: clamp(360px, calc(100vh - 300px), 980px); }
+#chats-tbl { table-layout: fixed; width:100%; }
+#chats-tbl th:nth-child(1) { width: 200px; }
+#chats-tbl th:nth-child(3) { width: 64px; }
+#chats-tbl th:nth-child(4) { width: 70px; }
+#chats-tbl th:nth-child(5) { width: 180px; }
+#chats-tbl th:nth-child(6) { width: 84px; }
+#chats-tbl th:nth-child(7) { width: 76px; }
+#chats-tbl th:nth-child(8) { width: 64px; }
+#chats-tbl td { overflow:hidden; text-overflow:ellipsis; }
+.chats-goal { font:400 12px/1.45 var(--font-sans); color:var(--text-3); white-space:nowrap; }
+#chats-tbl .bm-proj { max-width:100%; }
+
+/* ---------- SPENDING SPIKES (anomalies) ---------- */
+.anom-row { display:flex; align-items:center; gap:12px; padding:9px 2px; border-bottom:1px solid var(--border-subtle); }
+.anom-row:last-child { border-bottom:none; }
+.anom-date { font:600 12px var(--font-mono); color:var(--text-2); flex-shrink:0; }
+.anom-flag { font:400 12px var(--font-sans); color:var(--warn); flex:1; min-width:0;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.anom-cost { font:600 13px var(--font-mono); color:var(--text-1); flex-shrink:0; }
+
+/* ---------- COST PER COMMIT ---------- */
+.commit-cell { display:flex; align-items:baseline; gap:8px; min-width:0;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.commit-sha { font:600 11px var(--font-mono); color:var(--brand); background:var(--brand-soft);
+  border-radius:4px; padding:1px 6px; flex-shrink:0; }
+
+/* ---------- ALERT DESTINATIONS FORM ---------- */
+.alert-form { display:flex; flex-direction:column; gap:10px; max-width:640px; }
+.af-row { display:flex; align-items:center; gap:8px; font:400 13px var(--font-sans); color:var(--text-2); }
+.af-field { display:flex; flex-direction:column; gap:4px; }
+.af-k { font:600 11px/1 var(--font-sans); letter-spacing:.04em; text-transform:uppercase; color:var(--text-4); }
+.alert-form input[type="url"], .alert-form input:not([type]), .alert-form input[type="password"] {
+  padding:8px 10px; border-radius:var(--radius-sm); border:1px solid var(--border-strong);
+  background:var(--bg-inset); color:var(--text-1); font:400 13px var(--font-mono); width:100%; }
+.alert-form input:focus { outline:none; border-color:var(--brand); }
+.af-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; }
+.af-actions { display:flex; align-items:center; gap:10px; margin-top:2px; }
+
 /* "~free because cache did the work" — a $0.00 row must not read as broken data */
 .pill-cached { font:600 10.5px/1 var(--font-sans); letter-spacing:.03em; color:var(--good);
   background:color-mix(in srgb, var(--good) 12%, transparent); border:1px solid color-mix(in srgb, var(--good) 35%, transparent);

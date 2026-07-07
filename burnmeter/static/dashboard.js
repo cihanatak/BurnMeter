@@ -648,6 +648,9 @@ function render(rep) {
   renderModelTable(rep);
   renderBehavior(rep);
   renderTools(rep);
+  renderChats(rep);                      // per-conversation costs (by_session + chat titles)
+  renderAnomalies(rep);                  // spending spikes (Alerts section)
+  renderCommits(rep);                    // cost per commit (Projects section)
   renderActiveModel(heroRep);            // live model = scoped (shows other devices' running model)
   checkAlerts(rep, isCodex);
 }
@@ -1764,6 +1767,113 @@ function renderProjects(rep) {
       <td class="num">${fmtMoney0(p.cost_usd)}</td></tr>`).join("");
 }
 
+// ---------- CHATS (per-conversation cost — by_session, enriched with chat titles) ----------
+window.__chatsSort = localStorage.getItem("burnmeter_chats_sort") || "recent";
+function bmDur(sec) {
+  if (!sec || sec < 60) return (sec || 0) + "s";
+  if (sec < 3600) return Math.round(sec / 60) + "m";
+  return (sec / 3600).toFixed(1) + "h";
+}
+function renderChats(rep) {
+  const tb = document.querySelector("#chats-tbl tbody"); if (!tb) return;
+  let rows = (rep.by_session || []).filter(s => (s.total_tokens || 0) > 0);
+  rows = rows.slice().sort((a, b) => window.__chatsSort === "cost"
+    ? (b.cost_usd || 0) - (a.cost_usd || 0)
+    : new Date(b.ended_at || 0) - new Date(a.ended_at || 0));
+  if (!rows.length) { tb.innerHTML = `<tr><td colspan="8" class="empty">No sessions yet</td></tr>`; return; }
+  tb.innerHTML = rows.slice(0, 60).map(s => {
+    const models = (s.models || []).filter(m => !String(m).startsWith("<")).slice(0, 3)
+      .map(m => `<span class="pill ${modelToFamily(m)}">${modelDisplay(m)}</span>`).join(" ");
+    const goal = (s.intent || "").slice(0, 90);
+    return `<tr>
+      <td>${bmProjCell(s.project_dir, s.project_label, null, s.chat)}</td>
+      <td class="chats-goal" title="${esc(s.intent || "")}">${esc(goal) || '<span class="dim">—</span>'}</td>
+      <td>${relTime(s.ended_at)}</td>
+      <td class="num">${bmDur(s.duration_seconds)}</td>
+      <td>${models}</td>
+      <td class="num">${fmtCompact(s.total_tokens || 0)}</td>
+      <td class="num">${fmtMoney(s.cost_usd)}</td>
+      <td class="num">${fmtPct(s.cache_hit_rate)}</td></tr>`;
+  }).join("");
+}
+
+// ---------- SPENDING SPIKES (daily_anomalies — computed since day 1, shown at last) ----------
+function renderAnomalies(rep) {
+  const el = $("anomalies-body"); if (!el) return;
+  const rows = (rep.anomalies || []).slice(-8).reverse();
+  if (!rows.length) { el.innerHTML = `<div class="dim" style="padding:14px 2px">No unusual days — your spending fits your own pattern.</div>`; return; }
+  el.innerHTML = rows.map(a => `
+    <div class="anom-row">
+      <span class="anom-date">${esc(a.date || "")}</span>
+      <span class="anom-flag">${esc((a.flags || [])[0] || "")}</span>
+      <span class="num anom-cost">${fmtMoney0(a.cost_usd)}</span>
+    </div>`).join("");
+}
+
+// ---------- COST PER COMMIT (git_attribution — computed since day 1, shown at last) ----------
+function renderCommits(rep) {
+  const tb = document.querySelector("#commits-tbl tbody"); if (!tb) return;
+  const ga = rep.git_attribution || {};
+  const sub = $("commits-sub");
+  if (sub && ga.total_commits_matched) sub.textContent =
+    `${ga.total_commits_matched} commits matched · median ~${fmtMoney(ga.median_cost_usd)} per commit`;
+  const rows = ga.commits || [];
+  if (!rows.length) { tb.innerHTML = `<tr><td colspan="5" class="empty">No commits matched yet (needs git repos in your projects)</td></tr>`; return; }
+  tb.innerHTML = rows.slice(0, 20).map(c => `<tr>
+    <td>${relTime(c.timestamp)}</td>
+    <td><div class="commit-cell"><span class="commit-sha">${esc(c.sha || "")}</span> ${esc((c.message || "").slice(0, 70))}</div></td>
+    <td>${esc(c.project_label || "")}</td>
+    <td class="num">${fmtCompact(c.tokens || 0)}</td>
+    <td class="num">${fmtMoney(c.cost_usd)}</td></tr>`).join("");
+}
+
+// ---------- ALERT DESTINATIONS (alerts.py config — the engine finally gets a door) ----------
+async function alertCfgLoad() {
+  try {
+    const c = await (await fetch("/api/alerts/config")).json();
+    $("af-enabled").checked = !!c.enabled;
+    const d = c.destinations || {};
+    $("af-slack").value = d.slack_webhook_url || "";
+    $("af-webhook").value = d.webhook_url || "";
+    const e = d.email || {};
+    $("af-eh").value = e.host || ""; $("af-ep").value = e.port || "";
+    $("af-eu").value = e.username || ""; $("af-ef").value = e.from || ""; $("af-et").value = e.to || "";
+    $("af-epw").placeholder = e.has_password ? "•••••• (saved — leave empty to keep)" : "app password";
+  } catch (e) { /* old server */ }
+}
+async function alertCfgSave() {
+  const msg = $("af-msg"); msg.textContent = "saving…";
+  const email = {
+    host: $("af-eh").value.trim(), port: parseInt($("af-ep").value, 10) || 587, tls: true,
+    username: $("af-eu").value.trim(), password: $("af-epw").value,
+    from: $("af-ef").value.trim(), to: $("af-et").value.trim(),
+  };
+  const body = {
+    enabled: $("af-enabled").checked,
+    sources: ["claude", "codex"],
+    destinations: {
+      slack_webhook_url: $("af-slack").value.trim(),
+      webhook_url: $("af-webhook").value.trim(),
+      email: email.to ? email : null,
+    },
+  };
+  try {
+    const r = await (await fetch("/api/alerts/config", { method: "POST",
+      headers: { "X-Burnmeter-Alerts": "1", "Content-Type": "application/json" },
+      body: JSON.stringify(body) })).json();
+    msg.textContent = r.ok ? "✓ saved" : ("error: " + (r.error || "?"));
+    if (r.ok) { $("af-epw").value = ""; alertCfgLoad(); }
+  } catch (e) { msg.textContent = "error: " + e.message; }
+}
+async function alertCfgTest() {
+  const msg = $("af-msg"); msg.textContent = "sending test…";
+  try {
+    const r = await (await fetch("/api/alerts/test", { method: "POST",
+      headers: { "X-Burnmeter-Alerts": "1" } })).json();
+    msg.textContent = r.ok ? ("test → " + (r.results || []).join(", ") || "no destinations") : ("error: " + (r.error || "?"));
+  } catch (e) { msg.textContent = "error: " + e.message; }
+}
+
 // ---------- recent turns ----------
 function renderRecent(rep) {
   const isCodex = (rep._meta?.source || "claude") === "codex";
@@ -2111,6 +2221,18 @@ function start() {
       if (window.__lastReport) renderTrend(window.__lastReport, window.__source === "codex");
     });
   });
+  // Chats sort picker (Recent / Most $)
+  document.querySelectorAll("#chats-sort button").forEach(b => {
+    b.classList.toggle("active", b.dataset.s === window.__chatsSort);
+    b.addEventListener("click", () => {
+      window.__chatsSort = b.dataset.s;
+      localStorage.setItem("burnmeter_chats_sort", b.dataset.s);
+      document.querySelectorAll("#chats-sort button").forEach(x => x.classList.toggle("active", x.dataset.s === b.dataset.s));
+      if (window.__lastReport && !window.__lastReport._combined) renderChats(window.__lastReport);
+      else if (window.__lastReport) renderChats(window.__lastReport.claude);
+    });
+  });
+  alertCfgLoad();          // Alerts destinations form (engine existed; this is its door)
   initModularGrid();
   const rl = $("reset-layout");
   if (rl) rl.addEventListener("click", () => { localStorage.removeItem("burnmeter_layout_v8"); location.reload(); });

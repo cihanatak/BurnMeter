@@ -201,6 +201,7 @@ def aggregate_by_session(
             meta[sid] = {
                 "session_id": sid,
                 "project_label": r.project_label,
+                "project_dir": r.project_dir,
                 "git_branch": r.git_branch,
                 "started_at": r.timestamp,
                 "ended_at": r.timestamp,
