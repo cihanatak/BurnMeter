@@ -1,7 +1,7 @@
 {
   "name": "burnmeter-desktop",
   "productName": "Burnmeter",
-  "version": "0.1.74",
+  "version": "0.2.0",
   "description": "Burnmeter desktop (Electron shell over the Python sidecar)",
   "main": "main.js",
   "author": "Cihan Atak",

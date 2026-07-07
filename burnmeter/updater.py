@@ -60,11 +60,20 @@ def run_installer_update(url: str = INSTALLER_URL) -> bool:
         # flags; Inno Setup honors its own flags and ignores the unknown /S. One command
         # line stays FULLY SILENT across both installer generations (pywebview-era Inno
         # and the Electron-era NSIS served under the same stable asset name).
+        #
+        # Electron era: (1) the SIDECAR (burnmeter-server.exe) must die too, or NSIS can't
+        # replace resources/server (locked files → broken update); (2) a silent NSIS
+        # install SKIPS runAfterFinish, so we relaunch EXPLICITLY on success — from the
+        # install dir both eras share (%LOCALAPPDATA%\Programs\Burnmeter), falling back to
+        # the old exe path if that vanished.
+        app_exe = r'%LOCALAPPDATA%\Programs\Burnmeter\Burnmeter.exe'
         cmdline = (
             'taskkill /F /IM Burnmeter.exe >nul 2>&1 & '
+            'taskkill /F /IM burnmeter-server.exe >nul 2>&1 & '
             'del "%USERPROFILE%\\.burnmeter\\window.lock" >nul 2>&1 & '
             'ping -n 4 127.0.0.1 >nul & '
-            f'"{dst}" /S /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NORESTARTAPPLICATIONS '
+            f'("{dst}" /S /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NORESTARTAPPLICATIONS '
+            f'&& start "" "{app_exe}") '
             f'|| start "" "{exe}"'
         )
         subprocess.Popen(["cmd", "/c", cmdline], creationflags=DETACHED, close_fds=True)
