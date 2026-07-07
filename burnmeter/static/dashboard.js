@@ -106,6 +106,8 @@ function modelDisplay(m) {
   const raw = String(m); if (raw.startsWith("<")) return raw.replace(/[<>]/g, "");
   const cl = raw.toLowerCase().match(/(opus|sonnet|haiku)-(\d+)-(\d+)/);
   if (cl) return cl[1][0].toUpperCase() + cl[1].slice(1) + " " + cl[2] + "." + cl[3];
+  const cl1 = raw.toLowerCase().match(/(opus|sonnet|haiku)-(\d+)/);   // single-part ver (claude-sonnet-5)
+  if (cl1) return cl1[1][0].toUpperCase() + cl1[1].slice(1) + " " + cl1[2];
   const fb = raw.toLowerCase().match(/(fable|mythos)-?(\d+)/);
   if (fb) return fb[1][0].toUpperCase() + fb[1].slice(1) + " " + fb[2];
   const g = raw.toLowerCase().match(/gpt-?(\d+(?:\.\d+)?)(-?(codex|mini))?/);
@@ -501,7 +503,7 @@ function bmScopedRep(localRep) {
     record_count: agg.records,
     cache_efficiency: Object.assign(bmMergeCache(pick, sources, thisId, localRep), { hit_rate: agg.cache }),  // FLEET cache savings (sum) + fleet weighted hit-rate
     daily: bmMergedDaily(pick, sources, 30, thisId, localRep),         // FLEET daily trend (sparkline)
-    recent_turns: bmMergedRecent(pick, sources, 12),
+    recent_turns: bmMergedRecent(pick, sources, 20),   // 20: tall windows now SHOW more rows (fold-fill)
     live_active_models_by_window: bmMergeLive(localRep.live_active_models_by_window, pick, sources[0], thisId),
   };
 }
@@ -823,7 +825,7 @@ function bmScopedHalf(localRep, source) {
     record_count: records,
     burn_rate_zones: { typical: z0.typical * kk, busy: z0.busy * kk, heavy: z0.heavy * kk,
                        max: (z0.max || 50) * kk, insufficient_history: z0.insufficient_history },
-    recent_turns: recent.slice(0, 12),
+    recent_turns: recent.slice(0, 20),
     // Live "what's running now" merged across devices (local windows + remote snapshots).
     live_active_models_by_window: bmMergeLive(localRep.live_active_models_by_window, pick, source, payload && payload.this_device),
   };
@@ -1208,7 +1210,8 @@ function renderKPIs(rep, isCodex) {
     { l: "Spent today", v: "~" + fmtMoney(fc.today?.so_far ?? 0), s: `${fmtInt(todayE.messages || 0)} prompts`, spark: daily.slice(-14).map(d => d.cost_usd || 0) },
     { l: "Burn rate", v: "~" + fmtMoney(burn), unit: "/hr", s: `avg over last ${bwin}` + est, spark: null },
     { l: "Cache savings", v: "~" + fmtMoney0(ce.usd_saved || 0), s: `~${Math.round((ce.discount_pct || 0) * 100)}% cheaper than no-cache · all-time est.`, spark: null },
-    { l: "Total spent", v: "~" + fmtMoney0(t.cost_usd || 0), s: `${fmtCompact(t.total_tokens || 0)} tokens · all-time${est}`, spark: daily.slice(-14).map(d => d.cost_usd || 0) },
+    // no spark: it duplicated "Spent today"'s daily series pixel-for-pixel (visual noise)
+    { l: "Total spent", v: "~" + fmtMoney0(t.cost_usd || 0), s: `${fmtCompact(t.total_tokens || 0)} tokens · all-time${est}`, spark: null },
   ];
   kpis.forEach((k, i) => {
     const n = i + 1;
