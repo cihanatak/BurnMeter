@@ -162,6 +162,7 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, "preload.js"),
       spellcheck: false,
+      backgroundThrottling: false,   // black-frame guard: never throttle the first paint
     },
   });
   Menu.setApplicationMenu(null);
@@ -171,11 +172,23 @@ function createWindow() {
     // Belt & braces: re-assert the dark overlay after show — on some Windows builds the
     // construction-time overlay color is ignored until reapplied (white strip bug).
     try { win.setTitleBarOverlay(OVERLAY); } catch { /* non-Windows / older Electron */ }
+    // Black-frame guard #2: some GPUs show the window without ever presenting the first
+    // frame on a cold boot — force a compositor repaint shortly after show.
+    setTimeout(() => { try { if (win && !win.isDestroyed()) win.webContents.invalidate(); } catch {} }, 600);
+    setTimeout(() => { try { if (win && !win.isDestroyed()) win.webContents.invalidate(); } catch {} }, 2500);
   });
   win.loadURL(`${BASE}/`);
   // Inject the drag region on EVERY load — never depend on the server's CSS version.
   win.webContents.on("did-finish-load", () => {
     win.webContents.insertCSS(DRAG_CSS).catch(() => {});
+  });
+  // Cold-boot races: if the first load failed (sidecar not accepting yet) retry; if the
+  // renderer ever dies, bring it back. The window must NEVER sit black.
+  win.webContents.on("did-fail-load", (e, code, desc, url, isMainFrame) => {
+    if (isMainFrame) setTimeout(() => { try { win.loadURL(`${BASE}/`); } catch {} }, 1200);
+  });
+  win.webContents.on("render-process-gone", () => {
+    setTimeout(() => { try { win.webContents.reload(); } catch {} }, 500);
   });
 
   ["resized", "moved", "maximize", "unmaximize"].forEach((ev) => win.on(ev, saveState));

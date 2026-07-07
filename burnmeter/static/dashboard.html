@@ -56,7 +56,14 @@
     </nav>
     <div class="side-foot">
       <button class="nav-item" data-section="settings" aria-label="Settings"><span class="nav-ico" aria-hidden="true"><svg><use href="#i-settings"/></svg></span><span class="nav-lbl">Settings</span></button>
-      <a id="pro-link" class="side-pro" href="https://burnmeter.dev/#pricing" target="_blank" rel="noopener" title="Pro — cross-device sync + limit alerts (desktop & Slack)"><span aria-hidden="true">✦</span> <span class="nav-lbl">Pro</span></a>
+      <!-- ACCOUNT CHIP — the modern auth surface (Linear/Slack pattern). Filled by
+           renderSideAccount(): signed-in → avatar+email+plan pill; signed-out → Sign-in CTA.
+           Click always lands on the Devices section, where the full account UI lives. -->
+      <button class="side-account" id="side-account" aria-label="Account" title="Account">
+        <span class="side-avatar" id="side-avatar">✦</span>
+        <span class="side-acc-txt"><span class="side-acc-line1" id="side-acc-line1">Pro</span><span class="side-acc-line2" id="side-acc-line2">loading…</span></span>
+        <span class="side-acc-plan" id="side-acc-plan" style="display:none"></span>
+      </button>
     </div>
   </aside>
 

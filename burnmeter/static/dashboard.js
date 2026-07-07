@@ -1384,6 +1384,8 @@ async function renderSyncDevices() {
   let st;
   try { st = await (await fetch("/api/pro/status")).json(); }
   catch (e) { return; }   // server may be old → skip silently
+  window.__proStatus = st;
+  renderSideAccount(st);   // sidebar account chip mirrors auth state on every refresh
   if (!st.configured) { body.innerHTML = proAuthFormHtml(); window.__devicesCache = { devices: [] }; return; }
   if (!st.verified) { body.innerHTML = proVerifyHtml(st.email); window.__devicesCache = { devices: [] }; return; }
   // signed in + verified → show devices
@@ -1398,6 +1400,32 @@ async function renderSyncDevices() {
     populateScopePill(data);
     if (window.__lastReport && window.__lastReport._combined) renderCombined(window.__lastReport.claude, window.__lastReport.codex);
     else bmRefreshHero();
+  }
+}
+
+// Sidebar ACCOUNT CHIP (modern auth surface — Linear/Slack pattern). Signed-in: avatar
+// initials + email + plan pill. Signed-out: a Sign-in CTA. Click → Devices section, where
+// the full account UI (form / verify / signed-in bar) lives.
+function renderSideAccount(st) {
+  const chip = $("side-account"); if (!chip) return;
+  const av = $("side-avatar"), l1 = $("side-acc-line1"), l2 = $("side-acc-line2"), pl = $("side-acc-plan");
+  chip.onclick = () => { const b = document.querySelector('.nav-item[data-section="devices"]'); if (b) b.click(); };
+  if (st && st.configured && st.email) {
+    const initials = st.email.slice(0, 2).toUpperCase();
+    av.textContent = initials;
+    av.classList.add("in");
+    l1.textContent = st.email.split("@")[0];
+    l2.textContent = st.verified ? st.email : "verify your email →";
+    const plan = (st.plan && st.plan !== "free") ? st.plan.toUpperCase() : "FREE";
+    pl.textContent = plan;
+    pl.className = "side-acc-plan " + ((st.plan && st.plan !== "free") ? "pro" : "free");
+    pl.style.display = "";
+  } else {
+    av.textContent = "✦";
+    av.classList.remove("in");
+    l1.textContent = "Sign in";
+    l2.textContent = "sync your devices · Pro";
+    pl.style.display = "none";
   }
 }
 
