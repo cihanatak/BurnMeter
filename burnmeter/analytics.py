@@ -1915,9 +1915,14 @@ def build_report(
         "by_model": aggregate_by_model(records),
         "by_model_full": bmf,
         "by_project": aggregate_by_project(records),
-        "by_session": aggregate_by_session(
-            records, user_intents, recent_cutoff=recent_cutoff,
-        )[:200],  # cap for UI
+        # Cap for the UI — but AFTER dropping 0-token stubs and sorting newest-first.
+        # A naive [:200] sliced in insertion order: with thousands of synthetic/stub
+        # sessions the REAL conversations fell outside the cap (Chats view showed 2 rows).
+        "by_session": sorted(
+            (s for s in aggregate_by_session(records, user_intents, recent_cutoff=recent_cutoff)
+             if s.get("total_tokens")),
+            key=lambda s: s.get("ended_at") or "", reverse=True,
+        )[:200],
         "by_tool": aggregate_by_tool(records),
         "windows": windows[-30:],                            # last 30 windows
         "current_window": current_window_status(windows, chosen_plan),
