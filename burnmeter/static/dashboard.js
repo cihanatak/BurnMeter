@@ -2131,7 +2131,9 @@ function applyZoom() {
 
 // ---------- section navigation (sidebar menu) ----------
 window.bmShowSection = function (name) {
-  const valid = ["overview", "devices", "projects", "trends", "alerts", "settings"];
+  // Valid sections come FROM THE DOM — a hardcoded list silently swallowed clicks when a
+  // new section shipped (v0.3.0 "chats" wasn't whitelisted → the nav button did nothing).
+  const valid = [...document.querySelectorAll("main > .section")].map((s) => s.dataset.section);
   name = valid.includes(name) ? name : "overview";
   // In the "both" combined view <main> is hidden, so a section click would be a silent
   // no-op. Switch back to the last single source first → render() shows <main> again.

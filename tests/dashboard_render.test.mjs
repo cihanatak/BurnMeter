@@ -265,4 +265,17 @@ const cellNoChat = bmProjCell("/x/y/repo", "repo", null, null);
 assert.ok(cellNoChat.includes('bm-proj-name">repo<') && !cellNoChat.includes("World"), "no chat → folder-big fallback unchanged");
 passed += 5;
 
+// === TEST 13: bmShowSection derives valid sections from the DOM, never a hardcoded list ===
+// (v0.3.0 bug: "chats" wasn't in the hardcoded whitelist → the nav button silently no-oped)
+const bss = code.slice(code.indexOf("window.bmShowSection"), code.indexOf("window.bmShowSection") + 500);
+assert.ok(bss.includes('querySelectorAll("main > .section")'),
+  "bmShowSection must derive the valid-section list from the DOM");
+assert.ok(!/valid = \[\s*"overview"/.test(bss), "no hardcoded section whitelist");
+// every section in the HTML must have a matching nav button and vice versa
+const html = readFileSync(join(__dirname, "..", "burnmeter", "static", "dashboard.html"), "utf8");
+const sections = [...html.matchAll(/class="section[^"]*" data-section="([^"]+)"/g)].map(m => m[1]);
+const navs = [...html.matchAll(/nav-item[^>]*data-section="([^"]+)"/g)].map(m => m[1]);
+navs.forEach(n => assert.ok(sections.includes(n), `nav "${n}" has no matching section`));
+passed += 2 + navs.length;
+
 console.log(`dashboard_render: ${passed} assertions passed`);
