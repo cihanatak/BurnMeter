@@ -56,6 +56,7 @@
 @media (prefers-reduced-motion: reduce) { *,*::before,*::after { transition:none!important; animation:none!important; } }
 
 html, body { margin:0; padding:0; background: var(--bg-base); color: var(--text-2); }
+html { scrollbar-gutter: stable; }   /* scrollbar appearing/vanishing must not shift the page */
 body {
   font-family: var(--font-sans);
   font-size: 14px; line-height: 1.5;
@@ -73,7 +74,10 @@ body {
 header {
   position: sticky; top: 0; z-index: 50;
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px var(--page-pad);
+  /* FIXED HEIGHT bar: at narrow widths text used to wrap INSIDE the buttons/meta →
+     the bar grew → everything below jumped ("kıpraşma"). Nothing in the bar may wrap;
+     the meta label is the designated shrinker (ellipsis) further down. */
+  height: 60px; padding: 0 var(--page-pad);
   background: rgba(8,9,10,0.82); backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-subtle);
 }
@@ -96,8 +100,10 @@ header {
   padding:8px 18px; border-radius:8px; letter-spacing:.01em;
   font:600 14px/1 var(--font-sans); color: var(--text-3);
   display:inline-flex; align-items:center; gap:7px;
+  white-space:nowrap;   /* NEVER break "Claude Code + Codex" into two lines (bar height!) */
   transition: all .18s cubic-bezier(.22,1,.36,1);
 }
+.source-toggle { flex-shrink:0; }   /* the toggle keeps its size; the meta label shrinks */
 .source-toggle button .dot { width:7px;height:7px;border-radius:50%; background: currentColor; opacity:.9; transition: all .18s; }
 .source-toggle button:hover { color: var(--text-1); }
 .source-toggle button.active { color:#fff; box-shadow: 0 2px 7px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.14); }
@@ -113,8 +119,12 @@ header {
 .source-toggle button[data-source="claude"].active { background: var(--brand-claude); }
 .source-toggle button[data-source="codex"].active  { background: var(--brand-codex); }
 
-.header-meta { display:flex; align-items:center; gap:14px; }
-.header-meta .meta-txt { font-size:11px; color: var(--text-4); font-family: var(--font-mono); }
+.header-meta { display:flex; align-items:center; gap:14px; min-width:0; flex-shrink:1; }
+.header-meta .meta-txt { font-size:11px; color: var(--text-4); font-family: var(--font-mono);
+  white-space:nowrap; }                       /* meta may COMPRESS but never wrap (bar height) */
+#data-source { overflow:hidden; text-overflow:ellipsis; min-width:0; flex-shrink:1; }
+#last-updated { min-width:5.5em; text-align:right; flex-shrink:0;
+  font-variant-numeric:tabular-nums; }        /* "now"→"12m ago" can't shimmer its neighbors */
 .live-dot { width:7px;height:7px;border-radius:50%; background: var(--good); position:relative; }
 .live-dot.live::after {
   content:""; position:absolute; inset:-4px; border-radius:50%;
