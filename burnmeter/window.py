@@ -375,6 +375,26 @@ def spawn_window(extra_args=None) -> bool:
         return False
 
 
+_MACOS_ACTIVITY = None   # NSActivity token — must stay referenced or the opt-out ends
+
+
+def _disable_app_nap():
+    """macOS App Nap suspends the whole process (server threads + WKWebView timers)
+    once the window sits occluded/backgrounded a while — the dashboard then freezes
+    until a click lifts the nap. Opt out for the window's lifetime. Uses
+    NSActivityUserInitiatedAllowingIdleSystemSleep (0x00EFFFFF): refuses only the
+    per-app nap, never blocks the lid/system sleep."""
+    global _MACOS_ACTIVITY
+    if sys.platform != "darwin" or _MACOS_ACTIVITY is not None:
+        return
+    try:
+        from Foundation import NSProcessInfo  # pyobjc — pywebview[cocoa] ships it
+        _MACOS_ACTIVITY = NSProcessInfo.processInfo().beginActivityWithOptions_reason_(
+            0x00EFFFFF, "Burnmeter live dashboard")
+    except Exception:
+        pass
+
+
 def run_window(open_browser: bool = False, ensure_background: bool = False, **kwargs) -> int:
     """Open the dashboard in a native window.
 
@@ -512,6 +532,22 @@ def run_window(open_browser: bool = False, ensure_background: bool = False, **kw
                     evt += (lambda *a, _n=_name: _wlog(_n))
             except Exception:
                 pass
+        # Self-heal poke: WKWebView/WebView2 throttle a hidden page's timers, and a
+        # fetch in flight across an OS sleep can hang forever — on re-show, nudge the
+        # dashboard's __bmWake so data is fresh the moment the window is. (Guarded:
+        # an older dashboard without the hook is a safe no-op.)
+        def _wake_js(*_a):
+            try:
+                win.evaluate_js("window.__bmWake && window.__bmWake()")
+            except Exception:
+                pass
+        for _name in ("shown", "restored"):
+            try:
+                evt = getattr(win.events, _name, None)
+                if evt is not None:
+                    evt += _wake_js
+            except Exception:
+                pass
         _wlog("window-created v" + __version__)
         # Persist the WebView profile (localStorage: zoom level + client prefs) across
         # restarts — private_mode=True (the default) would forget them every launch.
@@ -520,6 +556,7 @@ def run_window(open_browser: bool = False, ensure_background: bool = False, **kw
             storage.mkdir(parents=True, exist_ok=True)
         except Exception:
             pass
+        _disable_app_nap()   # macOS: nap would freeze the meter while backgrounded
         try:
             webview.start(private_mode=False, storage_path=str(storage))
         except TypeError:

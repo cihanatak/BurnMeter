@@ -64,12 +64,13 @@ globalThis.Chart = function () { return { destroy() {} }; };
 globalThis.setInterval = () => 0;
 globalThis.setTimeout = () => 0;
 globalThis.requestAnimationFrame = () => 0;
+globalThis.getComputedStyle = () => ({ getPropertyValue: () => "" });
 globalThis.location = windowStub.location;
 
 // Evaluate dashboard.js and capture the pure functions under test. Function declarations
 // are local to the wrapper; the appended assignment captures them out.
 const run = new Function(
-  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere };"
+  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere, refresh, fetchT };"
 );
 run();
 const { bmScopedHalf, bmScopedRep, liveBurnRate, bmPathParts, bmProjCell, liveWhere } = globalThis.__BM;
@@ -277,5 +278,70 @@ const sections = [...html.matchAll(/class="section[^"]*" data-section="([^"]+)"/
 const navs = [...html.matchAll(/nav-item[^>]*data-section="([^"]+)"/g)].map(m => m[1]);
 navs.forEach(n => assert.ok(sections.includes(n), `nav "${n}" has no matching section`));
 passed += 2 + navs.length;
+
+// === TEST 14: the poll loop must be un-wedgeable (v0.3.1 live-data freeze bug) ===
+// Shipped bug: refresh() latched a boolean __refreshInFlight and fetched with no
+// timeout; one hung fetch (sleep/resume, dead keep-alive) wedged the flag forever —
+// every 10s tick silently no-oped until the user "touched" the app. These guards
+// pin the three layers of the fix: bounded fetches, zombie takeover, wake hooks.
+
+// (a) every report fetch goes through the aborting wrapper — no bare fetch may hang
+assert.ok(code.includes("function fetchT("), "fetchT (AbortController wrapper) must exist");
+const lrf = code.slice(code.indexOf("async function loadReportFor"), code.indexOf("async function loadReportFor") + 700);
+assert.ok(lrf.includes("fetchT("), "loadReportFor must use the timeout fetch, never bare fetch");
+const rfBody = code.slice(code.indexOf("async function refresh"), code.indexOf("async function refresh") + 2600);
+assert.ok(rfBody.includes("__refreshToken"), "refresh must use ownership tokens (stale-paint guard)");
+assert.ok(rfBody.includes("__refreshStartedMs"), "refresh must timestamp in-flight polls (zombie takeover)");
+
+// (b) wake hooks: shell-callable + page wiring for visibility/focus/online/sleep-gap
+assert.ok(code.includes("window.__bmWake"), "__bmWake self-heal hook must exist");
+assert.ok(code.includes('"visibilitychange"') || code.includes("'visibilitychange'"), "visibilitychange revive must be wired");
+assert.ok(code.includes('"online"') || code.includes("'online'"), "online revive must be wired");
+assert.ok(code.includes("__bmHeartMs"), "sleep detector (heartbeat gap) must be wired");
+assert.ok(code.includes("__syncDevicesBusy"), "renderSyncDevices must have an anti-stacking guard");
+passed += 8;
+
+// === TEST 15 (behavioral): a wedged flag is TAKEN OVER; a fresh in-flight is respected ===
+let fetchCalls = 0;
+const okReport = () => ({ ok: true, json: async () => ({ _meta: { source: "claude" }, record_count: 1, forecast: { burn_rates_by_hours: {} } }) });
+globalThis.fetch = () => { fetchCalls++; return Promise.resolve(okReport()); };
+globalThis.setTimeout = (fn, ms) => 0;            // fetch resolves instantly; no timer needed
+globalThis.clearTimeout = () => {};
+window.__source = "claude";
+window.__scope = "all";
+window.__renderSig = null;
+
+// fresh in-flight (started 5s ago) → tick must respect the lock and NOT fetch
+window.__refreshInFlight = true;
+window.__refreshStartedMs = Date.now() - 5_000;
+await globalThis.__BM.refresh(false);
+assert.equal(fetchCalls, 0, "a FRESH in-flight poll must still be respected (no stampede)");
+
+// wedged in-flight (started 2min ago — the shipped freeze) → tick must TAKE OVER
+window.__refreshStartedMs = Date.now() - 120_000;
+await globalThis.__BM.refresh(false);
+assert.ok(fetchCalls >= 1, "a poll stuck >60s must be taken over by the next tick (freeze self-heals)");
+assert.equal(window.__refreshInFlight, false, "the takeover must clear the flag when done");
+
+// __bmWake: drops any wedge and refreshes immediately (shell resume / focus / online)
+window.__refreshInFlight = true;
+window.__refreshStartedMs = Date.now() - 5_000;   // even a FRESH lock must not survive a wake
+window.__bmWakeMs = 0;
+const before = fetchCalls;
+await window.__bmWake();
+assert.ok(fetchCalls > before, "__bmWake must force a refresh straight through a held lock");
+passed += 4;
+
+// === TEST 16 (behavioral): fetchT turns a never-settling fetch into a rejection ===
+globalThis.setTimeout = (fn, ms) => { fn(); return 0; };   // fire the abort timer immediately
+globalThis.fetch = (url, opts) => new Promise((res, rej) => {
+  if (opts && opts.signal) {
+    if (opts.signal.aborted) return rej(Object.assign(new Error("aborted"), { name: "AbortError" }));
+    opts.signal.addEventListener("abort", () => rej(Object.assign(new Error("aborted"), { name: "AbortError" })));
+  }
+  /* otherwise: hang forever — the exact bug */
+});
+await assert.rejects(globalThis.__BM.fetchT("/api/report", 10), "a hung socket must become a rejection, never an eternal await");
+passed += 1;
 
 console.log(`dashboard_render: ${passed} assertions passed`);

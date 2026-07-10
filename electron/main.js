@@ -10,7 +10,7 @@
 // Window model matches the product's: closing the window HIDES to tray (the meter
 // keeps collecting); Quit lives in the tray menu. We only kill the sidecar on quit
 // if WE spawned it — never someone else's server.
-const { app, BrowserWindow, Menu, Tray, shell, nativeImage, nativeTheme, screen } = require("electron");
+const { app, BrowserWindow, Menu, Tray, shell, nativeImage, nativeTheme, screen, powerMonitor } = require("electron");
 const { spawn } = require("child_process");
 const http = require("http");
 const fs = require("fs");
@@ -196,6 +196,8 @@ function createWindow() {
     saveState();
     if (!quitting) { e.preventDefault(); win.hide(); }   // close → tray (meter keeps running)
   });
+  win.on("show", () => setTimeout(wakeRenderer, 250));   // back from tray → data fresh NOW
+  win.on("restore", () => setTimeout(wakeRenderer, 250));
   win.on("closed", () => { win = null; });
 
   // external links (burnmeter.dev, GitHub, …) open in the real browser
@@ -228,8 +230,20 @@ function createTray() {
 }
 
 // ---------- lifecycle ----------
+// Wake-from-sleep recovery: a fetch in flight at suspend time can hang forever
+// against a half-open loopback socket. The page has its own watchdogs (__bmWake,
+// zombie takeover), but OS resume/unlock are signals only the shell sees reliably —
+// poke the page the moment the machine wakes so the numbers are never stale-frozen.
+// Guarded call: a page from an older server (no __bmWake) is a safe no-op.
+function wakeRenderer() {
+  if (!win || win.isDestroyed()) return;
+  win.webContents.executeJavaScript("window.__bmWake && window.__bmWake()").catch(() => {});
+}
+
 nativeTheme.themeSource = "dark";   // dark window chrome + dark UA scrollbars everywhere
 app.whenReady().then(() => {
+  powerMonitor.on("resume", () => setTimeout(wakeRenderer, 1500));        // let the loopback settle
+  powerMonitor.on("unlock-screen", () => setTimeout(wakeRenderer, 500));
   healthCheck((alreadyUp) => {
     if (!alreadyUp) startSidecar();
     waitForServer((ok) => {

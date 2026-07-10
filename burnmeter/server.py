@@ -160,8 +160,12 @@ class _Cache:
                 try:
                     threading.Thread(target=self._bg_rebuild, args=(build_fn, key),
                                      daemon=True).start()
-                except RuntimeError:                  # thread couldn't start
+                except RuntimeError as e:             # thread couldn't start
                     self._build_lock.release()
+                    # Never swallow this silently: repeated start failures mean the
+                    # cache is being served stale FOREVER (looks like a frozen app).
+                    sys.stderr.write(f"[burnmeter] bg rebuild thread failed to start "
+                                     f"(serving stale): {e}\n")
             return self._report
 
         # Cold cache (nothing usable yet): must build now, serialized.
@@ -172,7 +176,9 @@ class _Cache:
 
 
 def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict):
-    body = json.dumps(payload, default=str, indent=2).encode("utf-8")
+    # Compact JSON: the dashboard polls /api/report every 10s and the report grows
+    # with history — pretty-printing was pure per-request CPU + payload overhead.
+    body = json.dumps(payload, default=str, separators=(",", ":")).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Cache-Control", "no-store")
@@ -286,6 +292,13 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
     threading.Thread(target=_alert_watch, daemon=True).start()
 
     class Handler(BaseHTTPRequestHandler):
+        # Socket idle timeout. Without it, a client that connects and then stalls
+        # (suspended tab, sleeping laptop, AV proxy holding the socket) pins its
+        # handler THREAD forever; over days those leak until Thread.start() fails
+        # and the report cache silently freezes. 60s is 6× the poll cadence, and it
+        # only bounds socket WAITS (recv/send), never a long in-handler build.
+        timeout = 60
+
         # Keep the terminal clean for end users. The dashboard polls /api/report
         # every 10s; and if another service on the machine expects this port, its
         # pollers (/health, /favicon.ico, foreign API paths) hammer us with 404s.

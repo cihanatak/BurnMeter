@@ -129,47 +129,89 @@ function repSig(rep){
   return (rep.record_count||0) + ":" + ((rep._meta && rep._meta.files_scanned) || 0) + ":" + ((rep._meta && rep._meta.source) || "");
 }
 
+// A fetch that can NEVER hang forever. A dead socket (laptop sleep/resume leaving a
+// half-open keep-alive connection, a killed sidecar) leaves a plain fetch() pending
+// indefinitely — the await never settles, finally never runs, and the poll loop
+// wedges. Aborting turns that hang into an ordinary rejection the caller handles.
+async function fetchT(url, ms, opts) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), ms || 45000);
+  try { return await fetch(url, { ...(opts || {}), signal: ctl.signal }); }
+  finally { clearTimeout(t); }
+}
+
 async function loadReportFor(src, force) {
   const p = new URLSearchParams();
   if (force) p.set("refresh", "1");
   if (src !== "claude") p.set("source", src);
   const qs = p.toString();
-  const r = await fetch("/api/report" + (qs ? "?" + qs : ""));
+  // force → the server rebuilds synchronously (minutes on a big cold history); a
+  // routine poll answers from the warm cache instantly, so 45s only ever waits on
+  // a cold first build or a dead socket — exactly the case that must reject.
+  const r = await fetchT("/api/report" + (qs ? "?" + qs : ""), force ? 180000 : 45000);
   if (!r.ok) throw new Error("fetch " + r.status);
   return r.json();
 }
 const loadReport = (force) => loadReportFor(window.__source, force);
 
 async function refresh(force = false) {
-  if (window.__refreshInFlight && !force) return;
+  // In-flight guard with a ZOMBIE TAKEOVER: a poll stuck >60s is presumed dead (OS
+  // slept mid-fetch, wedged socket) — the next tick takes over instead of no-oping
+  // forever. The token makes takeovers safe: only the NEWEST call may paint or clear
+  // the flag, so a late-resolving zombie can't smear stale data over fresh.
+  const startedAt = Date.now();
+  if (window.__refreshInFlight && !force
+      && startedAt - (window.__refreshStartedMs || 0) < 60000) return;
+  const token = window.__refreshToken = (window.__refreshToken || 0) + 1;
   window.__refreshInFlight = true;
+  window.__refreshStartedMs = startedAt;
+  // Even when repSig is unchanged (idle: no new records), time-decaying figures
+  // (burn windows, forecast, budget pace) drift — do a full repaint at least
+  // once a minute so an idle dashboard never READS as frozen.
+  const fullDue = () => Date.now() - (window.__fullRenderMs || 0) > 60000;
   try {
     if (window.__source === "both") {
       const [cl, cx] = await Promise.all([loadReportFor("claude", force), loadReportFor("codex", force)]);
+      if (token !== window.__refreshToken) return;          // superseded (zombie) → never paint
       if (window.__source !== "both") return;               // switched away mid-fetch
       window.__reportCache.claude = cl; window.__reportCache.codex = cx;
       window.__lastReport = { _combined: true, claude: cl, codex: cx };
       const sig = repSig(window.__lastReport);
-      if (sig !== window.__renderSig) { renderCombined(cl, cx); window.__renderSig = sig; }
+      if (sig !== window.__renderSig || fullDue()) { renderCombined(cl, cx); window.__renderSig = sig; window.__fullRenderMs = Date.now(); }
       else { paintCombinedActive("claude", bmScopedHalf(cl, "claude")); paintCombinedActive("codex", bmScopedHalf(cx, "codex")); }  // scoped → shows remote devices' live model
       window.__lastRefreshMs = Date.now();
       return;
     }
     const rep = await loadReport(force);
+    if (token !== window.__refreshToken) return;            // superseded (zombie) → never paint
     if ((rep._meta?.source || "claude") !== window.__source) return; // stale
     window.__reportCache[rep._meta?.source || "claude"] = rep;
     window.__lastReport = rep;
     const sig = repSig(rep);
-    if (sig !== window.__renderSig) { render(rep); window.__renderSig = sig; }
+    if (sig !== window.__renderSig || fullDue()) { render(rep); window.__renderSig = sig; window.__fullRenderMs = Date.now(); }
     else { renderActiveModel(bmScopedRep(rep) || rep); }   // scoped → keeps cross-device live model (no merged→local flicker)
     window.__lastRefreshMs = Date.now();
   } catch (e) {
+    if (token !== window.__refreshToken) return;            // a superseded zombie failing late is noise
     console.error(e);
     $("last-updated").textContent = "failed to load: " + e.message;
   } finally {
-    window.__refreshInFlight = false;
+    if (token === window.__refreshToken) window.__refreshInFlight = false;
   }
 }
+
+// Shell-callable SELF-HEAL hook. The shells poke this on the signals only they see
+// (Electron: powerMonitor resume/unlock, window re-shown; pywebview: shown/restored);
+// the page wires its own signals (visibility/focus/online + sleep detector) in
+// start(). One call = drop any wedged poll and fetch now. Debounced: a wake storm
+// (focus + visibilitychange + resume at once) collapses to a single refresh.
+window.__bmWake = () => {
+  const now = Date.now();
+  if (now - (window.__bmWakeMs || 0) < 3000) return;
+  window.__bmWakeMs = now;
+  window.__refreshInFlight = false;
+  refresh(false);
+};
 
 // Paint a source from the client cache INSTANTLY (no network) so tab switches are
 // immediate; refresh() then silently revalidates in the background (SWR pattern).
@@ -180,6 +222,7 @@ function renderFromCache(src) {
       window.__lastReport = { _combined: true, claude: C.claude, codex: C.codex };
       renderCombined(C.claude, C.codex);
       window.__renderSig = repSig(window.__lastReport);
+      window.__fullRenderMs = Date.now();
       return true;
     }
     return false;
@@ -188,6 +231,7 @@ function renderFromCache(src) {
     window.__lastReport = C[src];
     render(C[src]);
     window.__renderSig = repSig(C[src]);
+    window.__fullRenderMs = Date.now();
     return true;
   }
   return false;
@@ -290,11 +334,14 @@ function _flashPill(msg, current) {
 async function checkForUpdate(current, manual = false) {
   if (!current || current === "?") return;
   if (!manual && window.__updateChecked) return;   // auto: once per load (periodic resets it)
+  if (window.__updCheckBusy) return;   // a slow check must not stack twins or wedge the pill
+  window.__updCheckBusy = true;
   window.__updateChecked = true;
   const el = $("update-link");
   if (manual && el) { el.className = "update-pill"; el.textContent = "↻ Checking…"; el.onclick = (ev) => ev.preventDefault(); }
   try {
-    const r = await fetch("https://raw.githubusercontent.com/cihanatak/BurnMeter/main/burnmeter/__init__.py", { cache: "no-store" });
+    // timeout: a stalled GitHub fetch used to leave the pill on "Checking…" forever
+    const r = await fetchT("https://raw.githubusercontent.com/cihanatak/BurnMeter/main/burnmeter/__init__.py", 15000, { cache: "no-store" });
     if (!r.ok) throw new Error("http " + r.status);
     const m = (await r.text()).match(/__version__\s*=\s*["']([\d.]+)["']/);
     const latest = m && m[1];
@@ -304,6 +351,8 @@ async function checkForUpdate(current, manual = false) {
   } catch (e) {
     if (manual) _flashPill("Check failed — offline?", current);
     /* auto: leave the affordance as-is (local-first, fail silent) */
+  } finally {
+    window.__updCheckBusy = false;
   }
 }
 
@@ -1384,25 +1433,34 @@ async function renderSyncDevices() {
   // Don't blow away an in-progress rename on the 10s render tick.
   const ae = document.activeElement;
   if (ae && ae.classList && ae.classList.contains("sync-rename-in")) return;
-  let st;
-  try { st = await (await fetch("/api/pro/status")).json(); }
-  catch (e) { return; }   // server may be old → skip silently
-  window.__proStatus = st;
-  renderSideAccount(st);   // sidebar account chip mirrors auth state on every refresh
-  if (!st.configured) { body.innerHTML = proAuthFormHtml(); window.__devicesCache = { devices: [] }; return; }
-  if (!st.verified) { body.innerHTML = proVerifyHtml(st.email); window.__devicesCache = { devices: [] }; return; }
-  // signed in + verified → show devices
-  let data;
-  try { data = await (await fetch("/api/sync/devices")).json(); }
-  catch (e) { data = { error: "server" }; }
-  body.innerHTML = proSignedInHeader(st) + proDevicesHtml(data);
-  // feed the multi-device scope: cache devices, fill the scope pill, re-scope whatever
-  // view is showing (the combined "both" view OR the single-source hero).
-  if (data && !data.error) {
-    window.__devicesCache = data;
-    populateScopePill(data);
-    if (window.__lastReport && window.__lastReport._combined) renderCombined(window.__lastReport.claude, window.__lastReport.codex);
-    else bmRefreshHero();
+  // The 30s tick must never STACK pending fetches: a stalled request would otherwise
+  // spawn an overlapping twin every tick, slowly eating the per-origin connection pool
+  // (and starving /api/report). fetchT bounds each request; the flag bounds the count.
+  if (window.__syncDevicesBusy) return;
+  window.__syncDevicesBusy = true;
+  try {
+    let st;
+    try { st = await (await fetchT("/api/pro/status", 15000)).json(); }
+    catch (e) { return; }   // server may be old → skip silently
+    window.__proStatus = st;
+    renderSideAccount(st);   // sidebar account chip mirrors auth state on every refresh
+    if (!st.configured) { body.innerHTML = proAuthFormHtml(); window.__devicesCache = { devices: [] }; return; }
+    if (!st.verified) { body.innerHTML = proVerifyHtml(st.email); window.__devicesCache = { devices: [] }; return; }
+    // signed in + verified → show devices
+    let data;
+    try { data = await (await fetchT("/api/sync/devices", 15000)).json(); }
+    catch (e) { data = { error: "server" }; }
+    body.innerHTML = proSignedInHeader(st) + proDevicesHtml(data);
+    // feed the multi-device scope: cache devices, fill the scope pill, re-scope whatever
+    // view is showing (the combined "both" view OR the single-source hero).
+    if (data && !data.error) {
+      window.__devicesCache = data;
+      populateScopePill(data);
+      if (window.__lastReport && window.__lastReport._combined) renderCombined(window.__lastReport.claude, window.__lastReport.codex);
+      else bmRefreshHero();
+    }
+  } finally {
+    window.__syncDevicesBusy = false;
   }
 }
 
@@ -2243,6 +2301,16 @@ function start() {
   $("last-updated").textContent = "Reading your Burnmeter logs — the first run can take a minute or two on large histories…";
   refresh(false);
   setInterval(() => refresh(false), 10000);
+  // ---- self-heal wiring: the poll loop must survive sleep/resume, tray-hide, ----
+  // ---- and dead sockets (the "freezes after long uptime" bug, v0.3.1)        ----
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) window.__bmWake(); });
+  window.addEventListener("focus", () => window.__bmWake());
+  window.addEventListener("online", () => window.__bmWake());
+  setInterval(() => {   // sleep detector: a 1s heartbeat that skips >15s means the OS slept
+    const now = Date.now();
+    if (window.__bmHeartMs && now - window.__bmHeartMs > 15000) { window.__bmWakeMs = 0; window.__bmWake(); }
+    window.__bmHeartMs = now;
+  }, 1000);
   setInterval(updateLiveStamp, 1000);
   setInterval(tickLive, 1000);   // canlı aktif model: saniyelik nabız/şimdi güncellemesi
   setInterval(liveGaugeTick, 5000);   // burn-rate gauge decays live (→ $0 when idle)
