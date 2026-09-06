@@ -165,7 +165,11 @@ def parse_codex_file(path: Path, start_offset: int = 0, resume: Optional[dict] =
                         # session_id/cwd/git_branch dosya-seviyesinde meta'ya hoist
                         # edilir (record başına tekrar etmez → cache 198MB→~birkaç MB).
                         turns.append([
-                            ts, cur_model or "gpt-5",
+                            # No turn_context seen yet → we do NOT know the model.
+                            # Inventing "gpt-5" priced these turns at a flagship rate
+                            # they may never have used; "" resolves to unknown, which
+                            # counts the tokens and surfaces in the pricing warning.
+                            ts, cur_model or "",
                             cur_turn_id or f"{session_id}:{idx}",
                             fresh_in, out_tok, cached,
                         ])
@@ -219,7 +223,7 @@ def _compact_to_usages(meta: dict, turns: list, device: str):
             project_dir=cwd,
             project_label=label,
             git_branch=branch,
-            model=model or "gpt-5",
+            model=model or "",
             message_id=f"{sid}:{i}",
             input_tokens=int(fin or 0),
             output_tokens=int(out or 0),

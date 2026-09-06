@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import ipaddress
 import json
 import os
 import sys
@@ -327,8 +328,56 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 self.address_string(), format % args
             ))
 
+        # ---- DNS-rebinding guard (applies to every /api/* request) ----
+        # A page on evil.com can flip its own DNS to 127.0.0.1; the browser then
+        # treats this server as SAME-ORIGIN, so CORS stops applying and a custom
+        # header is no longer proof of our own dashboard. The one thing the
+        # attacker cannot forge is the Host header: the browser sends the name the
+        # user navigated to. So we accept loopback, the exact address we are bound
+        # to (a power user serving a LAN), and bare IP literals on a wildcard bind
+        # — but never a hostname, which is precisely what rebinding must use.
+        # BURNMETER_ALLOWED_HOSTS (comma-separated) is the escape hatch for anyone
+        # fronting Burnmeter with a real name or reverse proxy.
+        def _api_host_ok(self) -> bool:
+            raw = (self.headers.get("Host") or "").strip()
+            host = raw.rsplit(":", 1)[0] if raw.count(":") == 1 else raw
+            if host.startswith("[") and "]" in host:          # [::1]:7654
+                host = host[1:host.index("]")]
+            elif raw.count(":") > 1 and "]" not in raw:       # bare IPv6, no port
+                host = raw
+            host = host.strip().lower()
+            if host in ("127.0.0.1", "localhost", "::1"):
+                return True
+            extra = os.environ.get("BURNMETER_ALLOWED_HOSTS", "")
+            if host and host in {h.strip().lower() for h in extra.split(",") if h.strip()}:
+                return True
+            try:
+                bound = str(self.server.server_address[0])
+            except Exception:
+                bound = ""
+            if bound in ("0.0.0.0", "::", ""):
+                # Wildcard bind: any literal IP is a user typing an address; a NAME
+                # never legitimately reaches us here.
+                try:
+                    ipaddress.ip_address(host)
+                    return True
+                except ValueError:
+                    return False
+            return host == bound.lower()
+
+        def _reject_foreign_host(self, path: str) -> bool:
+            """True (and the 403 is already sent) when this /api/ call must not run."""
+            if not path.startswith("/api/"):
+                return False
+            if self._api_host_ok():
+                return False
+            _json_response(self, 403, {"ok": False, "message": "forbidden: host not allowed"})
+            return True
+
         def do_POST(self):
             path = urlparse(self.path).path
+            if self._reject_foreign_host(path):
+                return
             if path == "/api/update":
                 # One-click self-update from the dashboard. CSRF guard: a random
                 # web page can't set this custom header without a CORS preflight
@@ -512,6 +561,8 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
             url = urlparse(self.path)
             qs = parse_qs(url.query)
             path = url.path
+            if self._reject_foreign_host(path):
+                return
 
             if path in ("/", "/index.html"):
                 # Serve dashboard.html with the cache-bust token (?v=__BMVER__) set to

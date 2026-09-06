@@ -250,6 +250,21 @@ main.gs-active { display:block; }
 /* In the recent TABLE, long chat titles must ellipsize instead of widening the column
    (they pushed tokens/$ off the card and forced a horizontal scrollbar). Fixed layout
    makes the browser RESPECT the widths instead of auto-expanding to content. */
+/* Long, space-free names (monorepo paths, hashed cache dirs) used to widen these
+   tables past their card and push the "$ (est.)" column out of view — hiding the
+   one number the product exists to show. Fixed layout + reserved numeric columns
+   let .bm-proj-name's existing ellipsis do its job instead. */
+#projects-tbl, #commits-tbl, #modeltbl { table-layout: fixed; width: 100%; }
+#projects-tbl th:nth-child(2), #projects-tbl th:nth-child(3) { width: 92px; }
+#commits-tbl th:nth-child(1) { width: 64px; }
+#commits-tbl th:nth-child(4), #commits-tbl th:nth-child(5) { width: 84px; }
+#modeltbl th:nth-child(2) { width: 78px; }
+#modeltbl th:nth-child(3), #modeltbl th:nth-child(4) { width: 84px; }
+#projects-tbl td, #commits-tbl td, #modeltbl td { overflow: hidden; text-overflow: ellipsis; }
+#projects-tbl .pill, #commits-tbl .pill, #modeltbl .pill {
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#projects-tbl .bm-proj, #commits-tbl .bm-proj { max-width: 100%; }
+
 #recent-tbl { table-layout: fixed; width: 100%; }
 #recent-tbl th:nth-child(1) { width: 60px; }
 #recent-tbl th:nth-child(3) { width: 96px; }

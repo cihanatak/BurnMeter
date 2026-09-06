@@ -1141,10 +1141,17 @@ def fuel_efficiency(
         commit_kind, commit_label = "neutral", "raw · no comparison"
 
     # --- 3. Cache hit rate ---
+    # A 0/0 rate is "nothing measured yet", not "bad". Without this guard a brand-new
+    # install (or the first minutes of any install) renders a red "low (most input
+    # uncached)" verdict directly beside the "No usage data yet" welcome — telling a
+    # first-time evaluator their non-existent usage is inefficient.
     cache_rate = totals_dict.get("cache_hit_rate", 0)
+    has_usage = bool(totals_dict.get("messages", 0)) and bool(totals_dict.get("total_tokens", 0))
     target_good = 0.70
     target_excellent = 0.85
-    if cache_rate >= target_excellent:
+    if not has_usage:
+        cache_kind, cache_label = "neutral", "no usage measured yet"
+    elif cache_rate >= target_excellent:
         cache_kind, cache_label = "good", "excellent (peak efficiency)"
     elif cache_rate >= target_good:
         cache_kind, cache_label = "good", "good (above target)"
@@ -1159,7 +1166,9 @@ def fuel_efficiency(
     you_per_turn = cost_usd / msgs if msgs else 0
     # No published canonical number, but community typical band: $0.10-$0.50 per turn
     turn_low, turn_high = 0.10, 0.50
-    if you_per_turn < turn_low:
+    if not has_usage:
+        turn_kind, turn_label = "neutral", "no turns recorded yet"
+    elif you_per_turn < turn_low:
         turn_kind, turn_label = "good", "very light per turn"
     elif you_per_turn <= turn_high:
         turn_kind, turn_label = "good", "within normal band"
@@ -1203,7 +1212,17 @@ def fuel_efficiency(
     warn_hour = hour_kind == "warn"
     high_hours_per_day = hours_stats["hours_per_active_day"] >= 6.0
 
-    if per_unit_good and (heavy_hour or warn_hour) and high_hours_per_day:
+    if not has_usage:
+        # Nothing measured yet — say so. Any verdict here would be a judgement on
+        # data that does not exist, which is the first thing a new user would see.
+        headline_kind = "neutral"
+        headline_label = "Waiting for your first session"
+        headline_detail = (
+            f"No {tool_label} usage recorded yet. Run a session and this card will "
+            f"compare your cost per turn, per commit, and cache efficiency against "
+            f"your own history."
+        )
+    elif per_unit_good and (heavy_hour or warn_hour) and high_hours_per_day:
         headline_kind = "good"
         headline_label = "Power user — heavy use, but efficient"
         _prior_hpd = prior_hours_stats.get("hours_per_active_day", 0)

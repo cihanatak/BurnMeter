@@ -42,9 +42,15 @@ LIVE_RATES = {
     "claude-sonnet-4-5-20250929": (3.00, 15.00, 0.30, 3.75),
     "claude-3-5-sonnet-20241022": (3.00, 15.00, 0.30, 3.75),
     "claude-haiku-4-5-20251001":  (1.00, 5.00, 0.10, 1.25),
+    "gpt-6-astra":                (10.00, 50.00, 1.00, 10.00),
+    "gpt-5.6-sol":                (4.00, 20.00, 0.40, 4.00),
+    "gpt-5.6-terra":              (2.00, 12.00, 0.20, 2.00),
+    "gpt-5.6-luna":               (0.20, 1.20, 0.02, 0.20),
+    "gpt-5.5-pro":                (30.00, 180.00, 3.00, 30.00),
     "gpt-5.5":                    (5.00, 30.00, 0.50, 5.00),
     "gpt-5.4":                    (2.50, 15.00, 0.25, 2.50),
     "gpt-5.4-mini":               (0.75, 4.50, 0.075, 0.75),
+    "gpt-5.4-nano":               (0.20, 1.25, 0.02, 0.20),
     "gpt-5.3-codex":              (1.75, 14.00, 0.175, 1.75),
     "o4-mini":                    (0.75, 4.50, 0.075, 0.75),
 }
@@ -78,9 +84,35 @@ def test_fable_51_cache_reads_are_a_quarter_of_fable_5():
 
 
 def test_variant_beats_version_for_openai_ids():
-    """gpt-5.4-mini is a mini model, not the 5.4 flagship; same for codex."""
+    """gpt-5.4-mini is a mini model, not the 5.4 flagship; same for codex/nano."""
     assert resolve_price("gpt-5.4-mini")[0] == "gpt-5-mini"
+    assert resolve_price("gpt-5.4-nano")[0] == "gpt-5-nano"
     assert resolve_price("gpt-5.3-codex")[0] == "gpt-5-codex"
+    assert resolve_price("gpt-5.5-pro")[0] == "gpt-5.5-pro"   # must beat plain gpt-5.5
+
+
+def test_gpt56_tiers_are_not_collapsed_into_one_price():
+    """Sol/Terra/Luna differ by 20x. Pricing Luna as the flagship reported a
+    cost-cutting user's spend at ~25x reality — the tool would look broken."""
+    luna = estimate_cost_usd("gpt-5.6-luna", input_tokens=1_000_000)
+    terra = estimate_cost_usd("gpt-5.6-terra", input_tokens=1_000_000)
+    sol = estimate_cost_usd("gpt-5.6-sol", input_tokens=1_000_000)
+    assert (luna, terra, sol) == (pytest.approx(0.20), pytest.approx(2.00), pytest.approx(4.00))
+    assert luna < terra < sol < estimate_cost_usd("gpt-6-astra", input_tokens=1_000_000)
+
+
+def test_gpt6_astra_is_not_priced_as_gpt55():
+    """Astra bills at twice GPT-5.5 on both sides; the generic 'gpt' fallback halved it."""
+    assert estimate_cost_usd("gpt-6-astra", input_tokens=1_000_000, output_tokens=1_000_000) == \
+        pytest.approx(60.00)
+    assert resolve_price("gpt-6-astra")[0] == "gpt-6-astra"
+
+
+def test_codex_turns_with_no_model_are_unknown_not_a_fabricated_flagship():
+    """codex_parser used to stamp unresolved turns 'gpt-5', pricing them at a
+    flagship rate the user may never have touched. Empty → unknown → surfaced."""
+    assert resolve_price("") == ("unknown", True)
+    assert estimate_cost_usd("", input_tokens=1_000_000) == 0.0
 
 
 def test_specific_version_beats_generic_family():

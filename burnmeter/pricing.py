@@ -112,9 +112,38 @@ PRICES: dict[str, ModelPrice] = {
     # Claude. OpenAI has no explicit cache WRITE charge (automatic prompt cache,
     # only reads are discounted) → cache_write_* = input rate (a no-op anyway
     # because Codex records carry cache_creation = 0).
+    # GPT-6 Astra — the flagship above GPT-5.5. Twice 5.5's rate on both sides, so
+    # falling back to the 5.5 row halved a Codex user's reported spend.
+    "gpt-6-astra": ModelPrice(
+        family="gpt-6-astra", input_per_mtok=10.00, output_per_mtok=50.00,
+        cache_read_per_mtok=1.00, cache_write_5m_per_mtok=10.00, cache_write_1h_per_mtok=10.00,
+    ),
+    # GPT-5.6 ships as three tiers that differ by 20x. Luna in particular was being
+    # reported at 25x its real cost — a user switching to it to save money would
+    # have watched Burnmeter claim their bill exploded.
+    "gpt-5.6-sol": ModelPrice(
+        family="gpt-5.6-sol", input_per_mtok=4.00, output_per_mtok=20.00,
+        cache_read_per_mtok=0.40, cache_write_5m_per_mtok=4.00, cache_write_1h_per_mtok=4.00,
+    ),
+    "gpt-5.6-terra": ModelPrice(
+        family="gpt-5.6-terra", input_per_mtok=2.00, output_per_mtok=12.00,
+        cache_read_per_mtok=0.20, cache_write_5m_per_mtok=2.00, cache_write_1h_per_mtok=2.00,
+    ),
+    "gpt-5.6-luna": ModelPrice(
+        family="gpt-5.6-luna", input_per_mtok=0.20, output_per_mtok=1.20,
+        cache_read_per_mtok=0.02, cache_write_5m_per_mtok=0.20, cache_write_1h_per_mtok=0.20,
+    ),
+    "gpt-5.5-pro": ModelPrice(
+        family="gpt-5.5-pro", input_per_mtok=30.00, output_per_mtok=180.00,
+        cache_read_per_mtok=3.00, cache_write_5m_per_mtok=30.00, cache_write_1h_per_mtok=30.00,
+    ),
     "gpt-5.5": ModelPrice(
         family="gpt-5.5", input_per_mtok=5.00, output_per_mtok=30.00,
         cache_read_per_mtok=0.50, cache_write_5m_per_mtok=5.00, cache_write_1h_per_mtok=5.00,
+    ),
+    "gpt-5-nano": ModelPrice(
+        family="gpt-5-nano", input_per_mtok=0.20, output_per_mtok=1.25,
+        cache_read_per_mtok=0.02, cache_write_5m_per_mtok=0.20, cache_write_1h_per_mtok=0.20,
     ),
     "gpt-5.4": ModelPrice(
         family="gpt-5.4", input_per_mtok=2.50, output_per_mtok=15.00,
@@ -189,6 +218,21 @@ def resolve_price(model: Optional[str]) -> tuple[str, bool]:
         return "gpt-5-codex", True
     if "mini" in m and ("gpt" in m or m.startswith("o")):
         return "gpt-5-mini", True
+    if "nano" in m and ("gpt" in m or m.startswith("o")):
+        return "gpt-5-nano", True
+    if "astra" in m or "gpt-6" in m or "gpt6" in m:
+        return "gpt-6-astra", True
+    # GPT-5.6's three tiers differ by 20x, so the tier name decides the price.
+    if "luna" in m:
+        return "gpt-5.6-luna", True
+    if "terra" in m:
+        return "gpt-5.6-terra", True
+    if "sol" in m:
+        return "gpt-5.6-sol", True
+    if "gpt-5.6" in m or "gpt5.6" in m:
+        return "gpt-5.6-sol", False  # unnamed 5.6 tier → priciest of the three, flagged
+    if "gpt-5.5-pro" in m or "gpt5.5-pro" in m:
+        return "gpt-5.5-pro", True
     if "gpt-5.5" in m or "gpt5.5" in m:
         return "gpt-5.5", True
     if "gpt-5.4" in m or "gpt5.4" in m:
