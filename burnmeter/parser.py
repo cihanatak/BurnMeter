@@ -57,6 +57,12 @@ class UsageRecord:
     output_tokens: int
     cache_creation_tokens: int
     cache_read_tokens: int
+    # Of cache_creation_tokens, how many were written with the 1-HOUR TTL. Claude
+    # bills a 1h cache write at 2.0x input where a 5-minute write costs 1.25x, so
+    # this split is a real price difference, not bookkeeping: on a heavy agentic
+    # month ~80% of writes are 1h. Absent in older logs → 0 → billed at 5m, which
+    # is the correct fallback for records that predate the field.
+    cache_creation_1h_tokens: int = 0
     tool_names: list[str] = field(default_factory=list)
     source_file: str = ""
     # JSONL uuid chain — bir assistant cevabı birden çok record üretir
@@ -174,6 +180,13 @@ def parse_line(line: str, source_file: str = "") -> Optional[UsageRecord]:
         output_tokens=int(usage.get("output_tokens") or 0),
         cache_creation_tokens=int(usage.get("cache_creation_input_tokens") or 0),
         cache_read_tokens=int(usage.get("cache_read_input_tokens") or 0),
+        # usage.cache_creation = {ephemeral_5m_input_tokens, ephemeral_1h_input_tokens};
+        # the two sum to cache_creation_input_tokens. We keep the 1h half because it
+        # bills at a higher multiple (see UsageRecord).
+        cache_creation_1h_tokens=int(
+            ((usage.get("cache_creation") or {}) if isinstance(usage.get("cache_creation"), dict) else {})
+            .get("ephemeral_1h_input_tokens") or 0
+        ),
         tool_names=_extract_tool_names(msg.get("content")),
         source_file=source_file,
         uuid=str(rec.get("uuid") or ""),
@@ -335,7 +348,10 @@ def iter_jsonl_files(root: Path = CLAUDE_PROJECTS_DIR) -> Iterator[Path]:
 # (path,mtime,size) ile değişmemiş dosyalar yeniden OKUNMAZ → build ~25s'den
 # ~birkaç saniyeye iner (sadece aktif/yeni dosyalar parse edilir).
 _CLAUDE_CACHE_PATH = CLAUDE_PROJECTS_DIR.parent / ".burnmeter_claude_cache.json"
-_CLAUDE_CACHE_VERSION = 1
+# Bump whenever UsageRecord gains a field the cache must carry, or a record's
+# meaning changes — an old entry would otherwise be replayed with the new field
+# silently zeroed. v2: cache_creation_1h_tokens (1-hour cache-write TTL split).
+_CLAUDE_CACHE_VERSION = 2
 
 
 def _claude_load_cache() -> dict:

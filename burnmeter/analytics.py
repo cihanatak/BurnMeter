@@ -120,6 +120,7 @@ class Totals:
             output_tokens=rec.output_tokens,
             cache_read_tokens=rec.cache_read_tokens,
             cache_creation_tokens=rec.cache_creation_tokens,
+            cache_creation_1h_tokens=getattr(rec, 'cache_creation_1h_tokens', 0),
         )
         self.messages += 1
 
@@ -278,6 +279,7 @@ def aggregate_by_session(
             output_tokens=lr.output_tokens,
             cache_read_tokens=lr.cache_read_tokens,
             cache_creation_tokens=lr.cache_creation_tokens,
+            cache_creation_1h_tokens=getattr(lr, 'cache_creation_1h_tokens', 0),
         )
         item["last_turn_cost_usd"]       = ltd["cost_usd"]
         item["last_turn_cache_hit_rate"] = ltd["cache_hit_rate"]
@@ -914,6 +916,7 @@ def attribute_to_commits(
                     output_tokens=r.output_tokens,
                     cache_read_tokens=r.cache_read_tokens,
                     cache_creation_tokens=r.cache_creation_tokens,
+                    cache_creation_1h_tokens=getattr(r, 'cache_creation_1h_tokens', 0),
                 )
                 sess.add(r.session_id)
                 rec_idx += 1
@@ -1014,6 +1017,7 @@ def active_hours_stats(records: list[UsageRecord], days: int = 7) -> dict:
             output_tokens=r.output_tokens,
             cache_read_tokens=r.cache_read_tokens,
             cache_creation_tokens=r.cache_creation_tokens,
+            cache_creation_1h_tokens=getattr(r, 'cache_creation_1h_tokens', 0),
         )
 
     active_minutes = len(buckets) * (BUCKET_SEC / 60)
@@ -1338,6 +1342,7 @@ def burn_rate_timeseries(
             output_tokens=r.output_tokens,
             cache_read_tokens=r.cache_read_tokens,
             cache_creation_tokens=r.cache_creation_tokens,
+            cache_creation_1h_tokens=getattr(r, 'cache_creation_1h_tokens', 0),
         )
         tokens[idx] += (r.input_tokens + r.output_tokens
                         + r.cache_creation_tokens + r.cache_read_tokens)
@@ -1384,6 +1389,7 @@ def daily_burn_rates(records: list[UsageRecord], days_back: int = 90) -> list[di
             output_tokens=r.output_tokens,
             cache_read_tokens=r.cache_read_tokens,
             cache_creation_tokens=r.cache_creation_tokens,
+            cache_creation_1h_tokens=getattr(r, 'cache_creation_1h_tokens', 0),
         )
         by_day[key]["buckets"].add(int(r.timestamp.timestamp() // BUCKET_SEC))
         by_day[key]["tokens"] += (
@@ -1443,6 +1449,7 @@ def live_active_models(records: list[UsageRecord], lookback_min: int = 15) -> di
             output_tokens=r.output_tokens,
             cache_read_tokens=r.cache_read_tokens,
             cache_creation_tokens=r.cache_creation_tokens,
+            cache_creation_1h_tokens=getattr(r, 'cache_creation_1h_tokens', 0),
         )
         m["messages"] += 1
         if m["last_seen"] is None or r.timestamp > m["last_seen"]:
@@ -1499,6 +1506,7 @@ def forecast(records: list[UsageRecord], daily: list[dict]) -> dict:
             output_tokens=r.output_tokens,
             cache_read_tokens=r.cache_read_tokens,
             cache_creation_tokens=r.cache_creation_tokens,
+            cache_creation_1h_tokens=getattr(r, 'cache_creation_1h_tokens', 0),
         )
         for r in recent_recs
     )
@@ -1564,6 +1572,7 @@ def forecast(records: list[UsageRecord], daily: list[dict]) -> dict:
                 output_tokens=r.output_tokens,
                 cache_read_tokens=r.cache_read_tokens,
                 cache_creation_tokens=r.cache_creation_tokens,
+                cache_creation_1h_tokens=getattr(r, 'cache_creation_1h_tokens', 0),
             )
             cost += rc
             per_model[r.model or "unknown"] += rc
@@ -1599,6 +1608,7 @@ def forecast(records: list[UsageRecord], daily: list[dict]) -> dict:
             output_tokens=r.output_tokens,
             cache_read_tokens=r.cache_read_tokens,
             cache_creation_tokens=r.cache_creation_tokens,
+            cache_creation_1h_tokens=getattr(r, 'cache_creation_1h_tokens', 0),
         )
     recent_costs = sorted([m, round(c, 4)] for m, c in rc_buckets.items())
 
@@ -1856,6 +1866,7 @@ def build_report(
             output_tokens=r.output_tokens,
             cache_read_tokens=r.cache_read_tokens,
             cache_creation_tokens=r.cache_creation_tokens,
+            cache_creation_1h_tokens=getattr(r, 'cache_creation_1h_tokens', 0),
         )
         b["records"] += 1
         if r.timestamp > b["last_ts"]:
@@ -1930,6 +1941,7 @@ def build_report(
                         output_tokens=r.output_tokens,
                         cache_read_tokens=r.cache_read_tokens,
                         cache_creation_tokens=r.cache_creation_tokens,
+                        cache_creation_1h_tokens=getattr(r, 'cache_creation_1h_tokens', 0),
                     )
                 slot["burn_cost"][k] += cost
     # Finalize

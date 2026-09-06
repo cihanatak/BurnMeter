@@ -231,21 +231,29 @@ def estimate_cost_usd(
     cache_read_tokens: int = 0,
     cache_creation_tokens: int = 0,
     cache_ttl: str = "5m",
+    cache_creation_1h_tokens: int = 0,
 ) -> float:
     """Compute estimated USD cost for a single usage record.
+
+    `cache_creation_tokens` is the TOTAL written to cache; `cache_creation_1h_tokens`
+    is how much of that used the 1-hour TTL, which bills at 2.0x input instead of
+    1.25x. Claude Code writes most of its cache at 1h in agentic sessions, so
+    ignoring the split under-reports real spend by a wide margin. Records from
+    before the log format carried the split pass 0 and bill at 5m, as they did.
 
     Returns 0.0 for unknown models (we still track tokens elsewhere).
     """
     p = price_for(model)
-    write_rate = (
-        p.cache_write_1h_per_mtok if cache_ttl == "1h"
-        else p.cache_write_5m_per_mtok
-    )
+    write_1h = min(max(int(cache_creation_1h_tokens), 0), cache_creation_tokens)
+    if not write_1h and cache_ttl == "1h":
+        write_1h = cache_creation_tokens        # caller declared the whole write as 1h
+    write_5m = cache_creation_tokens - write_1h
     return (
         input_tokens * p.input_per_mtok
         + output_tokens * p.output_per_mtok
         + cache_read_tokens * p.cache_read_per_mtok
-        + cache_creation_tokens * write_rate
+        + write_5m * p.cache_write_5m_per_mtok
+        + write_1h * p.cache_write_1h_per_mtok
     ) / 1_000_000.0
 
 
@@ -255,6 +263,7 @@ def effective_tokens(
     output_tokens: int = 0,
     cache_read_tokens: int = 0,
     cache_creation_tokens: int = 0,
+    cache_creation_1h_tokens: int = 0,
 ) -> int:
     """Cost-weighted input-equivalent token count.
 
@@ -275,9 +284,13 @@ def effective_tokens(
     out_mult = p.output_per_mtok / base
     cr_mult = p.cache_read_per_mtok / base
     cc_mult = p.cache_write_5m_per_mtok / base
+    cc1_mult = p.cache_write_1h_per_mtok / base
+    write_1h = min(max(int(cache_creation_1h_tokens), 0), cache_creation_tokens)
+    write_5m = cache_creation_tokens - write_1h
     return int(
         input_tokens
         + output_tokens * out_mult
         + cache_read_tokens * cr_mult
-        + cache_creation_tokens * cc_mult
+        + write_5m * cc_mult
+        + write_1h * cc1_mult
     )
