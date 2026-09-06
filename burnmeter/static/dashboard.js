@@ -1977,8 +1977,27 @@ function renderHeatmap(rep) {
   body.innerHTML = h + `</div>`;
 }
 
+// Price-table honesty note. A model released after our last price check is still
+// costed (at its family's current rate) — but the user must be told that figure is
+// a guess, otherwise the app quietly does the exact thing it exists to prevent.
+function renderPricingNote(rep) {
+  const el = $("pricing-note");
+  if (!el) return;
+  const pc = (rep && rep.pricing_coverage) || {};
+  const est = pc.estimated || [], unp = pc.unpriced || [];
+  if (!est.length && !unp.length) { el.style.display = "none"; el.innerHTML = ""; return; }
+  const names = (rows) => rows.slice(0, 3).map(r => esc(modelDisplay(r.model_id))).join(", ")
+    + (rows.length > 3 ? ` +${rows.length - 3}` : "");
+  const parts = [];
+  if (est.length) parts.push(`${names(est)} priced at family rates (${fmtMoney0(pc.estimated_cost_usd || 0)} est.)`);
+  if (unp.length) parts.push(`${names(unp)} not in the price table — tokens counted, cost excluded`);
+  el.style.display = "";
+  el.innerHTML = `⚠ ${parts.join(" · ")}. Rates last checked ${esc(pc.verified_at || "—")}.`;
+}
+
 // ---------- per-model table ----------
 function renderModelTable(rep) {
+  renderPricingNote(rep);
   const bmf = (rep.by_model_full || []).filter(m => !String(m.model_id || "").startsWith("<")).slice(0, 10);
   const tb = document.querySelector("#modeltbl tbody");
   if (!bmf.length) { tb.innerHTML = `<tr><td colspan="4" class="empty">No data</td></tr>`; return; }

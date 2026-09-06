@@ -286,6 +286,12 @@ main.gs-active { display:block; }
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .anom-cost { font:600 13px var(--font-mono); color:var(--text-1); flex-shrink:0; }
 
+/* Price-table honesty note (models card). Wraps freely — it is prose, and it must
+   never be clipped: the whole point is that the user reads it. */
+.pricing-note { margin-top:10px; padding:8px 10px; border-radius:8px;
+  background:var(--warn-bg); color:var(--warn);
+  font:500 11px/1.5 var(--font-sans); }
+
 /* ---------- COST PER COMMIT ---------- */
 .commit-cell { display:flex; align-items:baseline; gap:8px; min-width:0;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

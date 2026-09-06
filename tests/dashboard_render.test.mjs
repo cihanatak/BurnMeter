@@ -70,7 +70,7 @@ globalThis.location = windowStub.location;
 // Evaluate dashboard.js and capture the pure functions under test. Function declarations
 // are local to the wrapper; the appended assignment captures them out.
 const run = new Function(
-  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere, refresh, fetchT };"
+  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere, refresh, fetchT, renderPricingNote };"
 );
 run();
 const { bmScopedHalf, bmScopedRep, liveBurnRate, bmPathParts, bmProjCell, liveWhere } = globalThis.__BM;
@@ -342,6 +342,46 @@ globalThis.fetch = (url, opts) => new Promise((res, rej) => {
   /* otherwise: hang forever — the exact bug */
 });
 await assert.rejects(globalThis.__BM.fetchT("/api/report", 10), "a hung socket must become a rejection, never an eternal await");
+passed += 1;
+
+// === TEST 17: the price-table honesty note actually reaches the user ===
+// v0.3.1 priced Sonnet 5 and Fable 5.1 by a generic family match and said nothing.
+// The backend now flags guessed rates; these guards keep the UI from swallowing them.
+{
+  const note = { innerHTML: "", style: {} };
+  const realGet = documentStub.getElementById;
+  documentStub.getElementById = (id) => (id === "pricing-note" ? note : realGet(id));
+
+  // clean report → no warning, and the box stays hidden
+  globalThis.__BM.renderPricingNote({ pricing_coverage: { verified_at: "2026-09-06", estimated: [], unpriced: [] } });
+  assert.equal(note.innerHTML, "", "a fully-priced report must show no warning");
+  assert.equal(note.style.display, "none", "clean report hides the note box");
+
+  // a model priced by family fallback → named, with its spend and the check date
+  globalThis.__BM.renderPricingNote({
+    pricing_coverage: {
+      verified_at: "2026-09-06",
+      estimated: [{ model_id: "claude-opus-9-turbo", cost_usd: 12.5, total_tokens: 5 }],
+      unpriced: [{ model_id: "mystery-model", cost_usd: 0, total_tokens: 7 }],
+      estimated_cost_usd: 12.5,
+    },
+  });
+  assert.ok(note.style.display !== "none", "a flagged report must reveal the note");
+  assert.ok(/family rates/.test(note.innerHTML), "estimated models must say they are family-rated");
+  assert.ok(note.innerHTML.includes("mystery-model"), "unpriced models must be named");
+  assert.ok(note.innerHTML.includes("2026-09-06"), "the note must date the price check");
+
+  // an older report with no pricing_coverage at all must not crash the render
+  globalThis.__BM.renderPricingNote({});
+  assert.equal(note.style.display, "none", "missing coverage block degrades quietly");
+
+  documentStub.getElementById = realGet;
+  passed += 6;
+}
+
+// === TEST 18: renderModelTable emits the note (wiring, not just the function) ===
+assert.ok(/function renderModelTable\([^)]*\)\s*\{\s*renderPricingNote\(/.test(code),
+  "renderModelTable must call renderPricingNote so the warning can never be orphaned");
 passed += 1;
 
 console.log(`dashboard_render: ${passed} assertions passed`);

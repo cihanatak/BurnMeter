@@ -36,7 +36,10 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from .parser import UsageRecord
-from .pricing import estimate_cost_usd, family_from_model, effective_tokens, price_for
+from .pricing import (
+    estimate_cost_usd, family_from_model, effective_tokens, price_for,
+    resolve_price, PRICES_VERIFIED_AT,
+)
 from ._proc import NO_WINDOW as _NO_WINDOW
 
 
@@ -297,6 +300,44 @@ def aggregate_by_specific_model(records: Iterable[UsageRecord]) -> list[dict]:
         out.append({"model_id": k, **t.to_dict()})
     out.sort(key=lambda x: x["cost_usd"], reverse=True)
     return out
+
+
+def pricing_coverage(by_model_full: list[dict]) -> dict:
+    """Which models in this report were priced from a KNOWN rate, and which weren't.
+
+    A model released after the last price-table check still gets a number (its
+    family's current rate) — but presenting a guess as fact is exactly the kind of
+    silent error this product exists to prevent. So every model whose *version* we
+    don't recognise is listed here, with the spend attributed to it, and the
+    dashboard says so out loud.
+
+    - estimated: known family, unknown version → priced at family rates (flagged)
+    - unpriced:  no family match at all → counted in tokens, EXCLUDED from cost
+    Internal markers such as "<synthetic>" cost nothing by definition and never
+    appear here.
+    """
+    estimated: list[dict] = []
+    unpriced: list[dict] = []
+    for m in by_model_full:
+        mid = m.get("model_id") or ""
+        tier, exact = resolve_price(mid)
+        if exact:
+            continue
+        row = {
+            "model_id": mid,
+            "cost_usd": round(m.get("cost_usd") or 0.0, 4),
+            "total_tokens": m.get("total_tokens") or 0,
+        }
+        (unpriced if tier == "unknown" else estimated).append(row)
+    estimated.sort(key=lambda x: x["cost_usd"], reverse=True)
+    unpriced.sort(key=lambda x: x["total_tokens"], reverse=True)
+    return {
+        "verified_at": PRICES_VERIFIED_AT,
+        "estimated": estimated,
+        "unpriced": unpriced,
+        "estimated_cost_usd": round(sum(r["cost_usd"] for r in estimated), 4),
+        "unpriced_tokens": sum(r["total_tokens"] for r in unpriced),
+    }
 
 
 def aggregate_by_tool(records: Iterable[UsageRecord]) -> list[dict]:
@@ -1960,6 +2001,7 @@ def build_report(
         },
         "plan_limits": PLAN_LIMITS,
         "industry_reference": INDUSTRY_REFERENCE,
+        "pricing_coverage": pricing_coverage(bmf),
         "record_count": len(records),
     }
     # Chat titles (sohbet adı) MUST be attached HERE — build_report is the single choke
