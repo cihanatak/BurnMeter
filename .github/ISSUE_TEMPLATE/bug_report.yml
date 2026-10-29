@@ -13,7 +13,7 @@ body:
     attributes:
       label: Burnmeter version
       description: Shown under the logo in the app's sidebar. For pip installs, `pip show burnmeter` also prints it.
-      placeholder: "0.3.4"
+      placeholder: "0.3.5"
     validations:
       required: true
   - type: dropdown

@@ -13,10 +13,10 @@ No API keys, no account. Your usage data stays on your machine.
 <p align="center">
   <a href="https://github.com/cihanatak/BurnMeter/releases/latest/download/BurnmeterSetup.exe"><b>Download for Windows</b></a> ·
   <a href="https://burnmeter.dev">burnmeter.dev</a> ·
-  Claude Code + OpenAI Codex · v0.3.4 · <a href="./LICENSE">AGPL-3.0</a>
+  Claude Code + OpenAI Codex · v0.3.5 · <a href="./LICENSE">AGPL-3.0</a>
 </p>
 
-<sub>Screenshots use synthetic demo data: the projects, chats and numbers are made up.</sub>
+<sub>Screenshots show v0.3.4 with synthetic demo data: the projects, chats and numbers are made up.</sub>
 
 ## Install
 
@@ -88,7 +88,7 @@ python -m burnmeter serve
 ## The numbers are estimates, not your bill
 
 Burnmeter multiplies the tokens in your logs by each provider's public **API list
-prices** (last checked 2026-09-06; `PRICES_VERIFIED_AT` in
+prices** (last checked 2026-10-29; `PRICES_VERIFIED_AT` in
 [`burnmeter/pricing.py`](./burnmeter/pricing.py)). That is what the same usage would
 cost through the API. If you're on a flat-fee plan such as Claude Pro/Max or
 ChatGPT Plus/Pro, it is **not** what you pay. Use it to compare models, projects
@@ -108,14 +108,16 @@ The dashboard server listens on `127.0.0.1` only, and it rejects API requests
 whose `Host` header isn't local, which blocks DNS-rebinding attacks from other
 websites.
 
-The free app makes these network requests. None of them carry your usage data:
+The free app makes only these network requests:
 
 | Request | When |
 |---|---|
-| `cdn.jsdelivr.net`: loads Chart.js, the charting library | every time the dashboard opens |
 | `raw.githubusercontent.com`: reads the latest version number from this repo | when the dashboard opens, then every 3 hours; the tray icon checks every 6 hours |
 | `github.com`: downloads the update | only when you click Update |
-| your Slack, webhook or SMTP server: sends the alert text | only if you set up alerts |
+| your Slack, webhook or SMTP server: sends the alert message, including the numbers that triggered it (a Codex limit percentage, your burn rate or weekly spend) | only if you set up alerts |
+
+The version check and the update download carry none of your usage data. The
+charts use a bundled copy of Chart.js, so the dashboard loads nothing from a CDN.
 
 **Pro sync** (planned, see [Pricing](#pricing)) is off unless you sign in. When on,
 it uses Google Firebase:
@@ -136,19 +138,43 @@ it uses Google Firebase:
 ```bash
 burnmeter statusline                  # Claude Code
 burnmeter statusline --source codex   # Codex
-burnmeter statusline --json           # the same numbers as JSON
+burnmeter statusline --json           # the same fields as JSON
 ```
 
 Example output:
 
 ```
-🟠 claude-sonnet-5 $4/h · blok 4h24m · 0err/24h · cache %97 · gün $32
+🟠 Opus 5.5 $4.20/h · block 4h24m · 0 err/24h · cache 97% · today $32
 ```
 
-That's the verdict, active model, burn rate, time left in the 5-hour block,
-errors in the last 24 hours, cache hit rate and today's spend. It runs on its own
-(no server needed) and uses the same code as the dashboard. To show it in Claude
-Code, add this to `~/.claude/settings.json`:
+From left to right:
+
+- **Pace:** your burn rate against your own typical, busy and heavy zones
+  (🟢 🟡 🟠 🔴).
+- **Model:** the one your latest session is using.
+- **Burn rate.**
+- **Block:** time left in the current 5-hour block. `⚠ P90+` follows it when
+  this block already costs more than 90% of your past blocks.
+- **Errors:** in the last 24 hours.
+- **Cache:** today's cache hit rate.
+- **Today:** today's spend.
+
+When Burnmeter is running (the app or `burnmeter serve`), the command asks it for
+these numbers and answers in about half a second. Otherwise it builds the line
+itself from the last 26 hours of Claude Code logs. That is slower (about
+9 seconds on the maker's machine), and 26 hours can't show everything. In that
+case:
+
+- the pace dot is ⚪;
+- `⚠ P90+` never appears;
+- the block reads `—` unless those 26 hours include a 5-hour pause.
+
+Without a running Burnmeter, `--source codex` reads all of Codex's logs instead
+of the last 26 hours. Either way the numbers come from the same code as the
+dashboard.
+
+To show the line in Claude Code, keep Burnmeter running and add this to
+`~/.claude/settings.json`:
 
 ```json
 {

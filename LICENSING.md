@@ -41,3 +41,9 @@ To keep both licensing options possible, outside contributions are accepted
 under a Contributor License Agreement ([`.github/CLA.md`](./.github/CLA.md)). You
 keep the copyright on your work. See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for
 how signing works.
+
+## Third-party code
+
+The dashboard bundles Chart.js 4.4.7 (`burnmeter/static/chart.umd.js`), which is
+under the MIT License. Its copyright notice and license are in
+[`burnmeter/static/chart.umd.js.LICENSE.txt`](./burnmeter/static/chart.umd.js.LICENSE.txt).
