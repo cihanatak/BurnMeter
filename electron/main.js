@@ -79,11 +79,11 @@ const DRAG_CSS = `
 const OVERLAY = { color: "#0F1011", symbolColor: "#9BA1A6", height: 42 };  // = --bg-base (seamless bar)
 
 // Content-Security-Policy for every document the sidecar serves. Allowed for now,
-// tighten as the dashboard drops them: inline on* handlers ('unsafe-inline'), Chart.js
-// from jsDelivr, and the version check that reads raw.githubusercontent.com.
+// tighten as the dashboard drops them: inline on* handlers ('unsafe-inline') and the
+// version check that reads raw.githubusercontent.com. Chart.js is bundled (/static).
 const CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+  "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
