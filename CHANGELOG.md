@@ -48,6 +48,8 @@
   - A log line stamped outside the OS clock's range no longer takes down the report.
 
 ### Changed
+- **Charts work offline.** Chart.js 4.4.7 is now bundled, so the dashboard loads
+  nothing from a CDN.
 - **The statusline is instant while Burnmeter runs.** It asks the app instead of
   rebuilding the report: 0.5 s, against about 65 s on the maker's history. Without
   the app it reads only the last 26 hours, in about 9 s. It then blanks what
