@@ -1,8 +1,7 @@
 """Tiny stdlib HTTP server that serves the dashboard + JSON API.
 
-Local-only by default (binds to 127.0.0.1). No third-party deps. The only
-external resource is Chart.js, loaded by the browser from a CDN — if you
-want fully air-gapped operation, vendor chart.umd.min.js into ./static.
+Local-only by default (binds to 127.0.0.1). No third-party deps, and the page
+loads nothing remote: Chart.js 4.4.7 (MIT) is bundled in ./static.
 """
 from __future__ import annotations
 
@@ -605,6 +604,10 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
 
             if path == "/static/dashboard.js":
                 _file_response(self, STATIC_DIR / "dashboard.js", "application/javascript; charset=utf-8")
+                return
+
+            if path == "/static/chart.umd.js":
+                _file_response(self, STATIC_DIR / "chart.umd.js", "application/javascript; charset=utf-8")
                 return
 
             if path == "/static/dashboard.css":
