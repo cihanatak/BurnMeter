@@ -99,10 +99,10 @@ reads and writes at their own rates.
   features go behind an extra (`[sync]`, `[tray]`, `[app]`) and import lazily.
 - **Costs are estimates.** Always label them as such; never imply they are a
   bill.
-- **Local first.** The server binds `127.0.0.1`. Python makes no network calls
-  unless the user turned on a feature that needs one (Pro sync, alerts, updates),
-  and usage data never leaves the machine by default. Document any new outbound
-  request in the README's privacy section.
+- **Local first.** The server binds `127.0.0.1`. Usage data leaves the machine
+  only through features the user turns on (Pro sync, alerts). The default
+  outbound requests (the version check and the Chart.js CDN) carry no usage data.
+  Document any new outbound request in the README's privacy section.
 - **RAM discipline.** Heavy work runs in the build worker (`_worker.py`); the
   server process must stay small. Don't hold full record lists in the server.
 - **Check UI changes on screen**, in a browser or the app, not only through DOM
