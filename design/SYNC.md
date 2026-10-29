@@ -1,5 +1,11 @@
 # burnmeter Sync — çok-cihaz (Pro) mimarisi
 
+> **Note (English):** historical design notes, in Turkish, from the relay-based sync
+> prototype. Pro sync now runs on Google Firebase; see the README's
+> [privacy section](../README.md#privacy-what-stays-local-and-what-goes-out) for what
+> it uploads. The relay quick start below is outdated (`sync login --token` no longer
+> works).
+
 > **Durum:** TASARIM (henüz kod yok). Bu doküman üzerinde anlaşıp fazalı inşa edeceğiz.
 > **İş modeli:** open-core. Free = %100 lokal (değişmez). **Pro = cihazlar arası sync** (Obsidian Sync $4/ay modeli).
 
