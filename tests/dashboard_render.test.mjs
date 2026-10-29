@@ -70,7 +70,7 @@ globalThis.location = windowStub.location;
 // Evaluate dashboard.js and capture the pure functions under test. Function declarations
 // are local to the wrapper; the appended assignment captures them out.
 const run = new Function(
-  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere, refresh, fetchT, renderPricingNote, modelDisplay, bmNewChart, renderOverviewFleet, renderDeviceBreakdown, renderCombinedFleet };"
+  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere, refresh, fetchT, renderPricingNote, modelDisplay, bmNewChart, renderOverviewFleet, renderDeviceBreakdown, renderCombinedFleet, bmDur, bmChatCost, computeGaugeSpec };"
 );
 run();
 const { bmScopedHalf, bmScopedRep, liveBurnRate, bmPathParts, bmProjCell, liveWhere } = globalThis.__BM;
@@ -452,6 +452,37 @@ passed += 1;
   assert.equal(globalThis.__BM.bmNewChart({}, { type: "bar" }), null, "missing Chart.js must not throw");
   globalThis.Chart = realChart;
   passed += 1;
+}
+
+// === TEST 22: chat durations and costs fit their fixed-width columns ===
+{
+  const { bmDur, bmChatCost } = globalThis.__BM;
+  for (const [sec, want] of [[42, "42s"], [600, "10m"], [171000, "47.5h"], [342360, "4d"], [11753094, "136d"]]) {
+    assert.equal(bmDur(sec), want, `duration ${sec}s`); passed += 1;
+  }
+  for (const [usd, want] of [[0.756, "$0.76"], [99.5, "$99.50"], [310.4, "$310"], [3338.83, "$3,339"]]) {
+    assert.equal(bmChatCost(usd), want, `cost ${usd}`); passed += 1;
+  }
+}
+
+// === TEST 23: the pace beside the gauge is the needle's own ratio ===
+// It came from a projection of the block's first minutes and read "10.4×" next to
+// a needle in the yellow.
+{
+  const { computeGaugeSpec } = globalThis.__BM;
+  const zones = { typical: 12, busy: 45, heavy: 90, max: 135 };
+  const spec = (rate, extra = {}) => computeGaugeSpec({
+    forecast: { burn_rates_by_hours: { "2": rate } },
+    burn_rate_zones: { ...zones, ...extra },
+    current_window: { vs_baseline_ratio: 10.36 },
+  }, false, "2").g;
+  const busy = spec(33);
+  assert.equal(busy.zone[1], "🟡 above normal");
+  assert.ok(Math.abs(busy.ratio - 2.75) < 1e-9, `ratio follows the needle, got ${busy.ratio}`);
+  assert.equal(spec(6).ratio, null, "under typical reads 'below normal', not a ratio");
+  assert.equal(spec(6).below, true);
+  assert.equal(spec(33, { insufficient_history: true }).ratio, null, "a market estimate is not your pace");
+  passed += 5;
 }
 
 console.log(`dashboard_render: ${passed} assertions passed`);

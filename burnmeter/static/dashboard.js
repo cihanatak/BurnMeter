@@ -1118,7 +1118,10 @@ function computeGaugeSpec(rep, isCodex, hoursStr) {
         : rate >= z.busy ? ["warn", "🟠 busy zone"]
         : rate >= z.typical ? ["warn", "🟡 above normal"]
         :                  ["good", "🟢 calm · low burn right now"],
-    ratio: rep.current_window?.vs_baseline_ratio, below: rate < z.typical,
+    // The needle's own measure: this $/hr against your typical block's. The block
+    // projection (current_window.vs_baseline_ratio) stretched a block's first minutes
+    // over all 5 hours and said "10.4×" beside a needle in the yellow.
+    ratio: !zd && z.typical > 0 && rate >= z.typical ? rate / z.typical : null, below: rate < z.typical,
     note: zd ? "Market-normal estimate for your plan — it recalibrates to your own pace as Burnmeter learns it."
              : "Tuned to you: “typical” is your median 5-hour block, “heavy” is your busiest ~10%. (Started from a market-normal estimate.)",
   };
@@ -1894,11 +1897,15 @@ function renderProjects(rep) {
 
 // ---------- CHATS (per-conversation cost — by_session, enriched with chat titles) ----------
 window.__chatsSort = localStorage.getItem("burnmeter_chats_sort") || "recent";
+// The duration and $ columns are narrow and fixed: "3264.7h" and "$3,338.83"
+// were cut to "3264…" and "$3,33…".
 function bmDur(sec) {
   if (!sec || sec < 60) return (sec || 0) + "s";
   if (sec < 3600) return Math.round(sec / 60) + "m";
-  return (sec / 3600).toFixed(1) + "h";
+  if (sec < 48 * 3600) return (sec / 3600).toFixed(1) + "h";
+  return Math.round(sec / 86400) + "d";        // a chat resumed over weeks
 }
+const bmChatCost = (n) => (Number(n) || 0) >= 100 ? fmtMoney0(n) : fmtMoney(n);
 function renderChats(rep) {
   const tb = document.querySelector("#chats-tbl tbody"); if (!tb) return;
   let rows = (rep.by_session || []).filter(s => (s.total_tokens || 0) > 0);
@@ -1920,7 +1927,7 @@ function renderChats(rep) {
       <td class="num">${bmDur(s.duration_seconds)}</td>
       <td>${models}</td>
       <td class="num">${fmtCompact(s.total_tokens || 0)}</td>
-      <td class="num">${fmtMoney(s.cost_usd)}</td>
+      <td class="num" title="${fmtMoney(s.cost_usd)}">${bmChatCost(s.cost_usd)}</td>
       <td class="num">${fmtPct(s.cache_hit_rate)}</td></tr>`;
   }).join("");
 }
