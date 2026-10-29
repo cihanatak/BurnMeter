@@ -11,15 +11,19 @@ We deliberately keep this parser tolerant of schema drift: missing fields
 are coerced to safe defaults. We never crash on a malformed line — we
 collect a `parse_errors` count instead.
 
-We also deduplicate by `message.id` because parallel tool-use messages
-share the same id with identical usage; counting them all would inflate
-totals (Anthropic SDK docs explicitly warn about this).
+One API response is written as several lines (one per content block: thinking,
+text, each tool_use) that share `message.id`, so counting every line would
+inflate totals (Anthropic SDK docs explicitly warn about this). The lines are
+NOT identical, though: their usage snapshots grow while the response streams,
+and the full output count is usually only on the last one. load_records
+therefore folds a response's lines into one record by field-wise max — see
+`_merge_usage`.
 """
 from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator, Optional
 
@@ -75,6 +79,9 @@ class UsageRecord:
     # device — "mac" (main root) veya "pc" (extra_root'tan sync'lenmiş).
     # Cihan paradigm 2026-05-29: PC + Mac ayrı sayaç + her satırda badge.
     device: str = "mac"
+    # usage.speed — "fast" when the response ran in fast mode, which bills every
+    # token type at 2x. Standard responses ("standard") and older logs stay "".
+    speed: str = ""
 
     @property
     def total_tokens(self) -> int:
@@ -192,6 +199,7 @@ def parse_line(line: str, source_file: str = "") -> Optional[UsageRecord]:
         uuid=str(rec.get("uuid") or ""),
         parent_uuid=str(rec.get("parentUuid") or ""),
         # turn_id load_records'ta dosya context'iyle resolve edilir.
+        speed="fast" if usage.get("speed") == "fast" else "",
     )
 
 
@@ -210,6 +218,14 @@ def parse_user_intent(line: str) -> Optional[tuple[str, str, datetime]]:
     except json.JSONDecodeError:
         return None
 
+    # Only what the user typed. Claude Code also logs role-"user" lines that aren't:
+    # copies of each API request ("api-request-blob", undated, so they read as 1970
+    # and won "earliest"), meta lines such as image notes, compaction summaries, and
+    # tool results with a reminder appended ("Tool loaded.").
+    if rec.get("type", "user") != "user" or rec.get("isMeta") or rec.get("isCompactSummary"):
+        return None
+    if not rec.get("timestamp"):
+        return None
     msg = rec.get("message")
     if not isinstance(msg, dict):
         return None
@@ -225,6 +241,8 @@ def parse_user_intent(line: str) -> Optional[tuple[str, str, datetime]]:
     if isinstance(content, str):
         text = content
     elif isinstance(content, list):
+        if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+            return None
         for block in content:
             if isinstance(block, dict) and block.get("type") == "text":
                 text = block.get("text", "") or ""
@@ -239,6 +257,8 @@ def parse_user_intent(line: str) -> Optional[tuple[str, str, datetime]]:
     if text.startswith("/"):
         return None
     if text.startswith("<") and "</" in text:
+        return None
+    if text.startswith("[Request interrupted"):   # Claude Code's marker after Esc
         return None
 
     ts = _parse_timestamp(rec.get("timestamp"))
@@ -287,6 +307,9 @@ def parse_tool_events(line: str) -> Optional[dict]:
         rec = json.loads(line)
     except json.JSONDecodeError:
         return None
+    # Request copies ("api-request-blob") repeat the session's tool results.
+    if rec.get("type") not in (None, "user", "assistant"):
+        return None
     msg = rec.get("message")
     if not isinstance(msg, dict):
         return None
@@ -323,6 +346,7 @@ def parse_tool_events(line: str) -> Optional[dict]:
                 errors.append({
                     "category": _classify_error_text(text),
                     "snippet": text[:160].replace("\n", " "),
+                    "tool_use_id": str(block.get("tool_use_id") or ""),
                 })
 
     if not errors and not tool_uses:
@@ -351,7 +375,9 @@ _CLAUDE_CACHE_PATH = CLAUDE_PROJECTS_DIR.parent / ".burnmeter_claude_cache.json"
 # Bump whenever UsageRecord gains a field the cache must carry, or a record's
 # meaning changes — an old entry would otherwise be replayed with the new field
 # silently zeroed. v2: cache_creation_1h_tokens (1-hour cache-write TTL split).
-_CLAUDE_CACHE_VERSION = 2
+# v3: speed (fast mode bills 2x); intents from the user's own turns only; tool
+# errors carry their tool_use_id.
+_CLAUDE_CACHE_VERSION = 3
 
 
 def _claude_load_cache() -> dict:
@@ -362,15 +388,57 @@ def _claude_load_cache() -> dict:
 
 
 def _claude_save_cache(cache: dict) -> None:
+    """Write the cache atomically: a temp file renamed over the old one. A plain
+    write_text that is interrupted (app quit, crash) leaves a truncated file, and the
+    next build then re-parses every log from scratch — minutes on a big history."""
+    tmp = _CLAUDE_CACHE_PATH.with_name(f"{_CLAUDE_CACHE_PATH.name}.{os.getpid()}.tmp")
     try:
-        _CLAUDE_CACHE_PATH.write_text(json.dumps(cache))
+        tmp.write_text(json.dumps(cache))
+        os.replace(tmp, _CLAUDE_CACHE_PATH)
     except OSError:
-        pass
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+def _root_prefixes(roots) -> tuple[str, ...]:
+    """Scanned roots as the file system compares paths (case-folded on Windows,
+    absolute), so one tree spelled two ways isn't kept as two trees."""
+    return tuple(os.path.normcase(os.path.abspath(r)).rstrip("/\\") + os.sep for r in roots)
+
+
+def _under(path: str, prefixes: tuple[str, ...]) -> bool:
+    return os.path.normcase(os.path.abspath(path)).startswith(prefixes)
+
+
+def _merge_usage(into: UsageRecord, other: UsageRecord) -> None:
+    """Fold another streamed line of the SAME API response into its record.
+
+    Each line carries a usage snapshot taken while the response streamed, so the
+    counts only grow: on the maker's logs, 117,604 of 117,613 multi-line responses
+    had their full output_tokens on the LAST line alone. Keeping the first line
+    (v0.3.4 and earlier) dropped 32% of all output tokens. The response's real
+    usage is the field-wise max; its tool calls are spread across the lines.
+    """
+    into.input_tokens = max(into.input_tokens, other.input_tokens)
+    into.output_tokens = max(into.output_tokens, other.output_tokens)
+    into.cache_creation_tokens = max(into.cache_creation_tokens, other.cache_creation_tokens)
+    into.cache_read_tokens = max(into.cache_read_tokens, other.cache_read_tokens)
+    into.cache_creation_1h_tokens = max(into.cache_creation_1h_tokens, other.cache_creation_1h_tokens)
+    if other.speed == "fast":
+        into.speed = "fast"
+    # A new list, not extend(): a record rebuilt from the cache shares nothing with
+    # its entry (see _rec_from_dict), and this keeps it that way.
+    into.tool_names = into.tool_names + other.tool_names
 
 
 def _rec_from_dict(d: dict) -> UsageRecord:
     d = dict(d)
     d["timestamp"] = _parse_timestamp(d.get("timestamp"))
+    # Its own list: merging a later line into a cached record once extended the
+    # cache entry's list too, so tool counts grew on every build and so did the cache.
+    d["tool_names"] = list(d.get("tool_names") or ())
     return UsageRecord(**d)
 
 
@@ -402,6 +470,8 @@ def parse_claude_file(path: Path, scan_device: str = "mac"):
                     parsed = json.loads(s)
                 except json.JSONDecodeError:
                     continue
+                if not isinstance(parsed, dict):   # valid JSON of another shape: skip
+                    continue                       # the line, don't abort the whole load
                 u = parsed.get("uuid")
                 if not u:
                     continue
@@ -409,7 +479,8 @@ def parse_claude_file(path: Path, scan_device: str = "mac"):
                 parent = str(parsed.get("parentUuid") or "")
                 is_human = False
                 if typ == "user":
-                    msg = parsed.get("message") or {}
+                    msg = parsed.get("message")
+                    msg = msg if isinstance(msg, dict) else {}
                     content = msg.get("content")
                     if isinstance(content, str) and content.strip():
                         is_human = True
@@ -449,18 +520,7 @@ def parse_claude_file(path: Path, scan_device: str = "mac"):
                     intents[sid] = (text[:240], ts.isoformat() if ts else None)
                     intent_ts[sid] = ts
 
-            try:
-                evt = parse_tool_events(raw)
-            except Exception:
-                evt = None
-            if evt and evt["errors"]:
-                for e in evt["errors"]:
-                    errs.append({
-                        "session_id": evt["session_id"],
-                        "timestamp": evt["timestamp"].isoformat() if evt["timestamp"] else None,
-                        "category": e["category"],
-                        "snippet": e["snippet"],
-                    })
+            errs.extend(_tool_errors(raw))
 
             try:
                 rec = parse_line(raw, source_file=str(path))
@@ -478,10 +538,88 @@ def parse_claude_file(path: Path, scan_device: str = "mac"):
     return records, intents, errs, perr
 
 
+def _tool_errors(line: str, since: Optional[datetime] = None) -> list[dict]:
+    """The tool_result errors on one log line, as load_records reports them."""
+    try:
+        evt = parse_tool_events(line)
+    except Exception:
+        return []
+    if not (evt and evt["errors"]):
+        return []
+    ts = evt["timestamp"]
+    if since is not None and not (ts and ts >= since):
+        return []
+    return [{"session_id": evt["session_id"],
+             "timestamp": ts.isoformat() if ts else None,
+             "category": e["category"], "snippet": e["snippet"],
+             "tool_use_id": e.get("tool_use_id", "")} for e in evt["errors"]]
+
+
+_TS_KEY = b'"timestamp"'
+
+
+def _newest_stamp(raw: bytes) -> bytes:
+    """The latest "timestamp" value on a raw log line, read without parsing the
+    JSON (b"" when there is none). Nested objects can carry timestamps of their
+    own, so all of them count: the line's own stamp is always among them."""
+    newest = b""
+    i = raw.find(_TS_KEY)
+    while i >= 0:
+        j = i + len(_TS_KEY)
+        while j < len(raw) and raw[j] in b' \t:"':
+            j += 1
+        stamp = raw[j:j + 19]
+        if stamp > newest:
+            newest = stamp
+        i = raw.find(_TS_KEY, j)
+    return newest
+
+
+def parse_claude_recent(path: Path, scan_device: str, since: datetime):
+    """parse_claude_file for the statusline: records and tool errors stamped at or
+    after `since`, nothing else (no turn chains, no intents).
+
+    A long session's log holds months of history: on the maker's machine the 44
+    logs touched in a day weighed 1.6 GB, and parsing all of them, four JSON
+    decodes per line, made up most of a 65-second statusline. Lines are dated
+    from their raw bytes first, so only the recent ones are decoded at all. The
+    text check runs 14 hours early in case a stamp carries a UTC offset; the
+    decoded timestamp decides.
+    """
+    since = since.astimezone(timezone.utc)
+    cut = (since - timedelta(hours=14)).strftime("%Y-%m-%dT%H:%M:%S").encode()
+    records: list[UsageRecord] = []
+    errs: list[dict] = []
+    perr = 0
+    try:
+        with path.open("rb") as fh:
+            for raw in fh:
+                if _newest_stamp(raw) < cut:
+                    continue
+                line = raw.decode("utf-8", errors="replace")
+                if b'"tool_result"' in raw:
+                    errs.extend(_tool_errors(line, since))
+                if b'"usage"' not in raw:
+                    continue
+                try:
+                    rec = parse_line(line, source_file=str(path))
+                except Exception:
+                    perr += 1
+                    continue
+                if rec is None or rec.timestamp < since:
+                    continue
+                rec.device = scan_device
+                records.append(rec)
+    except OSError:
+        perr += 1
+    return records, {}, errs, perr
+
+
 def load_records(
     root: Path = CLAUDE_PROJECTS_DIR,
     deduplicate: bool = True,
     extra_roots: Optional[list[Path]] = None,
+    since: Optional[datetime] = None,
 ) -> tuple[list[UsageRecord], dict, dict[str, str]]:
     """Load all usage records from a Claude projects directory tree.
 
@@ -490,12 +628,20 @@ def load_records(
       - stats: counts of files scanned and parse errors
       - user_intents: session_id → first user message text (capped to 240
         chars). Lets the UI label each session with its actual prompt.
+
+    since: return only the records (and errors) stamped at or after this moment.
+    Logs untouched since then are skipped, older lines are dated from their raw
+    bytes and never decoded, and the parse cache is bypassed entirely: loading a
+    big history's cache costs more than reading one day of logs. For the
+    statusline's no-server fallback.
     """
     records: list[UsageRecord] = []
-    seen_ids: set[str] = set()
+    by_message: dict[str, UsageRecord] = {}   # message id → its merged record
+    seen_lines: set[str] = set()              # line uuids already folded in
     user_intents: dict[str, str] = {}
     user_intent_ts: dict[str, datetime] = {}    # earliest user msg timestamp per session
     error_events: list[dict] = []                # collected tool_result errors
+    seen_errors: set[str] = set()                # tool_use ids already counted
     files = 0
     errors = 0
 
@@ -516,8 +662,11 @@ def load_records(
             "extra_roots": [str(r) for r in (extra_roots or [])],
         }, user_intents, error_events
 
-    cache = _claude_load_cache()
+    use_cache = since is None
+    cache = _claude_load_cache() if use_cache else {}
     new_cache: dict = {}
+    dirty = False                 # did any entry change? An unchanged cache isn't rewritten.
+    since_ts = since.timestamp() if since is not None else None
 
     for scan_root in all_roots:
         if not scan_root.exists():
@@ -527,38 +676,53 @@ def load_records(
         # path-tail'inden infer edilebilir (örn. projects-pc → pc).
         scan_device = _local_device() if scan_root == root else "pc"
         for path in iter_jsonl_files(scan_root):
-            files += 1
             try:
                 st = path.stat()
                 sig = [st.st_mtime, st.st_size]
             except OSError:
+                files += 1
                 errors += 1
                 continue
+            if since_ts is not None and st.st_mtime < since_ts:
+                continue
+            files += 1
             key = str(path)
             c = cache.get(key)
-            if c and c.get("v") == _CLAUDE_CACHE_VERSION and c.get("sig") == sig:
+            if since is not None:
+                f_recs, f_intents, f_errs, f_perr = parse_claude_recent(path, scan_device, since)
+                entry = None              # not cached: only part of the file was read
+            elif c and c.get("v") == _CLAUDE_CACHE_VERSION and c.get("sig") == sig:
                 # unchanged file → reconstruct from cache (no re-read)
                 f_recs = [_rec_from_dict(d) for d in c.get("recs", [])]
                 f_intents = c.get("intents", {})
                 f_errs = c.get("errors", [])
                 f_perr = c.get("perr", 0)
+                entry = c
             else:
                 f_recs, f_intents, f_errs, f_perr = parse_claude_file(path, scan_device)
+                entry = {
+                    "v": _CLAUDE_CACHE_VERSION, "sig": sig,
+                    "recs": [r.to_dict() for r in f_recs],
+                    "intents": f_intents, "errors": f_errs, "perr": f_perr,
+                }
+                dirty = True
+            if use_cache:
+                new_cache[key] = entry
 
-            new_cache[key] = {
-                "v": _CLAUDE_CACHE_VERSION, "sig": sig,
-                "recs": [r.to_dict() for r in f_recs],
-                "intents": f_intents, "errors": f_errs, "perr": f_perr,
-            }
-
-            # cross-file aggregation: dedup by message_id, earliest intent, errors
+            # cross-file aggregation: merge each response's lines, earliest intent, errors
             errors += f_perr
             for r in f_recs:
                 r.device = scan_device          # re-apply (cache-hit safety)
                 if deduplicate and r.message_id:
-                    if r.message_id in seen_ids:
+                    if r.uuid:
+                        if r.uuid in seen_lines:
+                            continue            # the very same line again (mirrored root)
+                        seen_lines.add(r.uuid)
+                    first = by_message.get(r.message_id)
+                    if first is not None:
+                        _merge_usage(first, r)
                         continue
-                    seen_ids.add(r.message_id)
+                    by_message[r.message_id] = r
                 records.append(r)
             for sid, val in f_intents.items():
                 text = val[0] if isinstance(val, (list, tuple)) else val
@@ -568,9 +732,28 @@ def load_records(
                 if ts and (prev is None or ts < prev):
                     user_intents[sid] = (text or "")[:240]
                     user_intent_ts[sid] = ts
-            error_events.extend(f_errs)
+            # A forked or resumed session's log repeats the tool results it inherited.
+            for e in f_errs:
+                tid = e.get("tool_use_id")
+                if tid:
+                    if tid in seen_errors:
+                        continue
+                    seen_errors.add(tid)
+                error_events.append(e)
 
-    _claude_save_cache(new_cache)
+    if use_cache:
+        # Keep the entries of logs under other roots (another --projects-dir, a
+        # test's temp tree) while those files exist: scanning one tree must not
+        # evict the cache of another, such as the installed app's.
+        scanned = _root_prefixes(all_roots)
+        for key, c in cache.items():
+            if key not in new_cache and not _under(key, scanned) and os.path.exists(key):
+                new_cache[key] = c
+        # Rewrite only when something changed (a re-parsed file, or a file gone):
+        # this cache reaches hundreds of MB, and rewriting it on every build made
+        # each `burnmeter statusline` call take over a minute.
+        if dirty or len(new_cache) != len(cache):
+            _claude_save_cache(new_cache)
     records.sort(key=lambda r: r.timestamp)
     return records, {
         "files_scanned": files,

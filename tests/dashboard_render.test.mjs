@@ -70,7 +70,7 @@ globalThis.location = windowStub.location;
 // Evaluate dashboard.js and capture the pure functions under test. Function declarations
 // are local to the wrapper; the appended assignment captures them out.
 const run = new Function(
-  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere, refresh, fetchT, renderPricingNote };"
+  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere, refresh, fetchT, renderPricingNote, modelDisplay, bmNewChart, renderOverviewFleet, renderDeviceBreakdown, renderCombinedFleet };"
 );
 run();
 const { bmScopedHalf, bmScopedRep, liveBurnRate, bmPathParts, bmProjCell, liveWhere } = globalThis.__BM;
@@ -383,5 +383,75 @@ passed += 1;
 assert.ok(/function renderModelTable\([^)]*\)\s*\{\s*renderPricingNote\(/.test(code),
   "renderModelTable must call renderPricingNote so the warning can never be orphaned");
 passed += 1;
+
+// === TEST 19: a stale snapshot adds nothing to "now", "today" or "this month" ===
+// A Mac last synced in July once kept its July burn/today/month in the fleet totals.
+{
+  const { bmDeviceAgg } = globalThis.__BM;
+  const stale = { device_id: "OLD", _updated_at: new Date(Date.now() - 100 * 86400e3).toISOString(),
+                  sources: { claude: mkSnap(pcClaudeBBH) } };
+  store.set("burnmeter_burn_hours_claude", "2");
+  const a = bmDeviceAgg(stale, ["claude"]);
+  assert.equal(a.burn, 0, "a 100-day-old snapshot has no burn now");
+  assert.equal(a.today, 0, "nor a today");
+  assert.equal(a.month, 0, "nor a this-month");
+  assert.equal(a.lifetime, 100, "lifetime totals stay valid at any age");
+  const fresh = bmDeviceAgg({ ...stale, _updated_at: new Date(Date.now() - 60e3).toISOString() }, ["claude"]);
+  assert.ok(near(fresh.burn, pcClaudeBBH["2"]) && fresh.today === 1 && fresh.month === 10,
+    "a snapshot pushed a minute ago counts in full");
+
+  // and through the scoped "All devices" report: adding the stale device changes no live figure
+  window.__devicesCache = devicesCache;          // the refresh tests above swapped it out
+  window.__source = "claude"; window.__scope = "all"; window.__lastReport = clLocal;
+  const before = bmScopedRep(clLocal).forecast;
+  devicesCache.devices.push(stale);
+  const after = bmScopedRep(clLocal).forecast;
+  devicesCache.devices.pop();
+  assert.ok(near(after.burn_rate_per_hour_recent, before.burn_rate_per_hour_recent), "stale device must not add burn");
+  assert.equal(after.today.so_far, before.today.so_far, "stale device must not add to today");
+  assert.equal(after.month.so_far, before.month.so_far, "stale device must not add to this month");
+  passed += 8;
+
+  // the fleet chips and the month bar say "—" for it, not "$0"
+  const els = { "overview-fleet": { innerHTML: "", style: {} }, "device-breakdown": { innerHTML: "", style: {} },
+                "cv-fleet": { innerHTML: "", style: {} } };
+  const realGet = documentStub.getElementById;
+  documentStub.getElementById = (id) => els[id] || realGet(id);
+  devicesCache.devices.push({ ...stale, label: "OldMac" });
+  globalThis.__BM.renderOverviewFleet();
+  globalThis.__BM.renderDeviceBreakdown();
+  window.__lastReport = { _combined: true, claude: clLocal, codex: clLocal };
+  globalThis.__BM.renderCombinedFleet();
+  window.__lastReport = clLocal;
+  devicesCache.devices.pop();
+  documentStub.getElementById = realGet;
+  const chip = (html) => (html.match(/OldMac<\/span><span class="ovf-v">([^<]*)</) || [])[1];
+  assert.equal(chip(els["overview-fleet"].innerHTML), "—", "overview chip of an unsynced device");
+  assert.equal(chip(els["cv-fleet"].innerHTML), "—", "combined-view chip of an unsynced device");
+  assert.ok(/OldMac <b>—<\/b>/.test(els["device-breakdown"].innerHTML), "month bar legend of an unsynced device");
+  assert.ok(/>Mac<\/span><span class="ovf-v">\$/.test(els["overview-fleet"].innerHTML),
+    "a device synced this month keeps its amount");
+  passed += 4;
+}
+
+// === TEST 20: model names keep the minor version and never read a date as one ===
+{
+  const { modelDisplay } = globalThis.__BM;
+  for (const [id, want] of [
+    ["claude-opus-5-5", "Opus 5.5"], ["claude-fable-5-1", "Fable 5.1"], ["claude-sonnet-5", "Sonnet 5"],
+    ["claude-opus-4-20250514", "Opus 4"], ["claude-3-5-sonnet-20241022", "Sonnet 3.5"],
+    ["claude-haiku-4-5-20251001", "Haiku 4.5"], ["claude-opus-5-5[1m]", "Opus 5.5"],
+    ["gpt-5.5-codex", "GPT-5.5 Codex"],
+  ]) { assert.equal(modelDisplay(id), want, id); passed += 1; }
+}
+
+// === TEST 21: no Chart.js (CDN offline) skips the chart instead of throwing ===
+{
+  const realChart = globalThis.Chart;
+  delete globalThis.Chart;
+  assert.equal(globalThis.__BM.bmNewChart({}, { type: "bar" }), null, "missing Chart.js must not throw");
+  globalThis.Chart = realChart;
+  passed += 1;
+}
 
 console.log(`dashboard_render: ${passed} assertions passed`);

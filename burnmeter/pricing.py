@@ -1,26 +1,42 @@
 """Pricing tables for Claude Code + OpenAI Codex models.
 
 Source of truth: official Anthropic + OpenAI pricing pages.
-RE-VERIFIED 2026-09-06 against claude.com/pricing (live fetch) and
-openai.com/api/pricing. Per 1M tokens (input / output / cache-read / cache-write-5m):
-- Fable 5.1 · Mythos 5.1  $10 / $50 / $0.25 / $12.50   ← cache read is 4x cheaper
-- Fable 5 · Mythos 5      $10 / $50 / $1.00 / $12.50     than Fable 5's (legacy row)
-- Opus 5 / 4.5-4.8        $5  / $25 / $0.50 / $6.25
-- Sonnet 5                $2  / $10 / $0.20 / $2.50     ← cheaper than Sonnet 4.x
-- Sonnet 4.x / 3.x        $3  / $15 / $0.30 / $3.75
-- Haiku 4.5               $1  / $5  / $0.10 / $1.25
-- GPT-5.5 $5/$30 · GPT-5.4 $2.50/$15 · GPT-5-mini $0.75/$4.50 · Codex $1.75/$14
+RE-VERIFIED 2026-10-29 against platform.claude.com/docs/en/about-claude/pricing and
+developers.openai.com/api/docs/pricing (live fetch). Per 1M tokens
+(input / output / cache-read / cache-write-5m / cache-write-1h):
+- Fable 5.1 · Mythos 5.1   $10 / $50 / $0.25 / $12.50 / $20    ← cache read 0.025x input
+- Fable 5 · Mythos 5       $10 / $50 / $1.00 / $12.50 / $20
+- Opus 5.5                 $4  / $20 / $0.20 / $5     / $8     ← cache read 0.05x input
+- Opus 5 / 4.5-4.8         $5  / $25 / $0.50 / $6.25  / $10
+- Opus 4 / 4.1             $15 / $75 / $1.50 / $18.75 / $30
+- Sonnet 5.5               $2  / $10 / $0.10 / $2.50  / $4     ← cache read 0.05x input
+- Sonnet 5                 $2  / $10 / $0.20 / $2.50  / $4
+- Sonnet 4.x / 3.x         $3  / $15 / $0.30 / $3.75  / $6
+- Haiku 5.5, prompt ≤100K  $0.10 / $0.50 / $0.01 / $0.125 / $0.20
+- Haiku 5.5, prompt >100K  $0.50 / $2.50 / $0.05 / $0.625 / $1
+- Haiku 4.5                $1  / $5  / $0.10 / $1.25  / $2
+- Haiku 3.5                $0.80 / $4 / $0.08 / $1    / $1.60
+- GPT-5.5 $5/$30 · GPT-5.4 $2.50/$15 · GPT-5.4 mini $0.75/$4.50 · GPT-5 $1.25/$10
+  · GPT-5 mini $0.25/$2 · o4-mini $1.10/$4.40 · Codex $1.75/$14
+- Fast mode (`usage.speed == "fast"`, Opus 5.5 / 5 / 4.8 only): 2x every rate above.
+
+WHY MODEL IDS ARE PARSED, NOT SUBSTRING-MATCHED (v0.3.5): v0.3.2 made prices
+version-aware but still matched versions by substring, so the "opus-5" rule also
+matched claude-opus-5-5. Opus 5.5 was billed at Opus 5 rates and marked EXACT:
+output +25%, cache reads 2.5x, no warning — on the model a heavy user runs all day.
+A Claude id is now parsed into (family, major, minor) and looked up in an exact
+table; a version the table doesn't list is priced at the family's newest row and
+flagged (see `resolve_price`) so the UI can say "estimated at <family> rates"
+instead of quietly inventing a number.
 
 WHY TIERS ARE VERSION-AWARE (v0.3.2): prices used to be looked up by a single
 family substring ("sonnet" → one row). When Sonnet 5 shipped at $2/$10 and Fable
 5.1 dropped cache reads to $0.25, that generic match silently overstated real
-spend by ~24% on a heavy user's month. A price row now belongs to a VERSION, and
-anything we can't match exactly is flagged (see `resolve_price`) so the UI can say
-"estimated at <family> rates" instead of quietly inventing a number.
+spend by ~24% on a heavy user's month. A price row belongs to a VERSION.
 
 Cache reads are billed well below the input rate (usually 10%, but NOT always —
-Fable 5.1 is 2.5%). Cache writes are the input rate x1.25 (5-minute TTL) or x2.0
-(1-hour TTL); Claude Code defaults to 5-minute.
+Fable 5.1 is 2.5%, Opus 5.5 and Sonnet 5.5 are 5%). Cache writes are the input
+rate x1.25 (5-minute TTL) or x2.0 (1-hour TTL); the log says which (see parser).
 
 These prices are CLIENT-SIDE ESTIMATES. Anthropic explicitly notes the
 SDK's total_cost_usd is a client-side estimate, not authoritative billing.
@@ -30,13 +46,19 @@ If a model isn't in this table at all we fall back to "unknown" and exclude
 it from cost (but still count tokens) — and say so in the dashboard.
 """
 from __future__ import annotations
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Optional
 
 # Date the rates below were last checked against the providers' live pricing
 # pages. Surfaced in the report so a stale table is visible, not invisible.
-PRICES_VERIFIED_AT = "2026-09-06"
+PRICES_VERIFIED_AT = "2026-10-29"
+
+# Fast mode (`usage.speed == "fast"`) bills every token type at this multiple of the
+# model's standard rates: $8/$40 on Opus 5.5, $10/$50 on Opus 5 and Opus 4.8, with the
+# prompt-caching multipliers applied on top. Those three are the only fast models.
+FAST_MODE_MULTIPLIER = 2.0
 
 
 @dataclass(frozen=True)
@@ -47,6 +69,11 @@ class ModelPrice:
     cache_read_per_mtok: float
     cache_write_5m_per_mtok: float
     cache_write_1h_per_mtok: float
+    # Prompt-length pricing (Claude Haiku 5.5): a request whose prompt — input + cache
+    # reads + cache writes — exceeds `long_prompt_over` tokens pays `long`'s rates on
+    # ALL of its tokens, output included. Each request is priced on its own.
+    long_prompt_over: int = 0
+    long: Optional["ModelPrice"] = None
 
 
 # Per-million-token prices in USD, keyed by PRICE TIER (a version, not a family:
@@ -72,6 +99,16 @@ PRICES: dict[str, ModelPrice] = {
         cache_write_5m_per_mtok=12.50,
         cache_write_1h_per_mtok=20.00,
     ),
+    # Opus 5.5 — cheaper than Opus 5 on every token type, and cache reads are 0.05x
+    # input instead of 0.1x. Billing it at the Opus 5 row overstated cache reads 2.5x.
+    "opus-5-5": ModelPrice(
+        family="opus",
+        input_per_mtok=4.00,
+        output_per_mtok=20.00,
+        cache_read_per_mtok=0.20,           # 95% off input
+        cache_write_5m_per_mtok=5.00,
+        cache_write_1h_per_mtok=8.00,
+    ),
     # Opus 5 and Opus 4.5-4.8 share one price point.
     "opus": ModelPrice(
         family="opus",
@@ -80,6 +117,24 @@ PRICES: dict[str, ModelPrice] = {
         cache_read_per_mtok=0.50,           # 90% off input
         cache_write_5m_per_mtok=6.25,       # 1.25x input
         cache_write_1h_per_mtok=10.00,      # 2.00x input
+    ),
+    # Opus 4 / 4.1 (and Claude 3 Opus) — three times the Opus 4.5+ rates.
+    "opus-legacy": ModelPrice(
+        family="opus",
+        input_per_mtok=15.00,
+        output_per_mtok=75.00,
+        cache_read_per_mtok=1.50,
+        cache_write_5m_per_mtok=18.75,
+        cache_write_1h_per_mtok=30.00,
+    ),
+    # Sonnet 5.5 — Sonnet 5's headline rates, but cache reads at 0.05x input.
+    "sonnet-5-5": ModelPrice(
+        family="sonnet",
+        input_per_mtok=2.00,
+        output_per_mtok=10.00,
+        cache_read_per_mtok=0.10,
+        cache_write_5m_per_mtok=2.50,
+        cache_write_1h_per_mtok=4.00,
     ),
     # Sonnet 5 — cheaper than the Sonnet 4.x line it replaced.
     "sonnet-5": ModelPrice(
@@ -90,7 +145,7 @@ PRICES: dict[str, ModelPrice] = {
         cache_write_5m_per_mtok=2.50,
         cache_write_1h_per_mtok=4.00,
     ),
-    # Sonnet 4.6 / 4.5 / 3.x
+    # Sonnet 4.6 / 4.5 / 4 / 3.x
     "sonnet-legacy": ModelPrice(
         family="sonnet",
         input_per_mtok=3.00,
@@ -99,6 +154,25 @@ PRICES: dict[str, ModelPrice] = {
         cache_write_5m_per_mtok=3.75,
         cache_write_1h_per_mtok=6.00,
     ),
+    # Haiku 5.5 — a tenth of Haiku 4.5 for prompts up to 100K tokens, 5x that above.
+    "haiku-5-5": ModelPrice(
+        family="haiku",
+        input_per_mtok=0.10,
+        output_per_mtok=0.50,
+        cache_read_per_mtok=0.01,
+        cache_write_5m_per_mtok=0.125,
+        cache_write_1h_per_mtok=0.20,
+        long_prompt_over=100_000,
+        long=ModelPrice(
+            family="haiku",
+            input_per_mtok=0.50,
+            output_per_mtok=2.50,
+            cache_read_per_mtok=0.05,
+            cache_write_5m_per_mtok=0.625,
+            cache_write_1h_per_mtok=1.00,
+        ),
+    ),
+    # Haiku 4.5
     "haiku": ModelPrice(
         family="haiku",
         input_per_mtok=1.00,
@@ -106,6 +180,14 @@ PRICES: dict[str, ModelPrice] = {
         cache_read_per_mtok=0.10,
         cache_write_5m_per_mtok=1.25,
         cache_write_1h_per_mtok=2.00,
+    ),
+    "haiku-3-5": ModelPrice(
+        family="haiku",
+        input_per_mtok=0.80,
+        output_per_mtok=4.00,
+        cache_read_per_mtok=0.08,
+        cache_write_5m_per_mtok=1.00,
+        cache_write_1h_per_mtok=1.60,
     ),
     # --- OpenAI / Codex --------------------------------------------------------
     # Real OpenAI public API pricing. Cached input = 10% of input (90% off), like
@@ -141,17 +223,35 @@ PRICES: dict[str, ModelPrice] = {
         family="gpt-5.5", input_per_mtok=5.00, output_per_mtok=30.00,
         cache_read_per_mtok=0.50, cache_write_5m_per_mtok=5.00, cache_write_1h_per_mtok=5.00,
     ),
-    "gpt-5-nano": ModelPrice(
-        family="gpt-5-nano", input_per_mtok=0.20, output_per_mtok=1.25,
-        cache_read_per_mtok=0.02, cache_write_5m_per_mtok=0.20, cache_write_1h_per_mtok=0.20,
-    ),
     "gpt-5.4": ModelPrice(
         family="gpt-5.4", input_per_mtok=2.50, output_per_mtok=15.00,
         cache_read_per_mtok=0.25, cache_write_5m_per_mtok=2.50, cache_write_1h_per_mtok=2.50,
     ),
-    "gpt-5-mini": ModelPrice(
-        family="gpt-5-mini", input_per_mtok=0.75, output_per_mtok=4.50,
+    "gpt-5": ModelPrice(
+        family="gpt-5", input_per_mtok=1.25, output_per_mtok=10.00,
+        cache_read_per_mtok=0.125, cache_write_5m_per_mtok=1.25, cache_write_1h_per_mtok=1.25,
+    ),
+    # mini / nano: the VERSION sets the price — gpt-5-mini is a third of gpt-5.4-mini,
+    # and o4-mini is dearer than both. One "mini" row billed all three alike.
+    "gpt-5.4-mini": ModelPrice(
+        family="gpt-5.4-mini", input_per_mtok=0.75, output_per_mtok=4.50,
         cache_read_per_mtok=0.075, cache_write_5m_per_mtok=0.75, cache_write_1h_per_mtok=0.75,
+    ),
+    "gpt-5.4-nano": ModelPrice(
+        family="gpt-5.4-nano", input_per_mtok=0.20, output_per_mtok=1.25,
+        cache_read_per_mtok=0.02, cache_write_5m_per_mtok=0.20, cache_write_1h_per_mtok=0.20,
+    ),
+    "gpt-5-mini": ModelPrice(
+        family="gpt-5-mini", input_per_mtok=0.25, output_per_mtok=2.00,
+        cache_read_per_mtok=0.025, cache_write_5m_per_mtok=0.25, cache_write_1h_per_mtok=0.25,
+    ),
+    "gpt-5-nano": ModelPrice(
+        family="gpt-5-nano", input_per_mtok=0.05, output_per_mtok=0.40,
+        cache_read_per_mtok=0.005, cache_write_5m_per_mtok=0.05, cache_write_1h_per_mtok=0.05,
+    ),
+    "o4-mini": ModelPrice(
+        family="o4-mini", input_per_mtok=1.10, output_per_mtok=4.40,
+        cache_read_per_mtok=0.275, cache_write_5m_per_mtok=1.10, cache_write_1h_per_mtok=1.10,
     ),
     "gpt-5-codex": ModelPrice(
         family="gpt-5-codex", input_per_mtok=1.75, output_per_mtok=14.00,
@@ -167,32 +267,77 @@ PRICES: dict[str, ModelPrice] = {
     ),
 }
 
-# Ordered match rules: (substrings, tier, exact). FIRST match wins, so every
-# version-specific rule must come BEFORE the generic family rule it shadows.
-# exact=True  → we recognise this exact model generation; the price is trusted.
-# exact=False → a model of a known family whose VERSION we don't know (e.g. a
-#               brand-new "claude-opus-6"). We price it at the family's current
-#               generation and FLAG it, so the dashboard can say the number is a
-#               best guess rather than pretending it is authoritative.
-_TIER_RULES: tuple[tuple[tuple[str, ...], str, bool], ...] = (
-    # --- Anthropic, version-specific ---
-    (("fable-5-1", "fable-5.1", "fable51", "mythos-5-1", "mythos-5.1"), "fable-5-1", True),
-    (("fable-5", "fable5", "mythos-5", "mythos5"), "fable-5", True),
-    (("opus-5", "opus5", "opus-4", "opus4"), "opus", True),
-    (("sonnet-5", "sonnet5"), "sonnet-5", True),
-    # Sonnet 4.x and the old "claude-3-5-sonnet" naming scheme share the $3/$15 band.
-    (("sonnet-4", "sonnet4", "3-5-sonnet", "3.5-sonnet", "3-7-sonnet", "3.7-sonnet"),
-     "sonnet-legacy", True),
-    (("haiku-4", "haiku4"), "haiku", True),
-    # --- Anthropic, family fallbacks: an unrecognised version of a known family.
-    # Priced at the family's CURRENT generation (a new release is far likelier
-    # than an ancient one reappearing) and flagged as estimated.
-    (("fable", "mythos"), "fable-5-1", False),
-    (("opus",), "opus", False),
-    (("sonnet",), "sonnet-5", False),
-    (("haiku",), "haiku", False),
-)
+# Exact Claude versions: (family, major, minor) → tier. Mythos ids share Fable's rows.
+_CLAUDE_VERSIONS: dict[tuple[str, int, int], str] = {
+    ("fable", 5, 1): "fable-5-1",
+    ("fable", 5, 0): "fable-5",
+    ("opus", 5, 5): "opus-5-5",
+    ("opus", 5, 0): "opus",
+    ("opus", 4, 8): "opus",
+    ("opus", 4, 7): "opus",
+    ("opus", 4, 6): "opus",
+    ("opus", 4, 5): "opus",
+    ("opus", 4, 1): "opus-legacy",
+    ("opus", 4, 0): "opus-legacy",
+    ("opus", 3, 0): "opus-legacy",
+    ("sonnet", 5, 5): "sonnet-5-5",
+    ("sonnet", 5, 0): "sonnet-5",
+    ("sonnet", 4, 6): "sonnet-legacy",
+    ("sonnet", 4, 5): "sonnet-legacy",
+    ("sonnet", 4, 0): "sonnet-legacy",
+    ("sonnet", 3, 7): "sonnet-legacy",
+    ("sonnet", 3, 5): "sonnet-legacy",
+    ("sonnet", 3, 0): "sonnet-legacy",
+    ("haiku", 5, 5): "haiku-5-5",
+    ("haiku", 4, 5): "haiku",
+    ("haiku", 3, 5): "haiku-3-5",
+}
+# An unrecognised version of a known family is priced at the family's NEWEST row (a
+# new release is far likelier than an ancient one reappearing) and flagged.
+_CLAUDE_NEWEST = {"fable": "fable-5-1", "opus": "opus-5-5", "sonnet": "sonnet-5-5", "haiku": "haiku-5-5"}
 
+# claude-opus-4-5-20251101 · claude-opus-5-5 · us.anthropic.claude-opus-4-1-20250805-v1:0
+# · claude-opus-4-1@20250805. The (?!\d) guard keeps an 8-digit snapshot date from
+# being read as a minor version: claude-opus-4-20250514 is Opus 4, not Opus 4.20.
+_CLAUDE_ID = re.compile(r"(fable|mythos|opus|sonnet|haiku)-?(\d)(?:[-.]?(\d{1,2}))?(?!\d)")
+# The Claude 3.x scheme puts the version first: claude-3-5-sonnet-20241022, claude-3-opus.
+_CLAUDE_ID_V3 = re.compile(r"(?<!\d)(\d)(?:[-.](\d))?-(opus|sonnet|haiku)")
+_CLAUDE_FAMILIES = ("fable", "mythos", "opus", "sonnet", "haiku")
+
+
+def _parse_claude_id(m: str) -> Optional[tuple[str, Optional[tuple[int, int]]]]:
+    """'claude-opus-5-5' → ('opus', (5, 5)); a bare family word → (family, None);
+    no Claude family at all → None."""
+    hit = _CLAUDE_ID.search(m)
+    if hit:
+        fam = "fable" if hit.group(1) == "mythos" else hit.group(1)
+        return fam, (int(hit.group(2)), int(hit.group(3) or 0))
+    hit = _CLAUDE_ID_V3.search(m)
+    if hit:
+        return hit.group(3), (int(hit.group(1)), int(hit.group(2) or 0))
+    for fam in _CLAUDE_FAMILIES:
+        if fam in m:
+            return ("fable" if fam == "mythos" else fam), None
+    return None
+
+
+@lru_cache(maxsize=512)
+def display_name(model: Optional[str]) -> str:
+    """'claude-opus-5-5' → 'Opus 5.5', 'claude-opus-4-20250514' → 'Opus 4',
+    'claude-3-5-sonnet-20241022' → 'Sonnet 3.5'. Ids outside the Claude families
+    come back unchanged ('gpt-5.5-codex'); a missing id becomes '—'."""
+    if not model:
+        return "—"
+    m = model.lower()
+    claude = _parse_claude_id(m)
+    if claude is None:
+        return model
+    fam, version = claude
+    name = "Mythos" if "mythos" in m else fam.capitalize()
+    if version is None:
+        return name
+    major, minor = version
+    return f"{name} {major}.{minor}" if minor else f"{name} {major}"
 
 @lru_cache(maxsize=512)
 def resolve_price(model: Optional[str]) -> tuple[str, bool]:
@@ -208,18 +353,25 @@ def resolve_price(model: Optional[str]) -> tuple[str, bool]:
     m = model.lower()
     if m.startswith("<"):            # <synthetic> et al: internal, genuinely $0
         return "unknown", True
-    for needles, tier, exact in _TIER_RULES:
-        if any(n in m for n in needles):
-            return tier, exact
+    claude = _parse_claude_id(m)
+    if claude is not None:
+        fam, version = claude
+        tier = _CLAUDE_VERSIONS.get((fam, *version)) if version else None
+        return (tier, True) if tier else (_CLAUDE_NEWEST[fam], False)
     # --- OpenAI / Codex. Variant beats version: gpt-5.3-codex is a Codex model
     # and gpt-5.4-mini is a mini model — checking the version number first would
     # bill both at the flagship tier. ('mini' only counts on OpenAI ids.)
     if "codex" in m:
         return "gpt-5-codex", True
-    if "mini" in m and ("gpt" in m or m.startswith("o")):
-        return "gpt-5-mini", True
-    if "nano" in m and ("gpt" in m or m.startswith("o")):
-        return "gpt-5-nano", True
+    if ("mini" in m or "nano" in m) and ("gpt" in m or m.startswith("o")):
+        size = "nano" if "nano" in m else "mini"
+        if m.startswith("o4-mini"):
+            return "o4-mini", True
+        if "5.4" in m or "5-4" in m:
+            return f"gpt-5.4-{size}", True
+        if re.match(r"gpt-?5-(mini|nano)", m):
+            return f"gpt-5-{size}", True
+        return f"gpt-5.4-{size}", False   # unlisted mini/nano version → newest known, flagged
     if "astra" in m or "gpt-6" in m or "gpt6" in m:
         return "gpt-6-astra", True
     # GPT-5.6's three tiers differ by 20x, so the tier name decides the price.
@@ -237,6 +389,8 @@ def resolve_price(model: Optional[str]) -> tuple[str, bool]:
         return "gpt-5.5", True
     if "gpt-5.4" in m or "gpt5.4" in m:
         return "gpt-5.4", True
+    if re.fullmatch(r"gpt-?5(-\d{4}-\d{2}-\d{2})?", m):   # plain gpt-5, optionally dated
+        return "gpt-5", True
     if "gpt" in m or m.startswith("o1") or m.startswith("o3") or m.startswith("o4"):
         return "gpt-5.5", False      # unknown GPT version → flagship tier, flagged
     return "unknown", False
@@ -268,6 +422,18 @@ def is_price_estimated(model: Optional[str]) -> bool:
     return not resolve_price(model)[1]
 
 
+def _tier(p: ModelPrice, prompt_tokens: int) -> ModelPrice:
+    """The rates a request of this prompt length pays (Haiku 5.5 doubles past 100K)."""
+    return p.long if p.long is not None and prompt_tokens > p.long_prompt_over else p
+
+
+def record_price(rec) -> tuple[ModelPrice, float]:
+    """The rates one record was billed at, and its fast-mode factor."""
+    p = _tier(price_for(rec.model),
+              rec.input_tokens + rec.cache_read_tokens + rec.cache_creation_tokens)
+    return p, (FAST_MODE_MULTIPLIER if getattr(rec, "speed", "") == "fast" else 1.0)
+
+
 def estimate_cost_usd(
     model: Optional[str],
     input_tokens: int = 0,
@@ -276,6 +442,7 @@ def estimate_cost_usd(
     cache_creation_tokens: int = 0,
     cache_ttl: str = "5m",
     cache_creation_1h_tokens: int = 0,
+    speed: str = "",
 ) -> float:
     """Compute estimated USD cost for a single usage record.
 
@@ -285,20 +452,42 @@ def estimate_cost_usd(
     ignoring the split under-reports real spend by a wide margin. Records from
     before the log format carried the split pass 0 and bill at 5m, as they did.
 
+    `speed="fast"` (fast mode) doubles every rate. Prompt-length tiers (Haiku 5.5)
+    are decided per call, so pass ONE request's tokens here, never a sum.
+
     Returns 0.0 for unknown models (we still track tokens elsewhere).
     """
-    p = price_for(model)
+    p = _tier(price_for(model), input_tokens + cache_read_tokens + cache_creation_tokens)
     write_1h = min(max(int(cache_creation_1h_tokens), 0), cache_creation_tokens)
     if not write_1h and cache_ttl == "1h":
         write_1h = cache_creation_tokens        # caller declared the whole write as 1h
     write_5m = cache_creation_tokens - write_1h
-    return (
+    cost = (
         input_tokens * p.input_per_mtok
         + output_tokens * p.output_per_mtok
         + cache_read_tokens * p.cache_read_per_mtok
         + write_5m * p.cache_write_5m_per_mtok
         + write_1h * p.cache_write_1h_per_mtok
     ) / 1_000_000.0
+    return cost * FAST_MODE_MULTIPLIER if speed == "fast" else cost
+
+
+def record_cost_usd(rec) -> float:
+    """Cost of one parsed usage record (= one API response).
+
+    Use this rather than spelling out estimate_cost_usd's fields at each call site:
+    every billing input (1h writes, fast mode, prompt-length tiers) is per request,
+    and a call site that forgets one misprices silently.
+    """
+    return estimate_cost_usd(
+        rec.model,
+        input_tokens=rec.input_tokens,
+        output_tokens=rec.output_tokens,
+        cache_read_tokens=rec.cache_read_tokens,
+        cache_creation_tokens=rec.cache_creation_tokens,
+        cache_creation_1h_tokens=getattr(rec, "cache_creation_1h_tokens", 0),
+        speed=getattr(rec, "speed", ""),
+    )
 
 
 def effective_tokens(

@@ -206,6 +206,11 @@ def _file_response(handler: BaseHTTPRequestHandler, path: Path, content_type: st
 # the pidfile describes (not merely "a" Burnmeter on that port).
 _INSTANCE_TOKEN: Optional[str] = None
 
+# One-click update progress, echoed by /api/health so the dashboard can tell an
+# update that finished from one that never started (a frozen build once replied
+# "✓ Updated" after an updater that had exited on its first argument).
+_UPDATE_STATE: dict = {}
+
 # Set by the active launcher to a callable that cleanly stops THIS instance:
 # icon.stop in tray mode, server.shutdown in console mode. trigger_restart() calls
 # it so a one-click update can exit gracefully and a relauncher rebinds the port.
@@ -393,16 +398,34 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 # → the dashboard shows a false "couldn't reach". The dashboard polls
                 # /api/health and reloads when the new version is up.
                 host, port = self.server.server_address[0], self.server.server_address[1]
+                try:
+                    length = int(self.headers.get("Content-Length", 0) or 0)
+                    body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+                    version = str(body.get("version") or "") if isinstance(body, dict) else ""
+                except Exception:
+                    version = ""
+                _UPDATE_STATE.clear()
+                _UPDATE_STATE.update(state="starting", version=version, error=None)
                 _json_response(self, 200, {"ok": True, "message": "Updating — Burnmeter will restart…"})
                 def _go():
                     time.sleep(0.6)        # let the response flush first
                     # Don't swallow a spawn failure silently — the UI already got 200 and is
-                    # polling /api/health, so log WHY no restart happened (else "updating…"
-                    # hangs forever with no diagnostic).
+                    # polling /api/health, so report and log WHY no restart happened (else
+                    # "updating…" hangs forever with no diagnostic).
                     try:
-                        if not _spawn_update(host, port):
+                        if getattr(sys, "frozen", False):
+                            # A frozen build has no Python for `-m burnmeter _update`; it
+                            # updates by running the release installer instead.
+                            from . import updater
+                            _UPDATE_STATE["state"] = "downloading"
+                            if not updater.run_installer_update(updater.installer_url(version)):
+                                raise RuntimeError(
+                                    f"the v{version or 'latest'} installer could not be downloaded or started")
+                        elif not _spawn_update(host, port):
                             raise RuntimeError("_spawn_update returned False")
+                        _UPDATE_STATE["state"] = "restarting"
                     except Exception as e:
+                        _UPDATE_STATE.update(state="failed", error=str(e) or repr(e))
                         try:
                             from datetime import datetime as _dt
                             p = Path.home() / ".burnmeter" / "update_error.log"
@@ -605,6 +628,8 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                     "token": _INSTANCE_TOKEN,
                     "projects_dir": str(cache.projects_dir),
                     "projects_dir_exists": cache.projects_dir.exists(),
+                    "frozen": bool(getattr(sys, "frozen", False)),   # installed app, not pip
+                    "update": dict(_UPDATE_STATE) or None,
                 })
                 return
 

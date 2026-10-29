@@ -31,13 +31,13 @@ import statistics
 import subprocess
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Optional
 
 from .parser import UsageRecord
 from .pricing import (
-    estimate_cost_usd, family_from_model, effective_tokens, price_for,
+    family_from_model, effective_tokens, record_cost_usd, record_price,
     resolve_price, PRICES_VERIFIED_AT,
 )
 from ._proc import NO_WINDOW as _NO_WINDOW
@@ -114,14 +114,7 @@ class Totals:
         self.output_tokens += rec.output_tokens
         self.cache_creation_tokens += rec.cache_creation_tokens
         self.cache_read_tokens += rec.cache_read_tokens
-        self.cost_usd += estimate_cost_usd(
-            rec.model,
-            input_tokens=rec.input_tokens,
-            output_tokens=rec.output_tokens,
-            cache_read_tokens=rec.cache_read_tokens,
-            cache_creation_tokens=rec.cache_creation_tokens,
-            cache_creation_1h_tokens=getattr(rec, 'cache_creation_1h_tokens', 0),
-        )
+        self.cost_usd += record_cost_usd(rec)
         self.messages += 1
 
     def to_dict(self) -> dict:
@@ -137,6 +130,29 @@ class Totals:
         }
 
 
+# Calendar buckets (days, weeks, months, "today") follow the user's local
+# clock, so a user at UTC+3 does not see "today" reset at 03:00. Every UTC
+# offset in use is a multiple of 15 minutes and DST switches on those
+# boundaries, so each 15-minute UTC slot falls on exactly one local date.
+# Caching per slot keeps astimezone() (~2 us) off the per-record hot path.
+_LOCAL_DATE_SLOT_SEC = 900
+_local_date_by_slot: dict[int, date] = {}
+
+
+def local_date(ts: datetime) -> date:
+    slot = int(ts.timestamp()) // _LOCAL_DATE_SLOT_SEC
+    d = _local_date_by_slot.get(slot)
+    if d is None:
+        if len(_local_date_by_slot) > 200_000:
+            _local_date_by_slot.clear()
+        try:
+            d = ts.astimezone().date()
+        except (OverflowError, OSError, ValueError):   # a stamp the OS clock can't convert
+            d = ts.date()                               # (year 1, year 9999): its UTC date
+        _local_date_by_slot[slot] = d
+    return d
+
+
 def aggregate_total(records: Iterable[UsageRecord]) -> Totals:
     t = Totals()
     for r in records:
@@ -147,7 +163,7 @@ def aggregate_total(records: Iterable[UsageRecord]) -> Totals:
 def aggregate_by_day(records: Iterable[UsageRecord]) -> list[dict]:
     buckets: dict[str, Totals] = defaultdict(Totals)
     for r in records:
-        key = r.timestamp.astimezone(timezone.utc).date().isoformat()
+        key = local_date(r.timestamp).isoformat()
         buckets[key].add(r)
     return [
         {"date": k, **buckets[k].to_dict()}
@@ -652,7 +668,7 @@ def weekly_cap_status(records: list[UsageRecord], daily: list[dict]) -> dict:
         usage_pct_of_personal_p95: rolling_7d / historical_p95
         verdict_kind/label       : color + Turkish wording
     """
-    today = datetime.now(timezone.utc).date()
+    today = date.today()
     cutoff_now = today
     cutoff_recent = today - timedelta(days=6)
     cutoff_prior = today - timedelta(days=13)
@@ -910,14 +926,7 @@ def attribute_to_commits(
                 if r.timestamp > commit_time:
                     break
                 tokens += r.input_tokens + r.output_tokens + r.cache_creation_tokens + r.cache_read_tokens
-                cost += estimate_cost_usd(
-                    r.model,
-                    input_tokens=r.input_tokens,
-                    output_tokens=r.output_tokens,
-                    cache_read_tokens=r.cache_read_tokens,
-                    cache_creation_tokens=r.cache_creation_tokens,
-                    cache_creation_1h_tokens=getattr(r, 'cache_creation_1h_tokens', 0),
-                )
+                cost += record_cost_usd(r)
                 sess.add(r.session_id)
                 rec_idx += 1
 
@@ -1010,15 +1019,8 @@ def active_hours_stats(records: list[UsageRecord], days: int = 7) -> dict:
     days_set: set = set()
     for r in recent:
         buckets.add(int(r.timestamp.timestamp() // BUCKET_SEC))
-        days_set.add(r.timestamp.date())
-        cost += estimate_cost_usd(
-            r.model,
-            input_tokens=r.input_tokens,
-            output_tokens=r.output_tokens,
-            cache_read_tokens=r.cache_read_tokens,
-            cache_creation_tokens=r.cache_creation_tokens,
-            cache_creation_1h_tokens=getattr(r, 'cache_creation_1h_tokens', 0),
-        )
+        days_set.add(local_date(r.timestamp))
+        cost += record_cost_usd(r)
 
     active_minutes = len(buckets) * (BUCKET_SEC / 60)
     active_hours = active_minutes / 60.0
@@ -1046,7 +1048,7 @@ def fuel_efficiency(
     (e.g. better prompts, more caching) is paying off.
     """
     from datetime import date as _date
-    today = datetime.now(timezone.utc).date()
+    today = date.today()
     cutoff_7 = today - timedelta(days=7)
     cutoff_30 = today - timedelta(days=30)
 
@@ -1057,7 +1059,7 @@ def fuel_efficiency(
     # $/hr. (Earlier hardcoded 4/12/25 constants are removed.)
     hours_stats = active_hours_stats(records, days=7)
     prior_hours_stats = active_hours_stats(
-        [r for r in records if r.timestamp.date() < cutoff_7 and r.timestamp.date() >= cutoff_30],
+        [r for r in records if cutoff_30 <= local_date(r.timestamp) < cutoff_7],
         days=23,
     )
 
@@ -1188,8 +1190,8 @@ def fuel_efficiency(
             "direction": "up" if delta_day > 0.05 else ("down" if delta_day < -0.05 else "flat"),
         }
     # Recent cache hit (last 7d records vs prior 30d records)
-    recent_recs = [r for r in records if r.timestamp.date() >= cutoff_7]
-    prior_recs = [r for r in records if cutoff_30 <= r.timestamp.date() < cutoff_7]
+    recent_recs = [r for r in records if local_date(r.timestamp) >= cutoff_7]
+    prior_recs = [r for r in records if cutoff_30 <= local_date(r.timestamp) < cutoff_7]
     if recent_recs and prior_recs:
         r_tot = aggregate_total(recent_recs)
         p_tot = aggregate_total(prior_recs)
@@ -1355,14 +1357,7 @@ def burn_rate_timeseries(
             idx = num_buckets - 1
         if idx < 0:
             continue
-        costs[idx] += estimate_cost_usd(
-            r.model,
-            input_tokens=r.input_tokens,
-            output_tokens=r.output_tokens,
-            cache_read_tokens=r.cache_read_tokens,
-            cache_creation_tokens=r.cache_creation_tokens,
-            cache_creation_1h_tokens=getattr(r, 'cache_creation_1h_tokens', 0),
-        )
+        costs[idx] += record_cost_usd(r)
         tokens[idx] += (r.input_tokens + r.output_tokens
                         + r.cache_creation_tokens + r.cache_read_tokens)
         records_count[idx] += 1
@@ -1394,22 +1389,15 @@ def daily_burn_rates(records: list[UsageRecord], days_back: int = 90) -> list[di
     "cost_usd" is included for reference (= what /day chart shows).
     """
     BUCKET_SEC = 5 * 60
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days_back)).date()
+    cutoff = date.today() - timedelta(days=days_back)
 
     by_day: dict[str, dict] = defaultdict(lambda: {"cost": 0.0, "buckets": set(), "tokens": 0})
     for r in records:
-        d = r.timestamp.astimezone(timezone.utc).date()
+        d = local_date(r.timestamp)
         if d < cutoff:
             continue
         key = d.isoformat()
-        by_day[key]["cost"] += estimate_cost_usd(
-            r.model,
-            input_tokens=r.input_tokens,
-            output_tokens=r.output_tokens,
-            cache_read_tokens=r.cache_read_tokens,
-            cache_creation_tokens=r.cache_creation_tokens,
-            cache_creation_1h_tokens=getattr(r, 'cache_creation_1h_tokens', 0),
-        )
+        by_day[key]["cost"] += record_cost_usd(r)
         by_day[key]["buckets"].add(int(r.timestamp.timestamp() // BUCKET_SEC))
         by_day[key]["tokens"] += (
             r.input_tokens + r.output_tokens
@@ -1462,14 +1450,7 @@ def live_active_models(records: list[UsageRecord], lookback_min: int = 15) -> di
         m["billable_tokens"] += r.input_tokens + r.output_tokens + r.cache_creation_tokens
         m["total_tokens"]    += (r.input_tokens + r.output_tokens
                                  + r.cache_creation_tokens + r.cache_read_tokens)
-        m["cost"]            += estimate_cost_usd(
-            r.model,
-            input_tokens=r.input_tokens,
-            output_tokens=r.output_tokens,
-            cache_read_tokens=r.cache_read_tokens,
-            cache_creation_tokens=r.cache_creation_tokens,
-            cache_creation_1h_tokens=getattr(r, 'cache_creation_1h_tokens', 0),
-        )
+        m["cost"]            += record_cost_usd(r)
         m["messages"] += 1
         if m["last_seen"] is None or r.timestamp > m["last_seen"]:
             m["last_seen"] = r.timestamp
@@ -1502,7 +1483,7 @@ def live_active_models(records: list[UsageRecord], lookback_min: int = 15) -> di
 def forecast(records: list[UsageRecord], daily: list[dict]) -> dict:
     """Predictive forecasts: what does today/week/month look like at current pace?
 
-    'Today' uses your last 4 hours of burn rate × hours left in UTC day.
+    'Today' uses your last 2 hours of burn rate × hours left in the local day.
     'Week' uses your last 7 active days median × days left in week.
     'Month' uses last 14 active days median × days left in month.
 
@@ -1510,7 +1491,7 @@ def forecast(records: list[UsageRecord], daily: list[dict]) -> dict:
     """
     from datetime import date as _date
     now = datetime.now(timezone.utc)
-    today = now.date()
+    today = date.today()
 
     # --- Today ---
     # Burn rate averaged over the last 2 hours (was 4h — shortened so it
@@ -1519,20 +1500,15 @@ def forecast(records: list[UsageRecord], daily: list[dict]) -> dict:
     recent_recs = [r for r in records if r.timestamp >= last_2h_cutoff]
     hours_elapsed_2h = (now - last_2h_cutoff).total_seconds() / 3600.0
     last_2h_cost = sum(
-        estimate_cost_usd(
-            r.model,
-            input_tokens=r.input_tokens,
-            output_tokens=r.output_tokens,
-            cache_read_tokens=r.cache_read_tokens,
-            cache_creation_tokens=r.cache_creation_tokens,
-            cache_creation_1h_tokens=getattr(r, 'cache_creation_1h_tokens', 0),
-        )
+        record_cost_usd(r)
         for r in recent_recs
     )
     burn_rate_now = last_2h_cost / hours_elapsed_2h if hours_elapsed_2h > 0 else 0
 
-    end_of_day_utc = datetime.combine(today + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
-    hours_left_today = (end_of_day_utc - now).total_seconds() / 3600.0
+    # Local midnight; astimezone() on the naive value applies the local
+    # offset, so DST days get their real 23 or 25 hours.
+    end_of_day = datetime.combine(today + timedelta(days=1), datetime.min.time()).astimezone()
+    hours_left_today = (end_of_day - now).total_seconds() / 3600.0
 
     today_so_far = next(
         (d["cost_usd"] for d in daily if d["date"] == today.isoformat()),
@@ -1585,14 +1561,7 @@ def forecast(records: list[UsageRecord], daily: list[dict]) -> dict:
         for r in records:
             if r.timestamp < c:
                 continue
-            rc = estimate_cost_usd(
-                r.model,
-                input_tokens=r.input_tokens,
-                output_tokens=r.output_tokens,
-                cache_read_tokens=r.cache_read_tokens,
-                cache_creation_tokens=r.cache_creation_tokens,
-                cache_creation_1h_tokens=getattr(r, 'cache_creation_1h_tokens', 0),
-            )
+            rc = record_cost_usd(r)
             cost += rc
             per_model[r.model or "unknown"] += rc
         burn_rates_by_hours[str(hours)] = round(cost / hours, 2)
@@ -1621,14 +1590,7 @@ def forecast(records: list[UsageRecord], daily: list[dict]) -> dict:
         if r.timestamp < rc_cut:
             continue
         minute = int(r.timestamp.timestamp()) // 60 * 60
-        rc_buckets[minute] += estimate_cost_usd(
-            r.model,
-            input_tokens=r.input_tokens,
-            output_tokens=r.output_tokens,
-            cache_read_tokens=r.cache_read_tokens,
-            cache_creation_tokens=r.cache_creation_tokens,
-            cache_creation_1h_tokens=getattr(r, 'cache_creation_1h_tokens', 0),
-        )
+        rc_buckets[minute] += record_cost_usd(r)
     recent_costs = sorted([m, round(c, 4)] for m, c in rc_buckets.items())
 
     return {
@@ -1763,7 +1725,7 @@ def errors_summary(error_events: list[dict], lookback_hours: int = 24) -> dict:
     }
 
 
-def cache_efficiency(by_model_full: list[dict]) -> dict:
+def cache_efficiency(records: Iterable[UsageRecord]) -> dict:
     """Cache-efficiency paneli — rakiplerin atladığı yüksek-sinyal metrik.
 
     Cache read maliyeti input'un ~%10'u (90% indirim). "Cache olmasaydı bu
@@ -1773,21 +1735,24 @@ def cache_efficiency(by_model_full: list[dict]) -> dict:
     Döndürür: hit_rate, cached_tokens, fresh_input_tokens, usd_on_cache (cache
     read'in gerçek maliyeti), usd_saved (cache sayesinde kaçınılan), discount_pct
     (cache'in toplam input-maliyetini ne kadar düşürdüğü), full_equiv_usd.
+
+    Priced per record, at the rates that call paid: fast mode and Haiku 5.5's
+    long-prompt tier are decided per request, so per-model sums would miss them.
     """
     cached_tok = 0
     fresh_in_tok = 0
     usd_on_cache = 0.0
     usd_saved = 0.0
-    for m in by_model_full:
-        mid = m.get("model_id") or ""
-        cr = int(m.get("cache_read_tokens") or 0)
-        fin = int(m.get("input_tokens") or 0)
-        p = price_for(mid)
+    for r in records:
+        cr = r.cache_read_tokens
         cached_tok += cr
-        fresh_in_tok += fin
-        usd_on_cache += cr * p.cache_read_per_mtok / 1_000_000.0
+        fresh_in_tok += r.input_tokens
+        if not cr:
+            continue
+        p, mult = record_price(r)
+        usd_on_cache += cr * p.cache_read_per_mtok * mult / 1_000_000.0
         # Cache olmasaydı: cr token tam input fiyatından
-        usd_saved += cr * (p.input_per_mtok - p.cache_read_per_mtok) / 1_000_000.0
+        usd_saved += cr * (p.input_per_mtok - p.cache_read_per_mtok) * mult / 1_000_000.0
     denom = cached_tok + fresh_in_tok
     hit_rate = (cached_tok / denom) if denom > 0 else 0.0
     full_equiv = usd_on_cache + usd_saved        # cache yokken input-okuma maliyeti
@@ -1826,15 +1791,21 @@ def build_report(
     user_intents: Optional[dict[str, str]] = None,
     error_events: Optional[list[dict]] = None,
     source: str = "claude",
+    *,
+    git: bool = True,
 ) -> dict:
-    """One call → everything the dashboard needs."""
+    """One call → everything the dashboard needs.
+
+    git=False skips pairing sessions with commits, which runs `git log` in every
+    project (7 of the 8 seconds of a one-day build); its block comes back empty.
+    """
     tool_label = "Codex" if source == "codex" else "Claude Code"
     daily = aggregate_by_day(records)
     windows = detect_billing_windows(records)
     plan_guess = infer_plan(windows)
     chosen_plan = plan or plan_guess["guess"]
     totals_dict = aggregate_total(records).to_dict()
-    git_attr = attribute_to_commits(records, since_days=14)
+    git_attr = attribute_to_commits(records if git else [], since_days=14)
     # 2026-05-28 (Cihan paradigm): "SON AKTİVİTE" panelinde session
     # lifetime toplamı (5 milyar token) yerine yalnızca son 2 saatte
     # yakılan token'ı göster. recent_cutoff aggregate_by_session'a
@@ -1954,14 +1925,7 @@ def build_report(
         for k, (cutoff, _hf) in burn_cutoffs.items():
             if r.timestamp >= cutoff:
                 if cost is None:
-                    cost = estimate_cost_usd(
-                        r.model,
-                        input_tokens=r.input_tokens,
-                        output_tokens=r.output_tokens,
-                        cache_read_tokens=r.cache_read_tokens,
-                        cache_creation_tokens=r.cache_creation_tokens,
-                        cache_creation_1h_tokens=getattr(r, 'cache_creation_1h_tokens', 0),
-                    )
+                    cost = record_cost_usd(r)
                 slot["burn_cost"][k] += cost
     # Finalize
     for dev, slot in list(by_device_totals.items()):
@@ -1981,7 +1945,7 @@ def build_report(
         "recent_turns": recent_turns_data,
         "by_device": by_device_totals,
         "totals": totals_dict,
-        "cache_efficiency": cache_efficiency(bmf),
+        "cache_efficiency": cache_efficiency(records),
         "daily": daily,
         "usage_heatmap": usage_heatmap(records),
         "by_model": aggregate_by_model(records),

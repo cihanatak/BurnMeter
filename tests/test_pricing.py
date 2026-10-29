@@ -5,9 +5,15 @@ Why this file exists: v0.3.1 shipped with Sonnet 5 billed at Sonnet 4.x rates
 month by ~24%. Both slipped through 74 passing tests because NOTHING asserted
 that a model maps to the right price — only that the arithmetic was consistent.
 
-Rates below were verified against claude.com/pricing on 2026-09-06. When a
-provider changes a price or ships a model, update PRICES *and* this file
-together; a failure here means the table drifted from reality.
+Rates below were verified against platform.claude.com/docs/en/about-claude/pricing
+and developers.openai.com/api/docs/pricing on 2026-10-29. When a provider changes
+a price or ships a model, update PRICES *and* this file together; a failure here
+means the table drifted from reality.
+
+v0.3.4 repeated the v0.3.1 mistake in a new form: the "opus-5" substring rule also
+matched claude-opus-5-5, so Opus 5.5 was billed at Opus 5 rates and reported as
+EXACT. This file now pins every shipping id, including the dated and cloud-provider
+spellings, so a matcher that confuses two versions fails here first.
 """
 from __future__ import annotations
 
@@ -19,6 +25,7 @@ from burnmeter import parser
 from burnmeter.analytics import pricing_coverage
 from burnmeter.parser import parse_line
 from burnmeter.pricing import (
+    FAST_MODE_MULTIPLIER,
     PRICES,
     PRICES_VERIFIED_AT,
     effective_tokens,
@@ -26,22 +33,33 @@ from burnmeter.pricing import (
     family_from_model,
     is_price_estimated,
     price_for,
+    record_cost_usd,
     resolve_price,
 )
 
 # model id -> (input, output, cache_read, cache_write_5m) per 1M tokens
 LIVE_RATES = {
+    "claude-opus-5-5":            (4.00, 20.00, 0.20, 5.00),
     "claude-opus-5":              (5.00, 25.00, 0.50, 6.25),
     "claude-opus-4-8":            (5.00, 25.00, 0.50, 6.25),
+    "claude-opus-4-7":            (5.00, 25.00, 0.50, 6.25),
+    "claude-opus-4-6":            (5.00, 25.00, 0.50, 6.25),
     "claude-opus-4-5-20251101":   (5.00, 25.00, 0.50, 6.25),
+    "claude-opus-4-1-20250805":   (15.00, 75.00, 1.50, 18.75),
+    "claude-opus-4-20250514":     (15.00, 75.00, 1.50, 18.75),
     "claude-fable-5-1":           (10.00, 50.00, 0.25, 12.50),
     "claude-mythos-5-1":          (10.00, 50.00, 0.25, 12.50),
     "claude-fable-5":             (10.00, 50.00, 1.00, 12.50),
+    "claude-mythos-5":            (10.00, 50.00, 1.00, 12.50),
+    "claude-sonnet-5-5":          (2.00, 10.00, 0.10, 2.50),
     "claude-sonnet-5":            (2.00, 10.00, 0.20, 2.50),
     "claude-sonnet-4-6":          (3.00, 15.00, 0.30, 3.75),
     "claude-sonnet-4-5-20250929": (3.00, 15.00, 0.30, 3.75),
+    "claude-sonnet-4-20250514":   (3.00, 15.00, 0.30, 3.75),
     "claude-3-5-sonnet-20241022": (3.00, 15.00, 0.30, 3.75),
+    "claude-haiku-5-5":           (0.10, 0.50, 0.01, 0.125),
     "claude-haiku-4-5-20251001":  (1.00, 5.00, 0.10, 1.25),
+    "claude-3-5-haiku-20241022":  (0.80, 4.00, 0.08, 1.00),
     "gpt-6-astra":                (10.00, 50.00, 1.00, 10.00),
     "gpt-5.6-sol":                (4.00, 20.00, 0.40, 4.00),
     "gpt-5.6-terra":              (2.00, 12.00, 0.20, 2.00),
@@ -51,8 +69,25 @@ LIVE_RATES = {
     "gpt-5.4":                    (2.50, 15.00, 0.25, 2.50),
     "gpt-5.4-mini":               (0.75, 4.50, 0.075, 0.75),
     "gpt-5.4-nano":               (0.20, 1.25, 0.02, 0.20),
+    "gpt-5":                      (1.25, 10.00, 0.125, 1.25),
+    "gpt-5-mini":                 (0.25, 2.00, 0.025, 0.25),
+    "gpt-5-nano":                 (0.05, 0.40, 0.005, 0.05),
     "gpt-5.3-codex":              (1.75, 14.00, 0.175, 1.75),
-    "o4-mini":                    (0.75, 4.50, 0.075, 0.75),
+    "o4-mini":                    (1.10, 4.40, 0.275, 1.10),
+}
+
+# 1-hour cache writes are 2x input everywhere, which makes them easy to get wrong
+# when a row is copied from its neighbour.
+LIVE_1H_WRITE = {
+    "claude-opus-5-5": 8.00,
+    "claude-opus-5": 10.00,
+    "claude-opus-4-1-20250805": 30.00,
+    "claude-fable-5-1": 20.00,
+    "claude-sonnet-5-5": 4.00,
+    "claude-sonnet-4-6": 6.00,
+    "claude-haiku-5-5": 0.20,
+    "claude-haiku-4-5-20251001": 2.00,
+    "claude-3-5-haiku-20241022": 1.60,
 }
 
 
@@ -63,10 +98,92 @@ def test_rates_match_the_live_price_pages(model, rates):
             p.cache_read_per_mtok, p.cache_write_5m_per_mtok) == rates, model
 
 
+@pytest.mark.parametrize("model,rate", sorted(LIVE_1H_WRITE.items()))
+def test_one_hour_write_rates_match_the_live_price_page(model, rate):
+    assert price_for(model).cache_write_1h_per_mtok == rate, model
+
+
 @pytest.mark.parametrize("model", sorted(LIVE_RATES))
 def test_every_shipping_model_is_recognised_exactly(model):
     """A model we ship support for must never be priced by family guesswork."""
     assert not is_price_estimated(model), f"{model} fell back to a family rate"
+
+
+def test_opus_55_is_not_priced_as_opus_5():
+    """The v0.3.4 bug: 'opus-5' matched claude-opus-5-5, billed it at Opus 5 rates and
+    called that exact. Opus 5.5 is cheaper on every token type; cache reads by 2.5x."""
+    assert resolve_price("claude-opus-5-5") == ("opus-5-5", True)
+    assert estimate_cost_usd("claude-opus-5-5", cache_read_tokens=1_000_000) == pytest.approx(0.20)
+    assert estimate_cost_usd("claude-opus-5", cache_read_tokens=1_000_000) == pytest.approx(0.50)
+    assert estimate_cost_usd("claude-sonnet-5-5", cache_read_tokens=1_000_000) == pytest.approx(0.10)
+
+
+def test_a_snapshot_date_is_never_read_as_a_minor_version():
+    """claude-opus-4-20250514 is Opus 4 ($15/$75), not 'Opus 4.20' or Opus 4.5+."""
+    assert resolve_price("claude-opus-4-20250514") == ("opus-legacy", True)
+    assert resolve_price("claude-sonnet-4-20250514") == ("sonnet-legacy", True)
+    assert resolve_price("claude-3-haiku-20240307")[1] is False   # retired, not in the table
+
+
+@pytest.mark.parametrize("model,tier", [
+    ("us.anthropic.claude-opus-4-1-20250805-v1:0", "opus-legacy"),   # Bedrock
+    ("claude-opus-4-1@20250805", "opus-legacy"),                     # Vertex
+    ("anthropic/claude-opus-4.5", "opus"),                           # dotted version
+    ("claude-opus-5-5[1m]", "opus-5-5"),                             # Claude Code alias suffix
+])
+def test_cloud_and_alias_spellings_resolve_to_the_same_version(model, tier):
+    assert resolve_price(model) == (tier, True)
+
+
+def test_haiku_55_bills_a_long_prompt_at_the_higher_tier():
+    """Prompts over 100K tokens (input + cache reads + cache writes) pay 5x on ALL
+    tokens of that request, output included."""
+    at_limit = estimate_cost_usd("claude-haiku-5-5", input_tokens=40_000,
+                                 cache_read_tokens=60_000, output_tokens=1_000_000)
+    over = estimate_cost_usd("claude-haiku-5-5", input_tokens=40_000,
+                             cache_read_tokens=60_001, output_tokens=1_000_000)
+    assert at_limit == pytest.approx((40_000 * 0.10 + 60_000 * 0.01) / 1e6 + 0.50)
+    assert over == pytest.approx((40_000 * 0.50 + 60_001 * 0.05) / 1e6 + 2.50)
+
+
+def test_fast_mode_doubles_every_token_type():
+    """Fast mode is $8/$40 on Opus 5.5; the cache multipliers stack on top of it."""
+    kw = dict(input_tokens=1_000_000, output_tokens=1_000_000, cache_read_tokens=1_000_000,
+              cache_creation_tokens=1_000_000, cache_creation_1h_tokens=500_000)
+    std = estimate_cost_usd("claude-opus-5-5", **kw)
+    fast = estimate_cost_usd("claude-opus-5-5", speed="fast", **kw)
+    assert FAST_MODE_MULTIPLIER == 2.0
+    assert std == pytest.approx(4.00 + 20.00 + 0.20 + 0.5 * 5.00 + 0.5 * 8.00)
+    assert fast == pytest.approx(2 * std)
+    assert estimate_cost_usd("claude-opus-5-5", speed="standard", **kw) == pytest.approx(std)
+
+
+def test_record_cost_carries_every_billing_input():
+    """record_cost_usd must agree with estimate_cost_usd fed the same fields, fast
+    mode included — the per-call-site copies are how fast mode went unbilled."""
+    line = json.dumps({
+        "type": "assistant", "timestamp": "2026-10-29T10:00:00.000Z", "sessionId": "s1",
+        "uuid": "u1", "cwd": "/tmp/proj",
+        "message": {"id": "m1", "role": "assistant", "model": "claude-opus-5-5",
+                    "usage": {"input_tokens": 10, "output_tokens": 2_000,
+                              "cache_read_input_tokens": 50_000,
+                              "cache_creation_input_tokens": 3_000,
+                              "cache_creation": {"ephemeral_1h_input_tokens": 3_000},
+                              "speed": "fast"}},
+    })
+    rec = parse_line(line)
+    assert rec is not None and rec.speed == "fast"
+    assert record_cost_usd(rec) == pytest.approx(estimate_cost_usd(
+        "claude-opus-5-5", input_tokens=10, output_tokens=2_000, cache_read_tokens=50_000,
+        cache_creation_tokens=3_000, cache_creation_1h_tokens=3_000, speed="fast"))
+
+
+def test_gpt5_mini_is_not_priced_as_gpt54_mini():
+    """One 'mini' row billed gpt-5-mini at 3x and o4-mini below its real rate."""
+    assert estimate_cost_usd("gpt-5-mini", input_tokens=1_000_000) == pytest.approx(0.25)
+    assert estimate_cost_usd("gpt-5.4-mini", input_tokens=1_000_000) == pytest.approx(0.75)
+    assert estimate_cost_usd("o4-mini", input_tokens=1_000_000) == pytest.approx(1.10)
+    assert resolve_price("gpt-5.6-mini") == ("gpt-5.4-mini", False)   # unlisted → flagged
 
 
 def test_sonnet_5_is_cheaper_than_sonnet_4():
@@ -85,8 +202,8 @@ def test_fable_51_cache_reads_are_a_quarter_of_fable_5():
 
 def test_variant_beats_version_for_openai_ids():
     """gpt-5.4-mini is a mini model, not the 5.4 flagship; same for codex/nano."""
-    assert resolve_price("gpt-5.4-mini")[0] == "gpt-5-mini"
-    assert resolve_price("gpt-5.4-nano")[0] == "gpt-5-nano"
+    assert resolve_price("gpt-5.4-mini")[0] == "gpt-5.4-mini"
+    assert resolve_price("gpt-5.4-nano")[0] == "gpt-5.4-nano"
     assert resolve_price("gpt-5.3-codex")[0] == "gpt-5-codex"
     assert resolve_price("gpt-5.5-pro")[0] == "gpt-5.5-pro"   # must beat plain gpt-5.5
 
@@ -123,7 +240,7 @@ def test_specific_version_beats_generic_family():
 
 def test_unknown_future_model_is_priced_by_family_and_flagged():
     tier, exact = resolve_price("claude-opus-9-turbo")
-    assert tier == "opus" and exact is False        # costed, but not silently
+    assert tier == "opus-5-5" and exact is False    # newest Opus rate, but not silently
     assert is_price_estimated("claude-opus-9-turbo")
 
 
@@ -270,4 +387,24 @@ def test_parser_tolerates_logs_without_the_split():
 def test_record_cache_version_bumped_for_the_new_field():
     """An old parse-cache entry lacks the 1h field and would replay as zero, so the
     cache version MUST change whenever UsageRecord grows a billing field."""
-    assert parser._CLAUDE_CACHE_VERSION >= 2
+    assert parser._CLAUDE_CACHE_VERSION >= 3   # v3: speed (fast mode)
+
+
+def test_cache_savings_are_priced_at_each_calls_rates():
+    # cache_efficiency once priced per-model sums at base rates, missing fast mode
+    # and Haiku 5.5's long-prompt tier, which are decided per request.
+    from datetime import datetime, timezone
+
+    from burnmeter.analytics import cache_efficiency
+    from burnmeter.parser import UsageRecord
+
+    def rec(model, speed=""):
+        return UsageRecord(timestamp=datetime(2026, 10, 29, tzinfo=timezone.utc), session_id="s",
+                           project_dir="/p", project_label="p", git_branch="", model=model,
+                           message_id=model + speed, input_tokens=0, output_tokens=0,
+                           cache_creation_tokens=0, cache_read_tokens=1_000_000, speed=speed)
+
+    saved = lambda *recs: cache_efficiency(list(recs))["usd_saved"]
+    assert saved(rec("claude-opus-5-5")) == 3.80                  # $4 input − $0.20 read
+    assert saved(rec("claude-opus-5-5", "fast")) == 7.60          # fast mode bills 2x
+    assert saved(rec("claude-haiku-5-5")) == 0.45                 # 1M prompt: $0.50 − $0.05
