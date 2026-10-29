@@ -408,3 +408,22 @@ def test_cache_savings_are_priced_at_each_calls_rates():
     assert saved(rec("claude-opus-5-5")) == 3.80                  # $4 input − $0.20 read
     assert saved(rec("claude-opus-5-5", "fast")) == 7.60          # fast mode bills 2x
     assert saved(rec("claude-haiku-5-5")) == 0.45                 # 1M prompt: $0.50 − $0.05
+
+
+def test_the_cache_card_reads_the_same_hit_rate_as_the_totals():
+    # The cache card left cache writes out and read 100.0% beside an
+    # Efficiency row of 98.2% for the same logs.
+    from datetime import datetime, timezone
+
+    from burnmeter.analytics import Totals, cache_efficiency
+    from burnmeter.parser import UsageRecord
+
+    recs = [UsageRecord(timestamp=datetime(2026, 10, 29, tzinfo=timezone.utc), session_id="s",
+                        project_dir="/p", project_label="p", git_branch="", model="claude-opus-5-5",
+                        message_id=f"m{i}", input_tokens=10, output_tokens=0,
+                        cache_creation_tokens=cw, cache_read_tokens=cr)
+            for i, (cw, cr) in enumerate([(2_000, 50_000), (0, 98_000), (30_000, 0)])]
+    totals = Totals()
+    for r in recs:
+        totals.add(r)
+    assert cache_efficiency(recs)["hit_rate"] == round(totals.cache_hit_rate, 4) == 0.8221

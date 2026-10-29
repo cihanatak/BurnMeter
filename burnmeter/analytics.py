@@ -1738,22 +1738,27 @@ def cache_efficiency(records: Iterable[UsageRecord]) -> dict:
 
     Priced per record, at the rates that call paid: fast mode and Haiku 5.5's
     long-prompt tier are decided per request, so per-model sums would miss them.
+
+    hit_rate is the share of input served from the cache, the same rate as
+    totals.cache_hit_rate: cache writes are input the cache did not serve.
     """
     cached_tok = 0
     fresh_in_tok = 0
+    written_tok = 0
     usd_on_cache = 0.0
     usd_saved = 0.0
     for r in records:
         cr = r.cache_read_tokens
         cached_tok += cr
         fresh_in_tok += r.input_tokens
+        written_tok += r.cache_creation_tokens
         if not cr:
             continue
         p, mult = record_price(r)
         usd_on_cache += cr * p.cache_read_per_mtok * mult / 1_000_000.0
         # Cache olmasaydı: cr token tam input fiyatından
         usd_saved += cr * (p.input_per_mtok - p.cache_read_per_mtok) * mult / 1_000_000.0
-    denom = cached_tok + fresh_in_tok
+    denom = cached_tok + fresh_in_tok + written_tok
     hit_rate = (cached_tok / denom) if denom > 0 else 0.0
     full_equiv = usd_on_cache + usd_saved        # cache yokken input-okuma maliyeti
     discount_pct = (usd_saved / full_equiv) if full_equiv > 0 else 0.0
