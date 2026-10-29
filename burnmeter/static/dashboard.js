@@ -851,12 +851,12 @@ function liveGaugeTick() {
 function renderActiveModel(rep) {
   const body = $("active-model-body"); if (!body) return;
   let w = localStorage.getItem("burnmeter_active_window3") || "live"; if (!["live", "1", "5", "15"].includes(w)) w = "live";
-  // "Canlı" = ŞU AN yazan modeller: 5dk bucket'ından canlılık eşiğiyle (<120s) filtre.
+  // "Canlı" = ŞU AN yazan sohbetler (satır başına bir sohbet): 5dk bucket'ından canlılık eşiğiyle (<120s) filtre.
   const lam = (rep.live_active_models_by_window || {})[w === "live" ? "5" : w] || {};
   let models = (lam.models || []).filter(m => !String(m.model_id).startsWith("<"));
   if (w === "live") models = models.filter(m => (m.seconds_since_last ?? 9e9) < 120);
   if (!models.length) {
-    body.innerHTML = `<div class="dim" style="padding:16px 2px">${w === "live" ? "No model running now." : `No active model in the last ${w}m.`}</div>`;
+    body.innerHTML = `<div class="dim" style="padding:16px 2px">${w === "live" ? "No chat running now." : `No chat active in the last ${w}m.`}</div>`;
     return;
   }
   models = models.slice().sort((a, b) => (a.seconds_since_last ?? 9e9) - (b.seconds_since_last ?? 9e9));
@@ -1059,19 +1059,19 @@ function paintCombinedSide(side, rep, isCodex) {
   });
 }
 
-// İkisi yarısının "Canlı aktif model" satırları — seçili pencereye göre; tickLive saniyede bir canlılığı günceller.
+// İkisi yarısının "Canlı sohbetler" satırları — seçili pencereye göre; tickLive saniyede bir canlılığı günceller.
 function paintCombinedActive(side, rep) {
   const root = document.getElementById("cv-" + side); if (!root) return;
   const box = root.querySelector(".cv-am-rows"); if (!box) return;
   let w = localStorage.getItem("burnmeter_active_window3_" + side) || "live"; if (!["live", "1", "5", "15"].includes(w)) w = "live";
   const lam = (rep.live_active_models_by_window || {})[w === "live" ? "5" : w] || {};
   let models = (lam.models || []).filter(m => !String(m.model_id).startsWith("<"))
-    .sort((a, b) => (a.seconds_since_last ?? 9e9) - (b.seconds_since_last ?? 9e9)).slice(0, 4);
+    .sort((a, b) => (a.seconds_since_last ?? 9e9) - (b.seconds_since_last ?? 9e9)).slice(0, 8);
   if (w === "live") models = models.filter(m => (m.seconds_since_last ?? 9e9) < 120);
   box.innerHTML = models.length ? models.map(m => {
     const s = m.seconds_since_last ?? 9e9, live = s < 120;
     return `<div class="am-row" data-ls="${esc(m.last_seen || "")}"><span class="am-dot${live ? " live" : ""}"></span><span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span>${liveWhere(m)}</span><span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/min</span></span><span class="am-seen${live ? " live" : ""} dim">${seenLabel(s)}</span></div>`;
-  }).join("") : `<div class="dim" style="padding:6px 0">${w === "live" ? "no model running now" : `no active model in the last ${w}m`}</div>`;
+  }).join("") : `<div class="dim" style="padding:6px 0">${w === "live" ? "no chat running now" : `no chat active in the last ${w}m`}</div>`;
 }
 
 // ===== gauge TEK KAYNAK (single tab renderSpeedometer + İkisi paintBurnGauge ortak) =====
@@ -1196,7 +1196,7 @@ function halfStructure(rep, isCodex, side) {
       <div class="cv-zone2"></div>
       <div class="cv-breakdown speedo-breakdown"></div>
     </div>
-    <div class="cvb"><div class="cvb-trow"><span class="cvb-t dim">Live active model</span><span class="picker cv-am-picker">${amPicker}</span></div><div class="cv-am-rows"></div></div>
+    <div class="cvb"><div class="cvb-trow"><span class="cvb-t dim">Live chats</span><span class="picker cv-am-picker">${amPicker}</span></div><div class="cv-am-rows"></div></div>
     <div class="cvb"><div class="cvb-t dim">Recent activity</div>${recRows}</div>`;
 }
 

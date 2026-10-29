@@ -34,7 +34,7 @@ SNAPSHOT_VERSION = 8   # v8: + chat (sohbet adı) on recent/live. v7: cache_effi
                        # v2: bounded recent-turns tail (metadata only) for cross-device recent.
 SNAPSHOT_RECENT_MAX = 25   # last N turns per source carried in the snapshot (a few KB)
 SNAPSHOT_PROJECTS_MAX = 12  # top N projects (by cost) per source — cross-device rollup
-SNAPSHOT_LIVE_MAX = 4       # top N currently-active models per source — cross-device live panel
+SNAPSHOT_LIVE_MAX = 8       # top N currently-active chats per source — cross-device live panel
 SNAPSHOT_DAILY_MAX = 14     # last N days of cost per source — cross-device KPI sparkline
 
 
@@ -231,7 +231,7 @@ def _summarize(report: dict) -> dict:
     # Per-window burn (5m/15m/1h/2h/4h/6h) so another device can show THIS device's burn
     # at whatever window the viewer picks (the single recent value can't match the picker).
     burn_by_h = {str(k): round(v or 0, 4) for k, v in (fc.get("burn_rates_by_hours") or {}).items()}
-    # Currently-active models (last ~15 min) so another device's combined "Live active model"
+    # Currently-active chats (last ~15 min) so another device's combined "Live chats"
     # panel can show what's running on THIS machine. Metadata only — last_seen lets the
     # viewer recompute "now / Xm ago" against its own clock (snapshots are ~as-of-last-sync).
     lam15 = ((report.get("live_active_models_by_window") or {}).get("15") or {}).get("models") or []

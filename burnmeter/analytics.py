@@ -1421,15 +1421,16 @@ def daily_burn_rates(records: list[UsageRecord], days_back: int = 90) -> list[di
 
 
 def live_active_models(records: list[UsageRecord], lookback_min: int = 15) -> dict:
-    """For each model active in the last N minutes, report its live token rate
-    and how long since the last turn. Lets the UI show several models burning
-    in parallel rather than just the most-recent one.
+    """For each chat active in the last N minutes, report its model, live token rate
+    and how long since its last turn. One row per chat, so chats running in parallel
+    show side by side. Rows used to be per model: four chats on Opus made one row,
+    named after whichever chat wrote last and carrying the cost of all four.
     """
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(minutes=lookback_min)
     elapsed_min = lookback_min  # assume full window when computing rate
 
-    by_model: dict[tuple, dict] = defaultdict(lambda: {
+    by_chat: dict[tuple, dict] = defaultdict(lambda: {
         "billable_tokens": 0,
         "total_tokens": 0,
         "cost": 0.0,
@@ -1437,37 +1438,44 @@ def live_active_models(records: list[UsageRecord], lookback_min: int = 15) -> di
         "last_seen": None,
         "project": None,
         "project_dir": None,
-        "session_id": None,
+        "by_model": defaultdict(lambda: [0.0, 0]),   # model → [cost, billable tokens]
     })
 
     for r in records:
         if r.timestamp < cutoff:
             continue
-        # Key by (model, device) so the same model running on mac AND pc shows as
-        # two separate live rows; the dashboard tags each with its device badge.
-        key = (r.model or "unknown", getattr(r, "device", "mac"))
-        m = by_model[key]
-        m["billable_tokens"] += r.input_tokens + r.output_tokens + r.cache_creation_tokens
-        m["total_tokens"]    += (r.input_tokens + r.output_tokens
-                                 + r.cache_creation_tokens + r.cache_read_tokens)
-        m["cost"]            += record_cost_usd(r)
+        # Key by (device, chat): the same chat id on mac AND pc stays two rows, each with
+        # its device badge. A record without a chat falls back to one row per model.
+        model = r.model or "unknown"
+        key = (getattr(r, "device", "mac"), r.session_id or "model:" + model)
+        m = by_chat[key]
+        billable = r.input_tokens + r.output_tokens + r.cache_creation_tokens
+        cost = record_cost_usd(r)
+        m["billable_tokens"] += billable
+        m["total_tokens"]    += billable + r.cache_read_tokens
+        m["cost"]            += cost
         m["messages"] += 1
+        m["by_model"][model][0] += cost
+        m["by_model"][model][1] += billable
         if m["last_seen"] is None or r.timestamp > m["last_seen"]:
             m["last_seen"] = r.timestamp
             m["project"] = r.project_label or m["project"]   # project of the most-recent turn
             m["project_dir"] = r.project_dir or m["project_dir"]
-            m["session_id"] = r.session_id or m["session_id"]  # → chat title lookup
 
     out = []
     elapsed_hours = elapsed_min / 60.0
-    for (model_id, device), stats in by_model.items():
+    for (device, chat), stats in by_chat.items():
         last = stats["last_seen"]
+        # The chat's model is the one it spent most on, so a Haiku subagent doesn't
+        # rename an Opus chat; "<synthetic>" only when the chat ran nothing else.
+        bm = stats["by_model"]
+        model_id = max(bm, key=lambda k: (not k.startswith("<"), bm[k][0], bm[k][1]))
         out.append({
             "model_id": model_id,
             "device": device,
             "project": stats["project"],
             "project_dir": stats["project_dir"],
-            "session_id": stats["session_id"],
+            "session_id": None if chat.startswith("model:") else chat,   # → chat title lookup
             "billable_tokens_recent": stats["billable_tokens"],
             "tokens_per_min": round(stats["billable_tokens"] / elapsed_min, 0) if elapsed_min else 0,
             "messages": stats["messages"],
