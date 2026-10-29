@@ -10,7 +10,16 @@
   `BurnmeterSetup.exe` from this release. Updates from 0.3.6 on are one click.
 - **The Chats page reaches every chat.** It stopped at 60 rows with no way to see the
   rest (60 of 195 on the maker's PC). It now shows 60 and a "Show all" button, and
-  "Most $" ranks every chat, not only the newest 200.
+  "Most $" ranks every chat, not only the newest 200. The table also fills the window:
+  a later style rule held it to 320 px, about four rows. Costs of $10,000 and up are no
+  longer cut off ("$10,4…").
+- **The live card shows every chat that's running.** It had one row per model, so four
+  chats on Opus 5.5 made one row, named after whichever chat wrote last and costed at
+  all four. It's now "Live chats", with a row and a rate for each chat.
+- **Chat titles are back on Windows.** The Claude desktop app moved its session list to
+  `%LOCALAPPDATA%\Claude-Data`, so Chats, Recent activity and the live card showed
+  folder names ("repo", "ClaudeWorkspace") instead of the titles in the app. Burnmeter
+  reads the new place too.
 - **Pro sync says why it stopped.** A refused push or pull used to fail silently. The
   Pro bar now shows when this device last synced, or why it couldn't: no Pro plan,
   an unverified email, the daily quota, the network, or a session that ended.
