@@ -1,5 +1,71 @@
 # Changelog
 
+## [0.3.5] — 2026-10-29
+
+### Fixed
+- **Claude 5.5 models were billed at older rates.** Opus 5.5 was priced as Opus 5,
+  so its cache reads, the bulk of a Claude Code bill, cost 2.5x. Sonnet 5.5 cache
+  reads cost 2x, and Haiku 5.5 was billed at Haiku 4.5 rates (10x). Model ids now
+  match exactly. Haiku 5.5 prompts over 100K tokens bill at its higher tier, fast
+  mode bills at 2x, and an unknown version is still flagged. On the maker's logs,
+  October fell from $16,276 to $8,976.
+- **Output tokens were under-counted by a third.** Claude Code logs a response's
+  usage as it streams. Only the last line has the full count, and v0.3.4 kept the
+  first. The lines of one response are now merged at their highest values. On the
+  maker's logs, output tokens rose from 122.8M to 179.2M. With both fixes,
+  all-time spend went from $42,141 to $35,447.
+- **Days, weeks and months follow the local clock.** "Today" used to reset at UTC
+  midnight, which is 03:00 at UTC+3, so it disagreed with the activity heatmap.
+- **A device that stopped syncing kept adding to the fleet.** A Mac last synced in
+  July still added its July burn rate, "today" and month to "All devices". An old
+  snapshot now adds nothing to those three, and its card and chips show "—".
+- **One-click update did nothing in the installed app.** It ran
+  `burnmeter-server.exe -m burnmeter _update`, which exited at once, and the
+  dashboard still said "✓ Updated" after 150 s. The app now downloads and runs the
+  release installer for the version the dashboard offered. `/api/health` reports
+  progress and failure, and a failed update can be retried from the pill.
+- **Scanning another log tree wiped the shared parse cache.** This happened when
+  running the tests or passing a second `--projects-dir`, and the next launch then
+  re-read every log, which takes minutes on a big history. Entries for other trees
+  are now kept, and an unchanged cache is not rewritten. The Codex cache works the
+  same way.
+- **Tool counts grew with uptime.** A build served from the parse cache added each
+  multi-line response's tool calls again, which inflated the per-tool numbers and
+  grew the cache file on every rebuild.
+- **The Chats "goal" column showed "Tool loaded." or image notes.** Claude Code
+  also logs request copies, meta lines and compaction summaries as user messages.
+  The goal is now the first message the user typed. The model in use now comes
+  first in the models column.
+- **A forked or resumed session counted its tool errors twice.** Errors are now
+  de-duplicated per tool call.
+- **Cache savings** price each call at the rates it actually paid, including fast
+  mode and Haiku 5.5's long prompts.
+- **Smaller fixes:**
+  - Model names keep their minor version ("Opus 5.5", not "Opus 5").
+  - Model names and timestamps from synced devices are escaped before they reach
+    the page.
+  - The dashboard skips its charts instead of breaking when Chart.js can't load.
+  - A log line stamped outside the OS clock's range no longer takes down the report.
+  - The cache card counts cache writes as input, so its hit rate matches the rest
+    of the dashboard. It read 100.0% next to 98.2% on the Insights page.
+  - Chat costs and durations are no longer cut off: "$3,33…" now reads "$3,339",
+    and a chat resumed over weeks shows its span in days.
+  - The pace next to the burn gauge now uses the needle's own measure. It used to
+    project a block's first minutes over all 5 hours, and could read "10.4×" next
+    to a needle in the yellow.
+
+### Changed
+- **Charts work offline.** Chart.js 4.4.7 is now bundled, so the dashboard loads
+  nothing from a CDN.
+- **The statusline is instant while Burnmeter runs.** It asks the app instead of
+  rebuilding the report: 0.5 s, against about 65 s on the maker's history. Without
+  the app it reads only the last 26 hours, in about 9 s. It then blanks what
+  26 hours can't show: the pace dot (⚪), "P90+", and the block when that day has
+  no 5-hour pause. The line is now in English:
+  `🟠 Opus 5.5 $4.20/h · block 4h24m · 0 err/24h · cache 97% · today $32`.
+- The parse cache version was bumped, so the first launch after upgrading does one
+  full re-read.
+
 ## [0.3.4] — 2026-09-06
 
 ### Fixed

@@ -14,7 +14,7 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from .parser import CLAUDE_PROJECTS_DIR, load_records
@@ -102,7 +102,7 @@ def cmd_status(args):
 
     report = build_report(records, plan=args.plan)
 
-    today_iso = datetime.now(timezone.utc).date().isoformat()
+    today_iso = date.today().isoformat()
     today = next((d for d in report["daily"] if d["date"] == today_iso), None)
     totals = report["totals"]
     baseline = report["baseline"]
@@ -581,15 +581,37 @@ def cmd_desktop(args):
     return 0
 
 
-def cmd_statusline(args):
-    """One short line for a prompt / Claude Code statusLine.command.
+def _statusline_from_server(src: str, projects_dir: Path) -> dict | None:
+    """Statusline fields from a running Burnmeter, or None.
 
-    Computes standalone (no running server needed) so it works even before
-    `burnmeter serve` is up. Shares burnmeter/statusline.py with the HTTP endpoint,
-    so the terminal line and the web pull are identical.
-    """
-    from .statusline import build_statusline, statusline_text
-    src = (getattr(args, "source", "claude") or "claude").lower()
+    Its report is already built, so it answers in milliseconds where a standalone
+    build of the whole history takes a minute. Used only when that server reads
+    the same logs this call would (same pidfile token, same projects dir)."""
+    import urllib.request
+    try:
+        info = json.loads((Path.home() / ".burnmeter" / "server.json").read_text(encoding="utf-8"))
+        host = info.get("host") or "127.0.0.1"
+        if host in ("0.0.0.0", "::"):
+            host = "127.0.0.1"
+        base = f"http://{f'[{host}]' if ':' in host else host}:{int(info['port'])}"
+        with urllib.request.urlopen(f"{base}/api/health", timeout=1.0) as r:
+            health = json.loads(r.read().decode("utf-8"))
+        if not (health.get("ok") and info.get("token") and health.get("token") == info.get("token")):
+            return None
+        if src == "claude" and Path(health.get("projects_dir") or "") != projects_dir:
+            return None
+        # A server still building its first report would block; give up and compute here.
+        with urllib.request.urlopen(f"{base}/api/statusline?source={src}&format=json",
+                                    timeout=3.0) as r:
+            fields = json.loads(r.read().decode("utf-8"))
+    except Exception:
+        return None
+    return fields if isinstance(fields, dict) and "burn_rate_per_hour" in fields else None
+
+
+def _statusline_standalone(args, src: str, projects_dir: Path) -> dict | None:
+    """Statusline fields computed here, for when no Burnmeter is running."""
+    from .statusline import build_statusline
     if src == "codex":
         from .codex_parser import CODEX_SESSIONS_DIR, load_codex_records
         root = (Path(args.codex_dir).expanduser()
@@ -597,21 +619,59 @@ def cmd_statusline(args):
         records, _stats, intents = load_codex_records(root)
         errors: list = []
     else:
-        records, _stats, intents, errors = load_records(Path(args.projects_dir))
+        # 26 hours cover the local day, the current 5-hour block and the 24-hour
+        # error count. Reading only the logs touched since then also skips the
+        # parse cache, whose load alone outweighs a day of logs.
+        since = datetime.now(timezone.utc) - timedelta(hours=26)
+        records, _stats, intents, errors = load_records(projects_dir, since=since)
+    if not records:
+        return None
+    report = build_report(records, plan=args.plan, user_intents=intents,
+                          error_events=errors, source=src, git=False)
+    fields = build_statusline(report)
+    if src == "claude":
+        # The dot and the P90 flag compare against the user's own blocks over weeks,
+        # which 26 hours can't show (they'd fall back to market rates, so the dot
+        # could read green where the app reads red). Say "not known" instead.
+        fields["verdict"] = "⚪"
+        fields["block_past_p90"] = False
+        # A block opens on the first message after the previous block closed, so
+        # which block is current is only known when the day read here holds a
+        # 5-hour pause: before its first record, between two, or since its last
+        # (then no block is open). Without one, the block is reported unknown.
+        stamps = [since, *sorted(r.timestamp for r in records), datetime.now(timezone.utc)]
+        if not any(b - a >= timedelta(hours=5) for a, b in zip(stamps, stamps[1:])):
+            fields["block_remaining_min"] = None
+    return fields
+
+
+def cmd_statusline(args):
+    """One short line for a prompt / Claude Code statusLine.command.
+
+    Asks a running Burnmeter first and computes standalone only without one.
+    Either way the fields come from burnmeter/statusline.py, shared with the
+    HTTP endpoint, so the line reads the same; standalone only blanks what its
+    26 hours of logs can't tell (the pace dot, P90+, sometimes the block).
+    """
+    from .statusline import format_statusline
+    src = (getattr(args, "source", "claude") or "claude").lower()
+    projects_dir = Path(args.projects_dir)
+    # The server's health names its Claude projects dir, so that is checked there; its
+    # Codex dir it doesn't name, so a custom --codex-dir always computes here.
+    ask_server = src == "claude" or not getattr(args, "codex_dir", None)
+    fields = _statusline_from_server(src, projects_dir) if ask_server else None
+    if fields is None:
+        fields = _statusline_standalone(args, src, projects_dir)
 
     # A statusLine command must ALWAYS print exactly one short line and exit 0,
     # otherwise Claude Code surfaces it as an error in the prompt.
-    if not records:
-        print(f"○ burnmeter: {src} verisi yok")
-        return 0
-
-    report = build_report(records, plan=args.plan, user_intents=intents,
-                          error_events=errors, source=src)
-    if getattr(args, "json", False):
-        import json
-        print(json.dumps(build_statusline(report), ensure_ascii=False))
+    if fields is None:
+        # Standalone reads Claude's logs back 26 hours only (Codex's in full).
+        print(f"○ burnmeter: no {src} usage " + ("in the last 26 h" if src == "claude" else "yet"))
+    elif getattr(args, "json", False):
+        print(json.dumps(fields, ensure_ascii=False))
     else:
-        print(statusline_text(report))
+        print(format_statusline(fields))
     return 0
 
 
@@ -845,16 +905,16 @@ def main(argv=None):
     p_serve.add_argument("--port", type=int, default=7654)
     p_serve.add_argument("--ttl", type=int, default=15)
     p_serve.add_argument("--no-browser", action="store_true",
-                         help="dashboard'ı tarayıcıda otomatik açma")
+                         help="don't open the dashboard in a browser")
     p_serve.add_argument("--no-shortcut", action="store_true",
-                         help="masaüstü kısayolu oluşturma")
+                         help="don't create a desktop shortcut")
     p_serve.add_argument("--extra-projects-dir", action="append", default=[],
-                         help="ek Claude JSONL dizinleri (PC Syncthing mirror'ı vb.). "
-                              "Birden çok için flag'i tekrarla.")
+                         help="another Claude JSONL dir to include (e.g. a mirrored PC). "
+                              "Repeat the flag for several.")
     p_serve.add_argument("--codex-dir", default=None,
-                         help="Codex sessions kökü (default ~/.codex/sessions)")
+                         help="Codex sessions root (default ~/.codex/sessions)")
     p_serve.add_argument("--codex-extra-dir", action="append", default=[],
-                         help="ek Codex sessions dizinleri (PC mirror'ı vb.).")
+                         help="another Codex sessions dir to include (e.g. a mirrored PC).")
     p_serve.add_argument("--codex-days", type=int, default=90,
                          help="how many recent days of Codex history to scan "
                               "(default 90; 0 = all-time — slow on a huge ~/.codex)")
@@ -914,52 +974,52 @@ def main(argv=None):
                    help="stop a backgrounded dashboard (the tray / windowless one)")
 
     p_sl = sub.add_parser("statusline",
-                          help="tek satır canlı durum (Claude Code statusLine.command için)")
+                          help="one live status line (for Claude Code's statusLine.command)")
     p_sl.add_argument("--source", default="claude", choices=["claude", "codex"],
-                      help="hangi araç (default claude)")
+                      help="which tool's usage (default claude)")
     p_sl.add_argument("--json", action="store_true",
-                      help="plain text yerine JSON çıktı")
+                      help="print the fields as JSON instead of the line")
     p_sl.add_argument("--codex-dir", default=None,
-                      help="Codex sessions kökü (default ~/.codex/sessions)")
+                      help="Codex sessions root (default ~/.codex/sessions)")
 
-    p_sync = sub.add_parser("sync", help="Pro: cihazlar arası sync (E2E şifreli)")
+    p_sync = sub.add_parser("sync", help="Pro: sync between devices (end-to-end encrypted)")
     p_sync.add_argument("action", choices=["activate", "login", "push", "pull", "status"])
     p_sync.add_argument("--relay", help="relay URL (activate/login)")
-    p_sync.add_argument("--email", help="hesap e-postan (activate/login)")
-    p_sync.add_argument("--password", help="şifren (verilmezse güvenli şekilde sorulur)")
-    p_sync.add_argument("--code", help="tek-kullanımlık aktivasyon kodu (activate)")
-    p_sync.add_argument("--label", help="bu cihazın etiketi (default hostname)")
-    p_sync.add_argument("--codex-dir", default=None, help="Codex sessions kökü (push)")
+    p_sync.add_argument("--email", help="your account email (activate/login)")
+    p_sync.add_argument("--password", help="your password (prompted securely if omitted)")
+    p_sync.add_argument("--code", help="one-time activation code (activate)")
+    p_sync.add_argument("--label", help="this device's label (default: hostname)")
+    p_sync.add_argument("--codex-dir", default=None, help="Codex sessions root (push)")
 
-    p_desktop = sub.add_parser("desktop", help="masaüstüne 'Burnmeter' kısayolu ekle")
+    p_desktop = sub.add_parser("desktop", help="add a 'Burnmeter' shortcut to the desktop")
     p_desktop.add_argument("--port", type=int, default=7654)
 
-    p_relay = sub.add_parser("sync-relay", help="Pro: self-host edilebilir sync relay sunucusu")
+    p_relay = sub.add_parser("sync-relay", help="Pro: self-hostable sync relay server")
     p_relay.add_argument("--host", default="127.0.0.1")
     p_relay.add_argument("--port", type=int, default=8899)
-    p_relay.add_argument("--storage", default=None, help="ciphertext blob deposu (default ~/.burnmeter-relay)")
+    p_relay.add_argument("--storage", default=None, help="ciphertext blob store (default ~/.burnmeter-relay)")
 
     p_acct = sub.add_parser("relay-account",
-                            help="Pro: relay müşteri hesapları (create/list/revoke) — /admin'in okuduğu kayıt")
+                            help="Pro: relay customer accounts (create/list/revoke), the registry /admin reads")
     p_acct.add_argument("action", choices=["create", "list", "revoke"])
-    p_acct.add_argument("--email", help="müşteri e-postası (create)")
-    p_acct.add_argument("--name", help="müşteri adı (create, opsiyonel)")
+    p_acct.add_argument("--email", help="customer email (create)")
+    p_acct.add_argument("--name", help="customer name (create, optional)")
     p_acct.add_argument("--plan", default="pro",
                         choices=["pro", "team", "supporter", "license", "free"])
     p_acct.add_argument("--device-limit", type=int, default=None,
-                        help="cihaz limiti (verilmezse plana göre otomatik)")
-    p_acct.add_argument("--token", help="revoke için ham hesap token'ı")
-    p_acct.add_argument("--id", help="revoke için hesap id'si (list'te görünür)")
+                        help="device limit (default: set by the plan)")
+    p_acct.add_argument("--token", help="raw account token to revoke")
+    p_acct.add_argument("--id", help="account id to revoke (shown by list)")
     p_acct.add_argument("--storage", default=None,
                         help="relay storage (default ~/.burnmeter-relay)")
 
-    p_alerts = sub.add_parser("alerts", help="local pre-limit uyarıları (webhook/Slack/e-posta)")
+    p_alerts = sub.add_parser("alerts", help="local pre-limit alerts (webhook / Slack / email)")
     p_alerts.add_argument("action", choices=["status", "test", "check", "on", "off"])
     p_alerts.add_argument("--source", default="claude", choices=["claude", "codex"],
-                          help="check için kaynak (default claude)")
-    p_alerts.add_argument("--codex-dir", default=None, help="Codex sessions kökü (check --source codex)")
+                          help="source for check (default claude)")
+    p_alerts.add_argument("--codex-dir", default=None, help="Codex sessions root (check --source codex)")
     p_alerts.add_argument("--fire", action="store_true",
-                          help="check sırasında eşik aşılırsa gerçekten gönder")
+                          help="actually send if check finds a threshold crossed")
 
     # `burnmeter` with no subcommand → open the desktop app (matches the frozen
     # exe's double-click). Keeps `burnmeter <cmd>` working as before.

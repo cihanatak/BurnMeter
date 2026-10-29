@@ -30,7 +30,7 @@ import os
 from pathlib import Path
 from typing import Iterator, Optional
 
-from .parser import UsageRecord, _parse_timestamp, _local_device
+from .parser import UsageRecord, _local_device, _parse_timestamp, _root_prefixes, _under
 
 CODEX_SESSIONS_DIR = Path.home() / ".codex" / "sessions"
 _CACHE_PATH = Path.home() / ".codex" / ".burnmeter_codex_cache.json"
@@ -198,10 +198,17 @@ def _load_cache() -> dict:
 
 
 def _save_cache(cache: dict) -> None:
+    # Write a temp file and swap it in: a reader (the app, or a build killed
+    # mid-save) never sees half a cache.
+    tmp = _CACHE_PATH.with_name(f"{_CACHE_PATH.name}.{os.getpid()}.tmp")
     try:
-        _CACHE_PATH.write_text(json.dumps(cache))
+        tmp.write_text(json.dumps(cache))
+        os.replace(tmp, _CACHE_PATH)
     except OSError:
-        pass
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
 
 
 def _compact_to_usages(meta: dict, turns: list, device: str):
@@ -257,6 +264,7 @@ def load_codex_records(
     user_intents: dict[str, str] = {}
     files = 0
     reparsed = 0
+    saved_at = 0                   # reparse count at the last partial save
     latest_rl_by_dev: dict[str, dict] = {}   # device → most-recent rate_limits
 
     roots = [(root, _local_device())]
@@ -345,11 +353,18 @@ def load_codex_records(
             # huge ~/.codex (50 GB+) RESUMES from where it stopped instead of re-parsing
             # from scratch — it eventually completes + caches, so the Codex/combined tab
             # stops "hanging forever".
-            if reparsed and reparsed % 25 == 0:
-                _save_cache(new_cache)
+            if reparsed and reparsed % 25 == 0 and reparsed != saved_at:
+                _save_cache({**cache, **new_cache})   # unvisited entries stay valid
+                saved_at = reparsed                   # cache hits don't move `reparsed`
 
-    if new_cache:                 # never clobber a good cache with an empty scan
-        _save_cache(new_cache)
+    # Keep the entries of logs under other roots while those files exist:
+    # scanning one tree (a test's temp dir) must not evict another's cache.
+    scanned = _root_prefixes(r for r, _dev in roots)
+    for key, c in cache.items():
+        if key not in new_cache and not _under(key, scanned) and os.path.exists(key):
+            new_cache[key] = c
+    if new_cache and (reparsed or new_cache.keys() != cache.keys()):
+        _save_cache(new_cache)    # never clobber a good cache with an empty scan
     records = list(dedup.values())
     records.sort(key=lambda r: r.timestamp)
     return records, {
