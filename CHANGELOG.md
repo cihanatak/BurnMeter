@@ -46,6 +46,13 @@
     the page.
   - The dashboard skips its charts instead of breaking when Chart.js can't load.
   - A log line stamped outside the OS clock's range no longer takes down the report.
+  - The cache card counts cache writes as input, so its hit rate matches the rest
+    of the dashboard. It read 100.0% next to 98.2% on the Insights page.
+  - Chat costs and durations are no longer cut off: "$3,33…" now reads "$3,339",
+    and a chat resumed over weeks shows its span in days.
+  - The pace next to the burn gauge now uses the needle's own measure. It used to
+    project a block's first minutes over all 5 hours, and could read "10.4×" next
+    to a needle in the yellow.
 
 ### Changed
 - **Charts work offline.** Chart.js 4.4.7 is now bundled, so the dashboard loads
