@@ -1953,14 +1953,50 @@ function bmDur(sec) {
   return Math.round(sec / 86400) + "d";        // a chat resumed over weeks
 }
 const bmChatCost = (n) => (Number(n) || 0) >= 100 ? fmtMoney0(n) : fmtMoney(n);
+// The page lists 60 chats until "Show all" (it used to stop at 60, with no way to
+// see the rest). The 10-s report carries the newest 200, and by_session_total counts
+// them all; past 200, "Show all" and "Most $" fetch the full list once from
+// /api/chats, and the report's copy of a chat wins over it.
+const BM_CHATS_FIRST = 60;
+window.__chatsAll = false;
+window.__chatsOlder = {};      // source → the full list from /api/chats
+function bmChatList(rep) {
+  const top = rep.by_session || [];
+  const older = window.__chatsOlder[(rep._meta && rep._meta.source) || "claude"];
+  if (!older) return top;
+  const seen = new Set(top.map((s) => s.session_id));
+  return top.concat(older.filter((s) => !seen.has(s.session_id)));
+}
+function bmChatsLoadOlder(src) {
+  if (window.__chatsOlder[src] || window.__chatsLoading) return;
+  window.__chatsLoading = fetchT("/api/chats?source=" + src, 45000).then((r) => r.json()).then((d) => {
+    window.__chatsOlder[src] = d.by_session || [];
+    const cur = window.__lastReport;   // a refresh may have replaced the report meanwhile
+    if (cur && !cur._combined && ((cur._meta && cur._meta.source) || "claude") === src) renderChats(cur);
+  }).catch(() => {}).finally(() => { window.__chatsLoading = null; });   // failed: the next render retries
+}
+window.bmChatsShowAll = function () {
+  window.__chatsAll = true;
+  const rep = window.__lastReport;
+  if (rep) renderChats(rep._combined ? rep.claude : rep);
+};
 function renderChats(rep) {
   const tb = document.querySelector("#chats-tbl tbody"); if (!tb) return;
-  let rows = (rep.by_session || []).filter(s => (s.total_tokens || 0) > 0);
+  const total = Math.max(rep.by_session_total || 0, (rep.by_session || []).length);
+  if (total > (rep.by_session || []).length && (window.__chatsAll || window.__chatsSort === "cost")) {
+    bmChatsLoadOlder((rep._meta && rep._meta.source) || "claude");
+  }
+  let rows = bmChatList(rep).filter(s => (s.total_tokens || 0) > 0);
   rows = rows.slice().sort((a, b) => window.__chatsSort === "cost"
     ? (b.cost_usd || 0) - (a.cost_usd || 0)
     : new Date(b.ended_at || 0) - new Date(a.ended_at || 0));
   if (!rows.length) { tb.innerHTML = `<tr><td colspan="8" class="empty">No sessions yet</td></tr>`; return; }
-  tb.innerHTML = rows.slice(0, 60).map(s => {
+  const shown = window.__chatsAll ? rows : rows.slice(0, BM_CHATS_FIRST);
+  const all = Math.max(total, rows.length);
+  const more = all > shown.length
+    ? `<tr><td colspan="8" style="text-align:center;padding:12px"><button class="ghost-btn" onclick="bmChatsShowAll()">Show all ${fmtInt(all)} chats</button></td></tr>`
+    : "";
+  tb.innerHTML = shown.map(s => {
     // `models` is sorted by name, so the one in use now could fall past the third chip.
     const named = (s.models || []).filter(m => !String(m).startsWith("<"));
     const cur = named.includes(s.model_latest) ? s.model_latest : null;
@@ -1976,7 +2012,7 @@ function renderChats(rep) {
       <td class="num">${fmtCompact(s.total_tokens || 0)}</td>
       <td class="num" title="${fmtMoney(s.cost_usd)}">${bmChatCost(s.cost_usd)}</td>
       <td class="num">${fmtPct(s.cache_hit_rate)}</td></tr>`;
-  }).join("");
+  }).join("") + more;
 }
 
 // ---------- SPENDING SPIKES (daily_anomalies — computed since day 1, shown at last) ----------

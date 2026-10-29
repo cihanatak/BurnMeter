@@ -70,7 +70,7 @@ globalThis.location = windowStub.location;
 // Evaluate dashboard.js and capture the pure functions under test. Function declarations
 // are local to the wrapper; the appended assignment captures them out.
 const run = new Function(
-  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere, refresh, fetchT, renderPricingNote, modelDisplay, bmNewChart, renderOverviewFleet, renderDeviceBreakdown, renderCombinedFleet, bmDur, bmChatCost, computeGaugeSpec, drawGaugeSvg, bmOnlineState, bmSnapFresh, proSyncNote, proDevicesHtml, proNote, proNoteHtml, proSignedInHeader };"
+  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere, refresh, fetchT, renderPricingNote, modelDisplay, bmNewChart, renderOverviewFleet, renderDeviceBreakdown, renderCombinedFleet, bmDur, bmChatCost, computeGaugeSpec, drawGaugeSvg, bmOnlineState, bmSnapFresh, proSyncNote, proDevicesHtml, proNote, proNoteHtml, proSignedInHeader, renderChats, bmChatList };"
 );
 run();
 const { bmScopedHalf, bmScopedRep, liveBurnRate, bmPathParts, bmProjCell, liveWhere } = globalThis.__BM;
@@ -552,6 +552,49 @@ passed += 1;
   window.__proNote.until = Date.now() - 1;
   assert.ok(!proSignedInHeader(st).includes("not synced yet"), "a note expires after a minute");
   passed += 6;
+}
+
+// === TEST 27: the Chats page reaches every chat ===
+// It stopped at 60 rows with no way to see the rest (60 of 195 on the maker's PC).
+{
+  const { renderChats } = globalThis.__BM;
+  const tbody = { innerHTML: "" };
+  const realQS = documentStub.querySelector, realFetch = globalThis.fetch;
+  documentStub.querySelector = (sel) => (sel === "#chats-tbl tbody" ? tbody : realQS(sel));
+  const chat = (i, cost = 1) => ({ session_id: "s" + i, total_tokens: 10, cost_usd: cost, models: [],
+    project_label: "p", ended_at: new Date(Date.now() - i * 60000).toISOString() });
+  const rows = () => (tbody.innerHTML.match(/class="chats-goal"/g) || []).length;   // chat rows only
+  window.__chatsSort = "recent"; window.__chatsAll = false; window.__chatsOlder = {};
+  const rep = { _meta: { source: "claude" }, by_session: Array.from({ length: 75 }, (_, i) => chat(i)), by_session_total: 75 };
+  window.__lastReport = rep;
+  renderChats(rep);
+  assert.equal(rows(), 60, "60 chats at first");
+  assert.ok(tbody.innerHTML.includes("Show all 75 chats"));
+  window.bmChatsShowAll();
+  assert.equal(rows(), 75, "then every chat");
+  assert.ok(!tbody.innerHTML.includes("Show all"));
+  passed += 4;
+
+  // Past the report's newest 200, the rest come from /api/chats, and "Most $" ranks them too.
+  window.__chatsAll = false; window.__chatsSort = "cost";
+  const asked = [];
+  globalThis.fetch = async (url) => { asked.push(url); return { ok: true,
+    json: async () => ({ by_session: Array.from({ length: 250 }, (_, i) => chat(i, i === 240 ? 999 : 1)) }) }; };
+  const big = { _meta: { source: "claude" }, by_session: Array.from({ length: 200 }, (_, i) => chat(i)), by_session_total: 250 };
+  window.__lastReport = big;
+  renderChats(big);
+  await window.__chatsLoading;
+  assert.deepEqual(asked, ["/api/chats?source=claude"]);
+  assert.ok(tbody.innerHTML.split("<tr>")[1].includes("$999"), "the costliest chat, older than the newest 200, comes first");
+  assert.equal(rows(), 60);
+  assert.ok(tbody.innerHTML.includes("Show all 250 chats"));
+  window.bmChatsShowAll();
+  assert.equal(rows(), 250);
+  renderChats(big);
+  assert.equal(asked.length, 1, "the full list is fetched once");
+  passed += 6;
+  documentStub.querySelector = realQS; globalThis.fetch = realFetch;
+  window.__chatsSort = "recent"; window.__chatsAll = false; window.__chatsOlder = {};
 }
 
 console.log(`dashboard_render: ${passed} assertions passed`);

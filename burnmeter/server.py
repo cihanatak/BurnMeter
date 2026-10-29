@@ -225,6 +225,8 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
             return codex_cache, "codex"
         return cache, "claude"
 
+    POLL_SESSIONS = 200   # chats in each /api/report; the full list only grows
+
     def build_for(source, plan, force=False):
         """Cached report for a source (worker-backed). Used by /api/report
         and /api/statusline so both share one RAM-bounded build per TTL."""
@@ -660,7 +662,19 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 report.setdefault("_meta", {})
                 report["_meta"]["version"] = __version__
                 report["_meta"]["served_at"] = time.time()
+                # The dashboard polls this every 10 s: it carries the newest chats only,
+                # with the count of all of them; /api/chats has the rest.
+                sessions = report.get("by_session") or []
+                report = {**report, "by_session": sessions[:POLL_SESSIONS],
+                          "by_session_total": len(sessions)}
                 _json_response(self, 200, report)
+                return
+
+            if path == "/api/chats":
+                # Every chat of a source, for the Chats page's "Show all" and "Most $".
+                _, source = pick_cache(qs)
+                _json_response(self, 200, {"source": source,
+                                           "by_session": build_for(source, None).get("by_session") or []})
                 return
 
             if path == "/api/alerts/config":

@@ -1956,14 +1956,13 @@ def build_report(
         "by_model": aggregate_by_model(records),
         "by_model_full": bmf,
         "by_project": aggregate_by_project(records),
-        # Cap for the UI — but AFTER dropping 0-token stubs and sorting newest-first.
-        # A naive [:200] sliced in insertion order: with thousands of synthetic/stub
-        # sessions the REAL conversations fell outside the cap (Chats view showed 2 rows).
+        # Every real chat (0-token stubs dropped), newest first. The server's 10-s poll
+        # (/api/report) carries the newest 200 of them and /api/chats all of them.
         "by_session": sorted(
             (s for s in aggregate_by_session(records, user_intents, recent_cutoff=recent_cutoff)
              if s.get("total_tokens")),
             key=lambda s: s.get("ended_at") or "", reverse=True,
-        )[:200],
+        ),
         "by_tool": aggregate_by_tool(records),
         "windows": windows[-30:],                            # last 30 windows
         "current_window": current_window_status(windows, chosen_plan),
