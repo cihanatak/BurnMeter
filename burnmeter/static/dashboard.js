@@ -1138,8 +1138,12 @@ function drawGaugeSvg(svgEl, g) {
     `<path class="speedo-zone-orange" d="${arcPath(cx,cy,r,z.busy,z.heavy,max)}" stroke-width="26" fill="none"/>` +
     `<path class="speedo-zone-red"    d="${arcPath(cx,cy,r,z.heavy,max,max)}" stroke-width="26" fill="none"/>`;
   const ticksSvg = g.ticks.map(t => {
-    const a = 180 - (Math.min(t.v, max) / max) * 180, p = polarToCartesian(cx, cy, r + 20, a);
-    const anc = a < 90 ? "start" : a > 90 ? "end" : "middle";
+    const a = 180 - (Math.min(t.v, max) / max) * 180;
+    let p = polarToCartesian(cx, cy, r + 20, a), anc = a < 90 ? "start" : a > 90 ? "end" : "middle";
+    // Near the left end there is no room outside the arc: "your typical" ran off the
+    // canvas and read "ypical". Such a label goes just inside the arc. 7 = one 11.5px
+    // mono character.
+    if (anc === "end" && p.x - t.l.length * 7 < 0) { p = polarToCartesian(cx, cy, r - 26, a); anc = "start"; }
     return `<text class="speedo-tick-label" x="${p.x.toFixed(1)}" y="${p.y.toFixed(1)}" text-anchor="${anc}" dominant-baseline="middle">${t.l}</text>`;
   }).join("");
   const clamped = Math.max(0, Math.min(g.value, max)), na = 180 - (clamped / max) * 180;

@@ -84,7 +84,8 @@ class _Cache:
         try:
             Path(in_path).write_text(json.dumps(self.worker_config or {}), encoding="utf-8")
             env = dict(os.environ, BURNMETER_WORKER_IN=in_path,
-                       BURNMETER_WORKER_OUT=out_path, PYTHONUTF8="1")
+                       BURNMETER_WORKER_OUT=out_path, PYTHONUTF8="1",
+                       BURNMETER_WORKER_PARENT=str(os.getpid()))   # it exits if we die
             proc = subprocess.run(
                 worker_argv, capture_output=True, text=True, timeout=1200,
                 creationflags=NO_WINDOW, env=env,   # NO_WINDOW: no cmd flash per rebuild

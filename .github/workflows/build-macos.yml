@@ -33,8 +33,15 @@ jobs:
           path: dist/*.dmg
           if-no-files-found: error
 
+      # build_mac.sh names the copy after __version__ (Burnmeter-0.3.5.dmg), not the tag
+      # (v0.3.5). Asking for the tag's name failed, and a silent fallback hid that for
+      # every release. Upload the stable name first, then the copy; if the copy is
+      # missing, the tag and __version__ disagree and the job goes red.
       - name: Attach to release
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" dist/Burnmeter.dmg "dist/Burnmeter-${{ github.event.release.tag_name }}.dmg" --clobber || gh release upload "${{ github.event.release.tag_name }}" dist/Burnmeter.dmg --clobber
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release upload "$TAG" dist/Burnmeter.dmg --clobber
+          gh release upload "$TAG" "dist/Burnmeter-${TAG#v}.dmg" --clobber

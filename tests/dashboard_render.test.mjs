@@ -70,7 +70,7 @@ globalThis.location = windowStub.location;
 // Evaluate dashboard.js and capture the pure functions under test. Function declarations
 // are local to the wrapper; the appended assignment captures them out.
 const run = new Function(
-  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere, refresh, fetchT, renderPricingNote, modelDisplay, bmNewChart, renderOverviewFleet, renderDeviceBreakdown, renderCombinedFleet, bmDur, bmChatCost, computeGaugeSpec };"
+  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere, refresh, fetchT, renderPricingNote, modelDisplay, bmNewChart, renderOverviewFleet, renderDeviceBreakdown, renderCombinedFleet, bmDur, bmChatCost, computeGaugeSpec, drawGaugeSvg };"
 );
 run();
 const { bmScopedHalf, bmScopedRep, liveBurnRate, bmPathParts, bmProjCell, liveWhere } = globalThis.__BM;
@@ -483,6 +483,30 @@ passed += 1;
   assert.equal(spec(6).below, true);
   assert.equal(spec(33, { insufficient_history: true }).ratio, null, "a market estimate is not your pace");
   passed += 5;
+}
+
+// === TEST 24: no gauge label runs off the canvas ===
+// The viewBox is 0..400 wide. "your typical" sits near the left end and read "ypical".
+{
+  const { computeGaugeSpec, drawGaugeSvg } = globalThis.__BM;
+  const cases = [
+    { typical: 12, busy: 45, heavy: 90, max: 135 },
+    { typical: 4, busy: 12, heavy: 25, max: 50 },
+    { typical: 4, busy: 12, heavy: 25, max: 50, insufficient_history: true },
+  ];
+  for (const z of cases) {
+    const { g } = computeGaugeSpec({ forecast: { burn_rates_by_hours: { "2": 6 } }, burn_rate_zones: z }, false, "2");
+    const svg = { innerHTML: "" };
+    drawGaugeSvg(svg, g);
+    const labels = [...svg.innerHTML.matchAll(/<text class="speedo-tick-label" x="([-\d.]+)" y="[-\d.]+" text-anchor="(\w+)"[^>]*>([^<]*)</g)];
+    assert.equal(labels.length, 4, "four tick labels");
+    for (const [, xs, anc, text] of labels) {
+      const x = Number(xs), w = text.length * 7;
+      const left = anc === "end" ? x - w : anc === "middle" ? x - w / 2 : x;
+      assert.ok(left >= 0 && left + w <= 400, `"${text}" spans ${left.toFixed(1)}..${(left + w).toFixed(1)} in a 400-wide box (${JSON.stringify(z)})`);
+      passed += 1;
+    }
+  }
 }
 
 console.log(`dashboard_render: ${passed} assertions passed`);
