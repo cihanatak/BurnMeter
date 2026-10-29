@@ -455,7 +455,7 @@ function bmSnapFresh(dev) {
   if (!t) return { burn: false, today: false, month: false };
   const at = new Date(t), now = new Date();
   return {
-    burn: now - at < 15 * 60 * 1000,                     // a running device pushes every few min
+    burn: now - at < 25 * 60 * 1000,   // a busy device pushes every 10 min; pulls are 5-min cached
     today: at.toDateString() === now.toDateString(),
     month: at.getFullYear() === now.getFullYear() && at.getMonth() === now.getMonth(),
   };
@@ -479,7 +479,7 @@ function bmDeviceAgg(dev, sources) {
   return o;
 }
 // Per-device aggregate, but the LOCAL device uses the LIVE report (its snapshot lags
-// up to ~5 min, so "all devices" must not show a stale burn the per-device view shows
+// up to ~10 min, so "all devices" must not show a stale burn the per-device view shows
 // as live). Remote devices use their snapshot. Burn is window-aware for the local
 // device (matches the burn-window picker), so the All gauge agrees with the This gauge.
 function bmDeviceAggFresh(dev, sources) {
@@ -1500,9 +1500,13 @@ function renderBudget(rep, isCodex) {
 // for this 127.0.0.1 UI. The password is POSTed only to localhost, never stored.
 const _proHdr = { "Content-Type": "application/json", "X-Burnmeter-Pro": "1" };
 
-async function renderSyncDevices() {
+// fresh: skip the server's caches (status 10 min, devices 5 min), for "I've verified".
+async function renderSyncDevices(fresh) {
   const body = $("sync-devices-body");
   if (!body) return;
+  // A hidden window (tray) shows nothing, and every pull costs Firestore reads from a
+  // quota all accounts share; the visibilitychange listener repaints on show.
+  if (document.hidden && !fresh) return;
   // Don't blow away an in-progress rename on the 10s render tick.
   const ae = document.activeElement;
   if (ae && ae.classList && ae.classList.contains("sync-rename-in")) return;
@@ -1512,17 +1516,22 @@ async function renderSyncDevices() {
   if (window.__syncDevicesBusy) return;
   window.__syncDevicesBusy = true;
   try {
+    const q = fresh ? "?fresh=1" : "";
     let st;
-    try { st = await (await fetchT("/api/pro/status", 15000)).json(); }
+    try { st = await (await fetchT("/api/pro/status" + q, 15000)).json(); }
     catch (e) { return; }   // server may be old → skip silently
     window.__proStatus = st;
     renderSideAccount(st);   // sidebar account chip mirrors auth state on every refresh
-    if (!st.configured) { body.innerHTML = proAuthFormHtml(); window.__devicesCache = { devices: [] }; return; }
+    if (!st.configured) { body.innerHTML = proAuthFormHtml(st.signed_out); window.__devicesCache = { devices: [] }; return; }
     if (!st.verified) { body.innerHTML = proVerifyHtml(st.email); window.__devicesCache = { devices: [] }; return; }
     // signed in + verified → show devices
     let data;
-    try { data = await (await fetchT("/api/sync/devices", 15000)).json(); }
+    try { data = await (await fetchT("/api/sync/devices" + q, 15000)).json(); }
     catch (e) { data = { error: "server" }; }
+    // This device's name is known here; the pulled copy lags a rename that is still queued.
+    if (data && Array.isArray(data.devices) && st.label) {
+      data.devices.forEach((d) => { if (d.device_id === data.this_device) d.label = st.label; });
+    }
     body.innerHTML = proSignedInHeader(st) + proDevicesHtml(data);
     // feed the multi-device scope: cache devices, fill the scope pill, re-scope whatever
     // view is showing (the combined "both" view OR the single-source hero).
@@ -1563,8 +1572,11 @@ function renderSideAccount(st) {
   }
 }
 
-function proAuthFormHtml() {
-  return `<div style="max-width:560px">
+// signedOut: Firebase ended this device's session (the password changed on another
+// device, or the account was disabled) — say so above the form.
+function proAuthFormHtml(signedOut) {
+  const why = signedOut ? `<div style="font-size:12.5px;color:var(--warn);margin-bottom:8px">This device was signed out${signedOut === "USER_DISABLED" ? " because the account is disabled" : signedOut === "USER_NOT_FOUND" ? " because the account no longer exists" : ", probably because the password changed on another device"}. Sign in again to keep syncing.</div>` : "";
+  return `<div style="max-width:560px">${why}
     <div style="font-size:14.5px;font-weight:600;color:var(--text-1);margin-bottom:4px">Connect Pro <span style="color:var(--brand)">✦</span></div>
     <div class="dim" style="font-size:12.5px;line-height:1.55;margin-bottom:10px">See all your machines in one view — end-to-end encrypted (only summaries sync; your raw logs never leave your machine). Create an account or sign in with your <b>email + password</b>.</div>
     <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:10px 14px;background:var(--bg-inset);border:1px solid var(--border-default);border-radius:var(--radius-md)">
@@ -1589,7 +1601,7 @@ function proVerifyHtml(email) {
     <div style="font-size:14.5px;font-weight:600;color:var(--text-1);margin-bottom:4px">Verify your email <span style="color:var(--brand)">✦</span></div>
     <div class="dim" style="font-size:12.5px;line-height:1.55;margin-bottom:12px">We sent a verification link to <b>${esc(email || '')}</b>. Click it, then come back and continue. (Pro sync starts working once your email is verified.)</div>
     <div class="pro-form">
-      <button class="get-pro-btn" onclick="renderSyncDevices()">I've verified — continue</button>
+      <button class="get-pro-btn" onclick="renderSyncDevices(true)">I've verified — continue</button>
       <button class="ghost-btn" onclick="proResend()">Resend email</button>
       <button class="ghost-btn" onclick="proSignout()">Sign out</button>
       <span id="pro-msg" class="dim" style="font-size:12px"></span>
@@ -1606,17 +1618,43 @@ function proSignedInHeader(st) {
     <span class="pro-badge">✦ Pro</span>
     <span class="pro-who">${esc(st.email || '')}</span>
     ${pill}
-    <span id="pro-msg" class="dim" style="font-size:11.5px"></span>
+    ${proSyncNote(st)}
+    ${proNoteHtml()}
     <span style="margin-left:auto;display:flex;gap:8px">
       <button class="ghost-btn" onclick="proPush(this)">Push now</button>
       <button class="ghost-btn" onclick="proSignout()">Sign out</button>
     </span></div>`;
 }
 
+// The last push of THIS device, or why it failed (the server's AutoPush state). Firebase
+// refusals used to vanish: a free or over-quota account just stopped syncing.
+function proSyncNote(st) {
+  const s = st.sync || {};
+  const warn = (s.error && s.error.message) || st.error;
+  if (warn) return `<span class="pro-sync" style="font-size:11.5px;color:var(--warn)">${esc(warn)}</span>`;
+  const next = s.pending && s.next_in ? ` · next in ${Math.max(1, Math.round(s.next_in / 60))}m` : "";
+  if (s.last_ok_at) return `<span class="pro-sync dim" style="font-size:11.5px">synced ${relTime(s.last_ok_at * 1000)}${next}</span>`;
+  return "";
+}
+
+// A note for the Pro bar after Push now or a rename. Kept for a minute in window state:
+// every fleet refresh repaints the bar, which wiped a note written straight into #pro-msg.
+function proNote(text, warn) { window.__proNote = { text, warn: !!warn, until: Date.now() + 60000 }; }
+function proNoteHtml() {
+  const n = window.__proNote && window.__proNote.until > Date.now() ? window.__proNote : null;
+  return `<span id="pro-msg" class="dim" style="font-size:11.5px${n && n.warn ? ";color:var(--warn)" : ""}">${n ? esc(n.text) : ""}</span>`;
+}
+
 async function proPush(btn) {
   if (btn) { btn.disabled = true; btn.textContent = "Pushing…"; }
-  try { await fetch("/api/pro/push", { method: "POST", headers: _proHdr }); } catch (e) {}
-  renderSyncDevices();   // server busts the devices cache on push → fresh list
+  let r = null;
+  try { r = await (await fetch("/api/pro/push", { method: "POST", headers: _proHdr })).json(); } catch (e) {}
+  // Within 5 min of the last push the server queues it (the rules allow one per 5 min).
+  // The note gives no times, which would go stale while it shows: proSyncNote has them,
+  // and it also shows a refusal, so that needs no note.
+  window.__proNote = null;
+  if (r && r.kind === "wait") proNote("queued: Firebase takes one update per device every 5 min");
+  await renderSyncDevices();   // server busts the devices cache on push → fresh list
 }
 window.proPush = proPush;
 
@@ -1624,14 +1662,19 @@ const BM_OSICON = { Windows: "🪟", Darwin: "🍎", Linux: "🐧" };
 function bmOnlineState(iso) {
   if (!iso) return { cls: "off", txt: "—" };
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (s < 360) return { cls: "live", txt: "online" };       // pushed within ~6 min
-  if (s < 86400) return { cls: "idle", txt: "idle" };
+  if (s < 1500) return { cls: "live", txt: "online" };      // a busy device pushes every 10 min
+  if (s < 86400) return { cls: "idle", txt: "idle" };       // unchanged: a heartbeat every 6 h
   return { cls: "off", txt: "offline" };
 }
 function proDevicesHtml(data) {
-  if (data && data.error) return `<div class="dim" style="font-size:12px;color:var(--warn)">couldn't reach Firebase: ${esc(String(data.error))}</div>`;
+  if (data && data.error) {
+    // The server words Firebase's refusals (plan, quota, verification) for this line.
+    const msg = data.error === "server" ? "couldn't reach the local Burnmeter server" : String(data.error);
+    const pro = data.kind === "plan" ? ` <a href="https://burnmeter.dev/#pricing" target="_blank" rel="noopener" style="color:var(--brand)">About Pro →</a>` : "";
+    return `<div class="dim" style="font-size:12px;color:var(--warn)">${esc(msg)}${pro}</div>`;
+  }
   const devs = (data && data.devices) || [];
-  if (!devs.length) return `<div class="dim" style="font-size:12.5px">no synced devices yet — click <b>Push now</b> above, or this device pushes automatically within ~5 min.</div>`;
+  if (!devs.length) return `<div class="dim" style="font-size:12.5px">no synced devices yet — click <b>Push now</b> above, or this device pushes automatically within ~10 min.</div>`;
   const ago = (iso) => { if (!iso) return ""; const s = (Date.now() - new Date(iso).getTime()) / 1000; return s < 60 ? "now" : s < 3600 ? Math.round(s / 60) + "m" : s < 86400 ? Math.round(s / 3600) + "h" : Math.round(s / 86400) + "d"; };
   return `<div class="sync-grid">` + devs.map(d => {
     if (d._undecryptable) {
@@ -1689,15 +1732,15 @@ async function bmRenameCommit(inp) {
   const v = (inp.value || "").trim();
   if (!v) { inp.blur(); renderSyncDevices(); return; }   // empty → cancel (blur so the re-render isn't skipped)
   inp.disabled = true;   // also drops focus so renderSyncDevices isn't skipped
-  let failed = false;
+  window.__proNote = null;
   try {
     const r = await (await fetch("/api/pro/rename", { method: "POST", headers: _proHdr, body: JSON.stringify({ label: v }) })).json();
-    if (!r.ok) failed = true;
-  } catch (e) { failed = true; }
+    // Pushed < 5 min ago: the name is saved and queued; proSyncNote shows when it goes out.
+    if (r.ok && r.kind === "wait") proNote("renamed here; it goes out with the next sync");
+    // The server echoes the label once it is saved; proSyncNote says why the push failed.
+    else if (!r.ok) proNote(r.label ? "renamed on this device; not synced yet" : (r.error || "rename failed"), true);
+  } catch (e) { proNote("couldn't reach the local Burnmeter server", true); }
   await renderSyncDevices();   // server re-pushed with the new label → refresh list + scope
-  if (failed) {   // label IS saved locally (server persists before push) → auto-pushes within ~5 min
-    const m = $("pro-msg"); if (m) { m.style.color = "var(--warn)"; m.textContent = "rename saved on this device — will sync when back online"; }
-  }
 }
 
 async function proAuth(mode) {
@@ -2403,7 +2446,9 @@ function start() {
   setInterval(() => refresh(false), 10000);
   // ---- self-heal wiring: the poll loop must survive sleep/resume, tray-hide, ----
   // ---- and dead sockets (the "freezes after long uptime" bug, v0.3.1)        ----
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) window.__bmWake(); });
+  // renderSyncDevices skips while hidden, and refresh() only repaints a changed report:
+  // repaint the fleet on show, or it waits for the 30s tick.
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { window.__bmWake(); renderSyncDevices(); } });
   window.addEventListener("focus", () => window.__bmWake());
   window.addEventListener("online", () => window.__bmWake());
   setInterval(() => {   // sleep detector: a 1s heartbeat that skips >15s means the OS slept
@@ -2416,7 +2461,7 @@ function start() {
   setInterval(liveGaugeTick, 5000);   // burn-rate gauge decays live (→ $0 when idle)
   // Fleet view (online/idle dots, "ago", breakdown) is time-based; refresh it on its
   // own cadence so it doesn't freeze while the local machine is idle. renderSyncDevices
-  // guards against clobbering an in-progress rename; /api/sync/devices is 20s-cached.
+  // guards against clobbering an in-progress rename; /api/sync/devices is 5-min cached.
   setInterval(() => { if (window.__lastReport) renderSyncDevices(); }, 30000);   // refresh fleet (incl. "both" mode)
   // Re-check for a new version every 3h so a long-open dashboard surfaces the
   // update pill on its own (not only on first load / the tray's 6h check).

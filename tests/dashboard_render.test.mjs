@@ -70,7 +70,7 @@ globalThis.location = windowStub.location;
 // Evaluate dashboard.js and capture the pure functions under test. Function declarations
 // are local to the wrapper; the appended assignment captures them out.
 const run = new Function(
-  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere, refresh, fetchT, renderPricingNote, modelDisplay, bmNewChart, renderOverviewFleet, renderDeviceBreakdown, renderCombinedFleet, bmDur, bmChatCost, computeGaugeSpec, drawGaugeSvg };"
+  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere, refresh, fetchT, renderPricingNote, modelDisplay, bmNewChart, renderOverviewFleet, renderDeviceBreakdown, renderCombinedFleet, bmDur, bmChatCost, computeGaugeSpec, drawGaugeSvg, bmOnlineState, bmSnapFresh, proSyncNote, proDevicesHtml, proNote, proNoteHtml, proSignedInHeader };"
 );
 run();
 const { bmScopedHalf, bmScopedRep, liveBurnRate, bmPathParts, bmProjCell, liveWhere } = globalThis.__BM;
@@ -396,7 +396,9 @@ passed += 1;
   assert.equal(a.today, 0, "nor a today");
   assert.equal(a.month, 0, "nor a this-month");
   assert.equal(a.lifetime, 100, "lifetime totals stay valid at any age");
-  const fresh = bmDeviceAgg({ ...stale, _updated_at: new Date(Date.now() - 60e3).toISOString() }, ["claude"]);
+  // A minute ago, but never yesterday: in the first minute after midnight it would be.
+  const minuteAgo = Math.max(Date.now() - 60e3, new Date().setHours(0, 0, 0, 0));
+  const fresh = bmDeviceAgg({ ...stale, _updated_at: new Date(minuteAgo).toISOString() }, ["claude"]);
   assert.ok(near(fresh.burn, pcClaudeBBH["2"]) && fresh.today === 1 && fresh.month === 10,
     "a snapshot pushed a minute ago counts in full");
 
@@ -507,6 +509,49 @@ passed += 1;
       passed += 1;
     }
   }
+}
+
+// === TEST 25: device freshness follows the 0.3.6 sync cadence ===
+// A device now checks every 10 min and pushes only a changed snapshot; pulls are 5-min
+// cached. The old 6-min "online" and 15-min burn windows would call a busy device idle
+// between its pushes and drop its burn from the fleet gauge.
+{
+  const { bmOnlineState, bmSnapFresh, proSyncNote, proDevicesHtml } = globalThis.__BM;
+  const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
+  assert.equal(bmOnlineState(ago(20)).txt, "online");
+  assert.equal(bmOnlineState(ago(30)).txt, "idle");
+  assert.equal(bmOnlineState(ago(25 * 60)).txt, "offline");
+  assert.equal(bmSnapFresh({ _updated_at: ago(20) }).burn, true);
+  assert.equal(bmSnapFresh({ _updated_at: ago(30) }).burn, false);
+  // A refused push is shown instead of swallowed; a plan refusal links to Pro.
+  const note = proSyncNote({ sync: { error: { kind: "plan", message: "sync is a Pro feature, and this account has no Pro plan" } } });
+  assert.ok(note.includes("no Pro plan") && note.includes("--warn"), note);
+  assert.ok(proSyncNote({ sync: { last_ok_at: Date.now() / 1000 - 120 } }).includes("synced 2m ago"));
+  const refused = proDevicesHtml({ error: "sync is a Pro feature, and this account has no Pro plan", kind: "plan", devices: [] });
+  assert.ok(refused.includes("About Pro") && !refused.includes("couldn't reach"), refused);
+  assert.ok(proDevicesHtml({ error: "server" }).includes("local Burnmeter server"));
+  passed += 9;
+}
+
+// === TEST 26: the Push-now / rename note survives the next repaint of the Pro bar ===
+// It used to be written into #pro-msg after the re-render, so a render already in flight
+// (or the next tick) painted the bar again without it.
+{
+  const { proSyncNote, proNote, proNoteHtml, proSignedInHeader } = globalThis.__BM;
+  const st = { configured: true, verified: true, plan: "pro", email: "x",
+    sync: { last_ok_at: Date.now() / 1000 - 120, pending: true, next_in: 190 } };
+  assert.ok(proSyncNote(st).includes("synced 2m ago · next in 3m"), proSyncNote(st));
+  assert.ok(!proSyncNote({ sync: { last_ok_at: Date.now() / 1000 - 120, next_in: 400 } }).includes("next in"),
+    "the next check is only shown for a queued push");
+  window.__proNote = null;
+  proNote("queued: Firebase takes one update per device every 5 min");
+  assert.ok(proSignedInHeader(st).includes("queued: Firebase"), "the note is in the repainted bar");
+  assert.ok(proSignedInHeader(st).includes("queued: Firebase"), "and in the one after");
+  proNote("renamed on this device; not synced yet", true);
+  assert.ok(proNoteHtml().includes("--warn") && proNoteHtml().includes("not synced yet"));
+  window.__proNote.until = Date.now() - 1;
+  assert.ok(!proSignedInHeader(st).includes("not synced yet"), "a note expires after a minute");
+  passed += 6;
 }
 
 console.log(`dashboard_render: ${passed} assertions passed`);
