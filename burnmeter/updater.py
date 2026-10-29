@@ -30,6 +30,16 @@ def installer_url(version: str = "") -> str:
     return INSTALLER_URL
 
 
+def _cmd_line(cmdline: str) -> str:
+    """The process command line that has cmd run `cmdline` as written.
+
+    Given ["cmd", "/c", cmdline], subprocess quotes the line for a C program and turns
+    every `"` into `\\"`, which cmd doesn't read. In 0.3.5 the taskkills (no quotes)
+    closed the app, then cmd couldn't find `\\"…\\BurnmeterSetup-latest.exe\\"`, and the
+    `start` fallback failed the same way: Update just closed Burnmeter."""
+    return f"cmd /c {cmdline}"
+
+
 def run_installer_update(url: str = INSTALLER_URL) -> bool:
     """Download the latest installer and run a clean in-place upgrade: close the app,
     replace it, relaunch ONE window (which restores the last position + section).
@@ -92,7 +102,7 @@ def run_installer_update(url: str = INSTALLER_URL) -> bool:
             f'&& start "" "{app_exe}") '
             f'|| start "" "{exe}"'
         )
-        subprocess.Popen(["cmd", "/c", cmdline], creationflags=DETACHED, close_fds=True)
+        subprocess.Popen(_cmd_line(cmdline), creationflags=DETACHED, close_fds=True)
         return True
     except Exception:
         return False

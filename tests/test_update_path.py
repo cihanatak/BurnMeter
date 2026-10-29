@@ -8,11 +8,14 @@ the CLI exited at once on "-m", nothing was logged, and the dashboard said
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import threading
 import time
 import urllib.request
 from pathlib import Path
+
+import pytest
 
 from burnmeter import server as srv
 from burnmeter import updater
@@ -22,6 +25,37 @@ def test_installer_url_names_the_release_the_dashboard_saw():
     assert updater.installer_url("0.3.5").endswith("/releases/download/v0.3.5/BurnmeterSetup.exe")
     assert updater.installer_url("") == updater.INSTALLER_URL
     assert updater.installer_url("0.3.5; del *") == updater.INSTALLER_URL
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="cmd.exe")
+def test_cmd_runs_the_quoted_installer(tmp_path):
+    # The update line's shape, with a harmless "installer" in a folder with a space
+    # (TEMP can have one). 0.3.5 passed the line as ["cmd", "/c", line]: subprocess
+    # escaped every quote, cmd couldn't run the installer, and the app just closed.
+    folder = tmp_path / "Temp dir"
+    folder.mkdir()
+    setup, ran, after = folder / "Setup latest.cmd", folder / "ran.txt", folder / "after.txt"
+    setup.write_text(f'@echo %*>"{ran}"\n', encoding="ascii")
+    line = f'echo start>nul & ("{setup}" /S /VERYSILENT && echo ok>"{after}") || echo failed>nul'
+    subprocess.run(updater._cmd_line(line), timeout=60)
+    assert ran.read_text().strip() == "/S /VERYSILENT" and after.exists()
+    ran.unlink()
+    subprocess.run(["cmd", "/c", line], timeout=60, capture_output=True)   # the 0.3.5 call
+    assert not ran.exists()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the frozen app is Windows-only")
+def test_the_update_hands_cmd_its_line_unescaped(monkeypatch, tmp_path):
+    setup = tmp_path / "BurnmeterSetup.exe"
+    setup.write_bytes(b"MZ" + b"\0" * 1_000_000)
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    monkeypatch.setattr(updater.tempfile, "gettempdir", lambda: str(temp))
+    spawned = []
+    monkeypatch.setattr(updater.subprocess, "Popen", lambda args, **kw: spawned.append(args))
+    assert updater.run_installer_update(setup.as_uri())
+    assert isinstance(spawned[0], str) and spawned[0].startswith("cmd /c taskkill ")
+    assert f'("{temp / "BurnmeterSetup-latest.exe"}" /S ' in spawned[0]
 
 
 def _health(port: int) -> dict:
