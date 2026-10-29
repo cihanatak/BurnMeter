@@ -20,10 +20,42 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
+import time
 from pathlib import Path
 
 
+def _exit_with_parent(poll: float = 2.0) -> None:
+    """Exit when the server that spawned this worker dies.
+
+    A killed or crashed server left its worker running until the build ended:
+    1.2-1.8 GB for minutes, and a restarted server started a second one. The
+    server passes its pid; the worker removes its config and report files, which
+    no one will read or delete now, and exits. Runs as a daemon thread.
+    """
+    ppid = int(os.environ.get("BURNMETER_WORKER_PARENT") or os.getppid())
+    if sys.platform.startswith("win"):
+        import ctypes
+        k32 = ctypes.WinDLL("kernel32")
+        k32.OpenProcess.restype = ctypes.c_void_p
+        k32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+        k32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        h = k32.OpenProcess(0x00100000, False, ppid)    # SYNCHRONIZE; None: already gone
+        if h:
+            k32.WaitForSingleObject(h, 0xFFFFFFFF)       # INFINITE
+    else:
+        while os.getppid() == ppid:                      # re-parented once it dies
+            time.sleep(poll)
+    for var in ("BURNMETER_WORKER_IN", "BURNMETER_WORKER_OUT"):
+        try:
+            os.unlink(os.environ[var])
+        except (KeyError, OSError):
+            pass
+    os._exit(3)
+
+
 def main() -> int:
+    threading.Thread(target=_exit_with_parent, name="parent-watch", daemon=True).start()
     # Config in / report out go through FILES (env vars) when set — a frozen
     # --windowed (no-console) process has no usable stdin/stdout, so writing the
     # report to stdout raised OSError [Errno 22]. Fall back to stdin/stdout for
