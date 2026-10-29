@@ -8,6 +8,7 @@ silent upgrade closes the running app, replaces it in place, and relaunches it.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,17 @@ import urllib.request
 INSTALLER_URL = (
     "https://github.com/cihanatak/BurnMeter/releases/latest/download/BurnmeterSetup.exe"
 )
+
+
+def installer_url(version: str = "") -> str:
+    """The installer of that release, else the latest one.
+
+    The dashboard learns of a new version from main, which is bumped before the
+    release is published. Asking for that exact version fails cleanly (404) in
+    the meantime instead of reinstalling the version already running."""
+    if re.fullmatch(r"\d+(\.\d+){1,3}", version or ""):
+        return f"https://github.com/cihanatak/BurnMeter/releases/download/v{version}/BurnmeterSetup.exe"
+    return INSTALLER_URL
 
 
 def run_installer_update(url: str = INSTALLER_URL) -> bool:
@@ -67,6 +79,10 @@ def run_installer_update(url: str = INSTALLER_URL) -> bool:
         # install dir both eras share (%LOCALAPPDATA%\Programs\Burnmeter), falling back to
         # the old exe path if that vanished.
         app_exe = r'%LOCALAPPDATA%\Programs\Burnmeter\Burnmeter.exe'
+        # Called from the Electron sidecar, sys.executable is burnmeter-server.exe:
+        # restarting only that would bring back a server with no window.
+        if os.path.basename(exe).lower().startswith("burnmeter-server"):
+            exe = os.path.expandvars(app_exe)
         cmdline = (
             'taskkill /F /IM Burnmeter.exe >nul 2>&1 & '
             'taskkill /F /IM burnmeter-server.exe >nul 2>&1 & '

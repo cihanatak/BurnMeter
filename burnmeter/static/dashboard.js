@@ -101,18 +101,29 @@ function modelToFamily(m) {
   if (m.includes("gpt") || m.startsWith("o1") || m.startsWith("o3")) return "gpt-55";
   return "unknown";
 }
+// 'claude-opus-5-5' → 'Opus 5.5', 'claude-opus-4-20250514' → 'Opus 4',
+// 'claude-3-5-sonnet-20241022' → 'Sonnet 3.5', 'claude-fable-5-1' → 'Fable 5.1'.
+// Mirrors pricing.display_name: a snapshot date is never read as a minor version.
+// Unknown ids come back raw, so every HTML sink must esc() the result.
 function modelDisplay(m) {
   if (!m) return "—";
   const raw = String(m); if (raw.startsWith("<")) return raw.replace(/[<>]/g, "");
-  const cl = raw.toLowerCase().match(/(opus|sonnet|haiku)-(\d+)-(\d+)/);
-  if (cl) return cl[1][0].toUpperCase() + cl[1].slice(1) + " " + cl[2] + "." + cl[3];
-  const cl1 = raw.toLowerCase().match(/(opus|sonnet|haiku)-(\d+)/);   // single-part ver (claude-sonnet-5)
-  if (cl1) return cl1[1][0].toUpperCase() + cl1[1].slice(1) + " " + cl1[2];
-  const fb = raw.toLowerCase().match(/(fable|mythos)-?(\d+)/);
-  if (fb) return fb[1][0].toUpperCase() + fb[1].slice(1) + " " + fb[2];
-  const g = raw.toLowerCase().match(/gpt-?(\d+(?:\.\d+)?)(-?(codex|mini))?/);
+  const low = raw.toLowerCase();
+  const name = (s) => s[0].toUpperCase() + s.slice(1);
+  const ver = (major, minor) => major + (minor && Number(minor) ? "." + Number(minor) : "");
+  let c = low.match(/(fable|mythos|opus|sonnet|haiku)-?(\d)(?:[-.]?(\d{1,2}))?(?!\d)/);
+  if (c) return name(c[1]) + " " + ver(c[2], c[3]);
+  c = low.match(/(?:^|\D)(\d)(?:[-.](\d))?-(opus|sonnet|haiku)/);   // claude-3-5-sonnet-…
+  if (c) return name(c[3]) + " " + ver(c[1], c[2]);
+  const g = low.match(/gpt-?(\d+(?:\.\d+)?)(-?(codex|mini))?/);
   if (g) return "GPT-" + g[1] + (g[3] === "codex" ? " Codex" : g[3] === "mini" ? " mini" : "");
   return raw;
+}
+// Chart.js comes from a CDN. Offline or blocked, `Chart` is undefined, and the first
+// `new Chart` threw out of render() and left the whole dashboard blank; this way
+// only the charts are missing.
+function bmNewChart(ctx, cfg) {
+  return (typeof Chart === "undefined" || !ctx) ? null : new Chart(ctx, cfg);
 }
 const sevClass = (pct) => pct >= 90 ? "bad" : pct >= 70 ? "warn" : "good";
 
@@ -357,50 +368,74 @@ async function checkForUpdate(current, manual = false) {
 }
 
 // One-click update straight from the dashboard: POST to the local server, which
-// runs `pip install --upgrade git+…`. Then the user just restarts Burnmeter.
+// hands off to a detached updater (pip for a pip install, the release installer
+// for the installed app) and restarts. This page reloads once the new version answers.
+function _manualUpdateHint(frozen) {
+  return frozen
+    ? "Download the installer from:\nhttps://github.com/cihanatak/BurnMeter/releases/latest"
+    : "Update manually:\npip install --force-reinstall --no-cache-dir git+https://github.com/cihanatak/BurnMeter";
+}
 async function doDashboardUpdate(latest) {
   const el = $("update-link"); if (!el || el.dataset.busy === "1") return;
   el.dataset.busy = "1";
   const orig = el.textContent;
   el.textContent = "⏳ Updating…";
+  let frozen = false;
   try {
-    const r = await fetch("/api/update", { method: "POST", headers: { "X-Burnmeter-Update": "1" } });
+    const h = await fetch("/api/health", { cache: "no-store" }).then(r => r.json()).catch(() => ({}));
+    frozen = !!(h && h.frozen);
+    const r = await fetch("/api/update", {
+      method: "POST",
+      headers: { "X-Burnmeter-Update": "1", "Content-Type": "application/json" },
+      body: JSON.stringify({ version: latest }),
+    });
     const d = await r.json().catch(() => ({}));
     if (r.ok && d.ok) {
       el.textContent = `⏳ Updating to v${latest} — restarting…`;
       el.title = "Burnmeter is restarting itself; this page will reload on the new version.";
       el.onclick = (ev) => ev.preventDefault();
-      waitForRestartAndReload(latest);     // server restarts itself; reload when back
+      waitForRestartAndReload(latest, frozen);     // server restarts itself; reload when back
     } else {
       el.textContent = orig; el.dataset.busy = "";
-      alert("Update failed:\n" + (d.message || ("HTTP " + r.status))
-            + "\n\nUpdate manually:\npip install --force-reinstall --no-cache-dir git+https://github.com/cihanatak/BurnMeter");
+      alert("Update failed:\n" + (d.message || ("HTTP " + r.status)) + "\n\n" + _manualUpdateHint(frozen));
     }
   } catch (e) {
     el.textContent = orig; el.dataset.busy = "";
     alert("Burnmeter doesn't seem to be running anymore — this page is stale.\n\n"
-        + "Open Burnmeter again (the 🔥 tray icon, or run `burnmeter tray`), then "
-        + "update from there.\n\nOr update manually:\n"
-        + "pip install --force-reinstall --no-cache-dir git+https://github.com/cihanatak/BurnMeter");
+        + "Open Burnmeter again, then update from there.\n\n" + _manualUpdateHint(frozen));
   }
 }
 
-// After a one-click update an external updater stops the server, reinstalls, and
-// relaunches on the same port (~30-90s incl. pip). Wait for it to go down and come
-// back, then reload THIS tab onto the new version.
-async function waitForRestartAndReload(latest) {
+// After a one-click update a detached updater stops the server, installs the new
+// version and relaunches it (pip: ~30-90 s; the app's installer is ~110 MB to
+// download first). Reload only once the NEW version answers: a server that comes
+// back on the old version, or reports that its updater failed, is a failed update,
+// not "✓ Updated".
+async function waitForRestartAndReload(latest, frozen) {
+  const el = $("update-link");
+  const fail = (why) => {
+    if (el) {
+      el.dataset.busy = ""; el.textContent = "⚠ Update failed — retry"; el.title = why;
+      el.onclick = (ev) => { ev.preventDefault(); doDashboardUpdate(latest); };   // was left inert
+    }
+    alert(`Burnmeter couldn't update to v${latest}:\n${why}\n\n` + _manualUpdateHint(frozen));
+  };
   let downSeen = false;
-  for (let i = 0; i < 150; i++) {          // ~150s — pip clone+build can be slow
+  for (let i = 0; i < 300; i++) {          // ~5 min
     await new Promise(r => setTimeout(r, 1000));
+    let d = null;
     try {
       const r = await fetch("/api/health", { cache: "no-store" });
-      if (r.ok) {
-        const d = await r.json().catch(() => ({}));
-        if (downSeen || d.version === latest) { location.reload(); return; }
-      }
-    } catch (e) { downSeen = true; }   // server is down → mid-update
+      if (r.ok) d = await r.json().catch(() => null);
+    } catch (e) { downSeen = true; continue; }   // server is down → mid-update
+    if (!d) continue;
+    if (d.version === latest) { location.reload(); return; }
+    const u = d.update || {};
+    if (u.state === "failed") { fail(u.error || "the updater did not start."); return; }
+    if (downSeen) { fail(`Burnmeter restarted but is still v${d.version}.`); return; }
+    if (el && u.state === "downloading") el.textContent = `⏳ Downloading v${latest}…`;
   }
-  const el = $("update-link"); if (el) el.textContent = `✓ Updated to v${latest} — reload`;
+  fail("No new version came up within 5 minutes.");
 }
 
 // ===== multi-device scope (Pro) — the hero "fuel panel" reflects the whole fleet =====
@@ -412,15 +447,31 @@ window.__devicesCache = null;   // last /api/sync/devices payload (set by render
 function bmActiveSources() {
   return window.__source === "both" ? ["claude", "codex"] : [window.__source];
 }
+// Which of a remote snapshot's "now" figures still describe now. A Mac last synced
+// in July kept adding its July burn, "today" and month to the fleet totals (the gauge
+// read $57/h with nothing running). Lifetime totals stay valid at any age.
+function bmSnapFresh(dev) {
+  const t = Date.parse((dev && dev._updated_at) || "");
+  if (!t) return { burn: false, today: false, month: false };
+  const at = new Date(t), now = new Date();
+  return {
+    burn: now - at < 15 * 60 * 1000,                     // a running device pushes every few min
+    today: at.toDateString() === now.toDateString(),
+    month: at.getFullYear() === now.getFullYear() && at.getMonth() === now.getMonth(),
+  };
+}
 function bmDeviceAgg(dev, sources) {
   const o = { burn: 0, today: 0, month: 0, lifetime: 0, tokens: 0, records: 0, chSum: 0, chW: 0 };
+  const f = bmSnapFresh(dev);
   (sources || []).forEach((s) => {
     const v = (dev.sources || {})[s]; if (!v) return;
     // Burn at the picker's window so a remote device matches what its own gauge shows
     // (snapshot carries burn_rates_by_hours; older snapshots only have burn_rate_per_hour).
     const hrs = localStorage.getItem("burnmeter_burn_hours_" + s) || "2";
     const wb = (v.burn_rates_by_hours && v.burn_rates_by_hours[hrs] != null) ? v.burn_rates_by_hours[hrs] : (v.burn_rate_per_hour || 0);
-    o.burn += wb || 0; o.today += v.today_cost || 0; o.month += v.month_so_far || 0;
+    if (f.burn) o.burn += wb || 0;
+    if (f.today) o.today += v.today_cost || 0;
+    if (f.month) o.month += v.month_so_far || 0;
     o.lifetime += v.lifetime_cost || 0; o.tokens += v.lifetime_tokens || 0; o.records += v.record_count || 0;
     o.chSum += (v.cache_hit_rate || 0) * (v.record_count || 0); o.chW += v.record_count || 0;
   });
@@ -443,6 +494,13 @@ function bmDeviceAggFresh(dev, sources) {
              cache: tot.cache_hit_rate || 0 };
   }
   return bmDeviceAgg(dev, sources);
+}
+// Whether a device's this-month figure is known: this device always (live report);
+// another only if it synced this month. "—" rather than "$0" for the rest, since
+// an unsynced machine may well have spent.
+function bmMonthKnown(dev) {
+  const payload = window.__devicesCache;
+  return !!(payload && dev.device_id === payload.this_device) || bmSnapFresh(dev).month;
 }
 function bmMergedRecent(devs, sources, n) {
   const out = [];
@@ -588,7 +646,7 @@ function renderOverviewFleet() {
     const ic = BM_OSICON[d.os] || "🖥";
     html += `<button class="ovf-chip${scope === id ? ' on' : ''}" data-scope="${esc(id)}" onclick="bmToggleScope('${id}')">` +
       `<span class="ovf-ic" aria-hidden="true">${ic}</span><span class="ovf-nm">${esc(d.label || 'device')}${isThis ? ' ·this' : ''}</span>` +
-      `<span class="ovf-v">${fmtMoney0(bmDeviceAggFresh(d, sources).month)}</span></button>`;
+      `<span class="ovf-v">${bmMonthKnown(d) ? fmtMoney0(bmDeviceAggFresh(d, sources).month) : "—"}</span></button>`;
   });
   el.innerHTML = html;
   el.style.display = "";
@@ -613,7 +671,8 @@ function renderDeviceBreakdown() {
   const parts = devs.map((d, i) => {
     const isThis = d.device_id === payload.this_device;
     return { id: bmSid(isThis ? "this" : d.device_id), label: d.label || "device",
-             val: bmDeviceAggFresh(d, sources).month, color: BM_DEVCOLORS[i % BM_DEVCOLORS.length], me: isThis };
+             val: bmDeviceAggFresh(d, sources).month, known: bmMonthKnown(d),
+             color: BM_DEVCOLORS[i % BM_DEVCOLORS.length], me: isThis };
   }).sort((a, b) => b.val - a.val);
   const total = parts.reduce((s, p) => s + p.val, 0) || 1;
   const active = window.__scope;
@@ -622,11 +681,11 @@ function renderDeviceBreakdown() {
     `<div class="dbk-head"><span class="dbk-t">This month by device</span>` +
     `<span class="dbk-sum">${fmtMoney0(total)} · ${devs.length} devices</span></div>` +
     `<div class="dbk-bar">` + parts.map((p) =>
-      `<span class="dbk-seg${active === p.id ? ' on' : ''}" style="width:${Math.max(2, p.val / total * 100).toFixed(1)}%;background:${p.color}" title="${esc(p.label)} · ${fmtMoney(p.val)}" onclick="bmToggleScope('${p.id}')"></span>`).join("") +
+      `<span class="dbk-seg${active === p.id ? ' on' : ''}" style="width:${Math.max(2, p.val / total * 100).toFixed(1)}%;background:${p.color}" title="${esc(p.label)} · ${p.known ? fmtMoney(p.val) : "not synced this month"}" onclick="bmToggleScope('${p.id}')"></span>`).join("") +
     `</div><div class="dbk-legend">` +
     `<span class="dbk-li${active === 'all' ? ' on' : ''}" onclick="bmSetScope('all')"><span class="dbk-dot" style="background:linear-gradient(90deg,#5E6AD2,#10A37F)"></span>All devices</span>` +
     parts.map((p) =>
-      `<span class="dbk-li${active === p.id ? ' on' : ''}" onclick="bmToggleScope('${p.id}')"><span class="dbk-dot" style="background:${p.color}"></span>${esc(p.label)}${p.me ? ' ·this' : ''} <b>${fmtMoney0(p.val)}</b></span>`).join("") +
+      `<span class="dbk-li${active === p.id ? ' on' : ''}" onclick="bmToggleScope('${p.id}')"><span class="dbk-dot" style="background:${p.color}"></span>${esc(p.label)}${p.me ? ' ·this' : ''} <b>${p.known ? fmtMoney0(p.val) : "—"}</b></span>`).join("") +
     `</div>`;
 }
 function populateScopePill(payload) {
@@ -803,11 +862,11 @@ function renderActiveModel(rep) {
   models = models.slice().sort((a, b) => (a.seconds_since_last ?? 9e9) - (b.seconds_since_last ?? 9e9));
   body.innerHTML = models.map((m, i) => {
     const s = m.seconds_since_last ?? 9e9, live = s < 120;
-    return `<div class="am-row${i === 0 ? " am-top" : ""}" data-ls="${m.last_seen || ""}">
+    return `<div class="am-row${i === 0 ? " am-top" : ""}" data-ls="${esc(m.last_seen || "")}">
       <span class="am-dot${live ? " live" : ""}"></span>
       <span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span>${liveWhere(m)}</span>
       <span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/min</span></span>
-      <span class="am-msg dim">${m.messages || 0} msg</span>
+      <span class="am-msg dim">${fmtInt(m.messages || 0)} msg</span>
       <span class="am-rate num">${fmtMoney(m.cost_per_hour || 0)}<span class="dim">/hr</span></span>
       <span class="am-seen${live ? " live" : ""} dim">${seenLabel(s)}</span>
     </div>`;
@@ -848,13 +907,15 @@ function bmScopedHalf(localRep, source) {
       (localRep.recent_turns || []).forEach((t) => recent.push({ ...t, device: d.label }));
     } else {
       const v = (d.sources || {})[source]; if (!v) return;
-      const bbh = v.burn_rates_by_hours || {};
+      const f = bmSnapFresh(d);
+      const bbh = f.burn ? (v.burn_rates_by_hours || {}) : {};
       if (Object.keys(bbh).length) WINS.forEach((w) => { if (bbh[w] != null) burnByH[w] += bbh[w] || 0; });
-      else if (v.burn_rate_per_hour) burnByH[hrs] += v.burn_rate_per_hour || 0;  // pre-0.1.63 snapshot
-      today += v.today_cost || 0; month += v.month_so_far || 0;
+      else if (f.burn && v.burn_rate_per_hour) burnByH[hrs] += v.burn_rate_per_hour || 0;  // pre-0.1.63 snapshot
+      if (f.today) today += v.today_cost || 0;
+      if (f.month) month += v.month_so_far || 0;
       lifetime += v.lifetime_cost || 0; tokens += v.lifetime_tokens || 0; records += v.record_count || 0;
       chSum += (v.cache_hit_rate || 0) * (v.record_count || 0); chW += v.record_count || 0;
-      if ((bbh[hrs] != null ? bbh[hrs] : (v.burn_rate_per_hour || 0)) > 0.01) k++;
+      if (f.burn && (bbh[hrs] != null ? bbh[hrs] : (v.burn_rate_per_hour || 0)) > 0.01) k++;
       (v.recent || []).forEach((t) => recent.push({
         timestamp: t.ts, project_label: t.project, model: t.model,
         effective_tokens: t.tokens, total_tokens: t.tokens, cost_usd: t.cost, cache_hit_rate: null, device: d.label,
@@ -930,6 +991,7 @@ function renderCombinedFleet() {
       return ((lr.claude && lr.claude.forecast && lr.claude.forecast.month && lr.claude.forecast.month.so_far) || 0)
            + ((lr.codex && lr.codex.forecast && lr.codex.forecast.month && lr.codex.forecast.month.so_far) || 0);
     }
+    if (!bmSnapFresh(d).month) return 0;      // a snapshot from an earlier month isn't this month
     return ((d.sources && d.sources.claude && d.sources.claude.month_so_far) || 0)
          + ((d.sources && d.sources.codex && d.sources.codex.month_so_far) || 0);
   };
@@ -942,7 +1004,7 @@ function renderCombinedFleet() {
     const ic = BM_OSICON[d.os] || "🖥";
     html += `<button class="ovf-chip${scope === id ? ' on' : ''}" onclick="bmToggleScope('${id}')">` +
       `<span class="ovf-ic" aria-hidden="true">${ic}</span><span class="ovf-nm">${esc(d.label || 'device')}${isThis ? ' ·this' : ''}</span>` +
-      `<span class="ovf-v">${fmtMoney0(devMonth(d))}</span></button>`;
+      `<span class="ovf-v">${bmMonthKnown(d) ? fmtMoney0(devMonth(d)) : "—"}</span></button>`;
   });
   el.innerHTML = html;
   el.style.display = "";
@@ -1008,7 +1070,7 @@ function paintCombinedActive(side, rep) {
   if (w === "live") models = models.filter(m => (m.seconds_since_last ?? 9e9) < 120);
   box.innerHTML = models.length ? models.map(m => {
     const s = m.seconds_since_last ?? 9e9, live = s < 120;
-    return `<div class="am-row" data-ls="${m.last_seen || ""}"><span class="am-dot${live ? " live" : ""}"></span><span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span>${liveWhere(m)}</span><span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/min</span></span><span class="am-seen${live ? " live" : ""} dim">${seenLabel(s)}</span></div>`;
+    return `<div class="am-row" data-ls="${esc(m.last_seen || "")}"><span class="am-dot${live ? " live" : ""}"></span><span class="am-name ${modelToFamily(m.model_id)}"><span class="am-modelname">${esc(modelDisplay(m.model_id))}</span>${liveWhere(m)}</span><span class="am-tpm num">${fmtInt(m.tokens_per_min || 0)}<span class="dim"> tok/min</span></span><span class="am-seen${live ? " live" : ""} dim">${seenLabel(s)}</span></div>`;
   }).join("") : `<div class="dim" style="padding:6px 0">${w === "live" ? "no model running now" : `no active model in the last ${w}m`}</div>`;
 }
 
@@ -1056,7 +1118,10 @@ function computeGaugeSpec(rep, isCodex, hoursStr) {
         : rate >= z.busy ? ["warn", "🟠 busy zone"]
         : rate >= z.typical ? ["warn", "🟡 above normal"]
         :                  ["good", "🟢 calm · low burn right now"],
-    ratio: rep.current_window?.vs_baseline_ratio, below: rate < z.typical,
+    // The needle's own measure: this $/hr against your typical block's. The block
+    // projection (current_window.vs_baseline_ratio) stretched a block's first minutes
+    // over all 5 hours and said "10.4×" beside a needle in the yellow.
+    ratio: !zd && z.typical > 0 && rate >= z.typical ? rate / z.typical : null, below: rate < z.typical,
     note: zd ? "Market-normal estimate for your plan — it recalibrates to your own pace as Burnmeter learns it."
              : "Tuned to you: “typical” is your median 5-hour block, “heavy” is your busiest ~10%. (Started from a market-normal estimate.)",
   };
@@ -1249,7 +1314,11 @@ function renderHeroAside(rep, isCodex) {
 function renderKPIs(rep, isCodex) {
   const fc = rep.forecast || {}, t = rep.totals || {}, ce = rep.cache_efficiency || {};
   const daily = rep.daily || [];
-  const todayE = daily[daily.length - 1] || {};
+  // Today's row by date: the last row is yesterday's on a day with no activity yet.
+  // Day keys are the server's local dates, and the server runs on this machine.
+  const now = new Date();
+  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const todayE = daily.find(d => d.date === todayIso) || {};
   const est = isCodex ? " (est.)" : "";
   // Burn rate KPI = the SAME window the gauge shows (the picker), not a fixed 2h — else the
   // card and the gauge disagree on one screen. scope=all → bmScopedRep has no
@@ -1259,7 +1328,7 @@ function renderKPIs(rep, isCodex) {
     ? fc.burn_rates_by_hours[bhrs] : (fc.burn_rate_per_hour_recent ?? 0);
   const bwin = bhrs === "0.0833" ? "5m" : bhrs === "0.25" ? "15m" : bhrs + "h";
   const kpis = [
-    { l: "Spent today", v: "~" + fmtMoney(fc.today?.so_far ?? 0), s: `${fmtInt(todayE.messages || 0)} prompts`, spark: daily.slice(-14).map(d => d.cost_usd || 0) },
+    { l: "Spent today", v: "~" + fmtMoney(fc.today?.so_far ?? 0), s: todayE.messages != null ? `${fmtInt(todayE.messages)} API calls` : (rep.__scopeLabel || ""), spark: daily.slice(-14).map(d => d.cost_usd || 0) },
     { l: "Burn rate", v: "~" + fmtMoney(burn), unit: "/hr", s: `avg over last ${bwin}` + est, spark: null },
     { l: "Cache savings", v: "~" + fmtMoney0(ce.usd_saved || 0), s: `~${Math.round((ce.discount_pct || 0) * 100)}% cheaper than no-cache · all-time est.`, spark: null },
     // no spark: it duplicated "Spent today"'s daily series pixel-for-pixel (visual noise)
@@ -1571,11 +1640,12 @@ function proDevicesHtml(data) {
     const st = bmOnlineState(d._updated_at);
     const osi = BM_OSICON[d.os] || "🖥";
     const srcs = d.sources || {};
+    const fr = bmSnapFresh(d);
     const rows = Object.keys(srcs).map(s => {
       const v = srcs[s] || {};
       return `<div class="sync-src"><span class="sync-srcname ${s === 'codex' ? 'fam-gpt' : 'fam-opus'}">${esc(s)}</span>
-        <span class="sync-amt">~${fmtMoney(v.month_so_far || 0)}<small>this month</small></span>
-        <span class="sync-amt">~${fmtMoney(v.burn_rate_per_hour || 0)}<small>/hr now</small></span>
+        <span class="sync-amt">${fr.month ? "~" + fmtMoney(v.month_so_far || 0) : "—"}<small>this month</small></span>
+        <span class="sync-amt">${fr.burn ? "~" + fmtMoney(v.burn_rate_per_hour || 0) : "—"}<small>/hr now</small></span>
         <span class="sync-cnt">${fmtInt(v.record_count || 0)}<small>records</small></span></div>`;
     }).join("") || `<div class="dim" style="font-size:11px">no data</div>`;
     const recent = Object.keys(srcs)
@@ -1687,7 +1757,7 @@ function renderTrend(rep, isCodex) {
   }
   const ctx = $("chart-trend");
   if (window.__charts.trend) window.__charts.trend.destroy();
-  window.__charts.trend = new Chart(ctx, {
+  window.__charts.trend = bmNewChart(ctx, {
     type: "bar", data: { labels, datasets },
     options: {
       responsive: true, maintainAspectRatio: false, animation: false,
@@ -1728,7 +1798,7 @@ function renderModels(rep) {
   const palette = bmf.map((m, i) => bmModelColor(m.model_id, i));
   const ctx = $("chart-models");
   if (window.__charts.models) window.__charts.models.destroy();
-  window.__charts.models = new Chart(ctx, {
+  window.__charts.models = bmNewChart(ctx, {
     type: "doughnut",
     data: { labels, datasets: [{ data, backgroundColor: palette, borderColor: "#0F1011", borderWidth: 2 }] },
     options: { responsive: true, maintainAspectRatio: false, animation: false, cutout: "66%", plugins: { legend: { display: false }, tooltip: tooltipCfg() } }
@@ -1757,7 +1827,7 @@ function renderDaily(rep) {
   // the shared yMoney tooltip (which appends "/sa") to label them correctly.
   const dailyOpts = chartOpts({ yMoney: true });
   dailyOpts.plugins.tooltip.callbacks = { label: (c) => fmtMoney(c.parsed.y) + " (daily total · est.)" };
-  window.__charts.daily = new Chart(ctx, {
+  window.__charts.daily = bmNewChart(ctx, {
     type: "bar",
     data: { labels, datasets: [{ data, backgroundColor: colors, borderRadius: 3, maxBarThickness: 18 }] },
     options: dailyOpts
@@ -1827,11 +1897,15 @@ function renderProjects(rep) {
 
 // ---------- CHATS (per-conversation cost — by_session, enriched with chat titles) ----------
 window.__chatsSort = localStorage.getItem("burnmeter_chats_sort") || "recent";
+// The duration and $ columns are narrow and fixed: "3264.7h" and "$3,338.83"
+// were cut to "3264…" and "$3,33…".
 function bmDur(sec) {
   if (!sec || sec < 60) return (sec || 0) + "s";
   if (sec < 3600) return Math.round(sec / 60) + "m";
-  return (sec / 3600).toFixed(1) + "h";
+  if (sec < 48 * 3600) return (sec / 3600).toFixed(1) + "h";
+  return Math.round(sec / 86400) + "d";        // a chat resumed over weeks
 }
+const bmChatCost = (n) => (Number(n) || 0) >= 100 ? fmtMoney0(n) : fmtMoney(n);
 function renderChats(rep) {
   const tb = document.querySelector("#chats-tbl tbody"); if (!tb) return;
   let rows = (rep.by_session || []).filter(s => (s.total_tokens || 0) > 0);
@@ -1840,8 +1914,11 @@ function renderChats(rep) {
     : new Date(b.ended_at || 0) - new Date(a.ended_at || 0));
   if (!rows.length) { tb.innerHTML = `<tr><td colspan="8" class="empty">No sessions yet</td></tr>`; return; }
   tb.innerHTML = rows.slice(0, 60).map(s => {
-    const models = (s.models || []).filter(m => !String(m).startsWith("<")).slice(0, 3)
-      .map(m => `<span class="pill ${modelToFamily(m)}">${modelDisplay(m)}</span>`).join(" ");
+    // `models` is sorted by name, so the one in use now could fall past the third chip.
+    const named = (s.models || []).filter(m => !String(m).startsWith("<"));
+    const cur = named.includes(s.model_latest) ? s.model_latest : null;
+    const models = (cur ? [cur, ...named.filter(m => m !== cur)] : named).slice(0, 3)
+      .map(m => `<span class="pill ${modelToFamily(m)}">${esc(modelDisplay(m))}</span>`).join(" ");
     const goal = (s.intent || "").slice(0, 90);
     return `<tr>
       <td>${bmProjCell(s.project_dir, s.project_label, null, s.chat)}</td>
@@ -1850,7 +1927,7 @@ function renderChats(rep) {
       <td class="num">${bmDur(s.duration_seconds)}</td>
       <td>${models}</td>
       <td class="num">${fmtCompact(s.total_tokens || 0)}</td>
-      <td class="num">${fmtMoney(s.cost_usd)}</td>
+      <td class="num" title="${fmtMoney(s.cost_usd)}">${bmChatCost(s.cost_usd)}</td>
       <td class="num">${fmtPct(s.cache_hit_rate)}</td></tr>`;
   }).join("");
 }
@@ -1951,7 +2028,7 @@ function renderRecent(rep) {
     return `<tr>
       <td>${relTime(t.timestamp)}</td>
       <td>${bmProjCell(t.project_dir, t.project_label, t.device, t.chat)}</td>
-      <td><span class="pill ${fam}">${modelDisplay(t.model)}</span></td>
+      <td><span class="pill ${fam}">${esc(modelDisplay(t.model))}</span></td>
       <td class="num">${fmtInt(t.effective_tokens)}</td>
       <td class="num">${costCell}</td>
       <td class="num">${fmtPct(t.cache_hit_rate)}</td></tr>`;
@@ -2003,7 +2080,7 @@ function renderModelTable(rep) {
   if (!bmf.length) { tb.innerHTML = `<tr><td colspan="4" class="empty">No data</td></tr>`; return; }
   tb.innerHTML = bmf.map(m => {
     const fam = modelToFamily(m.model_id);
-    return `<tr><td><span class="pill ${fam}">${modelDisplay(m.model_id)}</span></td>
+    return `<tr><td><span class="pill ${fam}">${esc(modelDisplay(m.model_id))}</span></td>
       <td class="num">${fmtInt(m.messages)}</td>
       <td class="num">${fmtCompact(m.total_tokens)}</td>
       <td class="num">${fmtMoney0(m.cost_usd)}</td></tr>`;
@@ -2066,7 +2143,7 @@ function drawSpark(canvasId, data) {
   if (window.__charts[canvasId]) window.__charts[canvasId].destroy();
   if (!data || !data.length) { ctx.style.display = "none"; return; }
   ctx.style.display = "";
-  window.__charts[canvasId] = new Chart(ctx, {
+  window.__charts[canvasId] = bmNewChart(ctx, {
     type: "line",
     data: { labels: data.map((_, i) => i), datasets: [{ data, borderColor: "#5E6AD2", borderWidth: 1.5, fill: false, tension: 0.4, pointRadius: 0 }] },
     options: { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: { x: { display: false }, y: { display: false } } }

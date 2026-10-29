@@ -4,35 +4,32 @@ Single source of truth shared by:
   - the HTTP endpoint  GET /api/statusline   (server.py)
   - the CLI subcommand `burnmeter statusline`   (cli.py)
 
-Both feed it the SAME `build_report(...)` dict, so the live web dashboard, the
-HTTP pull, and the terminal line can never drift apart.
+build_statusline() reduces a build_report() dict to a few fields and
+format_statusline() renders them. The CLI asks a running Burnmeter for the
+fields (its report is already built) and renders them itself, so the line
+reads the same whichever side computed it.
 """
 from __future__ import annotations
 
-import re
+from datetime import date
 
-_MODEL_RE = re.compile(r"(opus|sonnet|haiku)-(\d+)-(\d+)")
+from .pricing import display_name
 
 
 def _active_model(report: dict) -> str:
-    """Pretty name of the model used by the most recent session (e.g. 'Opus 4.8').
+    """Display name of the model the most recent session used last ('Opus 5.5').
 
-    Falls back to the raw model id for non-Claude families (Codex/gpt/o-series)
-    so the line still shows *something* truthful rather than a blank.
+    Ids outside the Claude families (Codex, gpt, o-series) are shown as they are,
+    so the line still says something true rather than going blank.
     """
     sessions = report.get("by_session") or []
-    if not (sessions and sessions[0].get("models")):
+    if not sessions:
         return "—"
-    raw = sessions[0]["models"][-1]
+    # model_latest, not models[-1]: `models` is sorted by name, not by time.
+    raw = sessions[0].get("model_latest") or (sessions[0].get("models") or [""])[-1]
     if not raw or str(raw).startswith("<"):   # skip synthetic/placeholder model ids
         return "—"
-    m = str(raw).lower()
-    for fam in ("opus", "sonnet", "haiku"):
-        if fam in m:
-            hit = _MODEL_RE.search(m)
-            if hit:
-                return f"{hit.group(1).capitalize()} {hit.group(2)}.{hit.group(3)}"
-    return raw
+    return display_name(str(raw))
 
 
 def build_statusline(report: dict) -> dict:
@@ -54,6 +51,11 @@ def build_statusline(report: dict) -> dict:
         dot = "🟢"
 
     rem_min = max(0, (cw.get("remaining_seconds", 0) or 0) // 60)
+    # Today's hit rate says whether caching works right now; a day without
+    # activity falls back to the all-time rate.
+    today_iso = date.today().isoformat()
+    day = next((d for d in reversed(report.get("daily") or []) if d.get("date") == today_iso), None)
+    hit_rate = (day or totals).get("cache_hit_rate", 0) or 0
 
     return {
         "verdict": dot,
@@ -62,19 +64,32 @@ def build_statusline(report: dict) -> dict:
         "block_remaining_min": int(rem_min),
         "block_past_p90": bool(cw.get("block_already_past_p90")),
         "errors_24h": err.get("total", 0),
-        "cache_hit_pct": round((totals.get("cache_hit_rate", 0) or 0) * 100, 1),
+        "cache_hit_pct": round(hit_rate * 100, 1),
         "today_cost": round((fc.get("today", {}) or {}).get("so_far", 0) or 0, 2),
     }
 
 
+def _money(v: float) -> str:
+    return f"${v:.2f}" if v < 10 else f"${v:,.0f}"
+
+
+def format_statusline(s: dict) -> str:
+    """Single plain-text line from build_statusline() fields."""
+    rem = s.get("block_remaining_min")
+    if rem is None:                       # not knowable from the logs that were read
+        block = "—"
+    else:
+        rem = int(rem)
+        block = f"{rem // 60}h{rem % 60:02d}m" if rem >= 60 else f"{rem}m"
+    p90 = " ⚠ P90+" if s.get("block_past_p90") else ""
+    return (
+        f"{s.get('verdict', '')} {s.get('active_model', '—')} "
+        f"{_money(s.get('burn_rate_per_hour') or 0)}/h · block {block}{p90} · "
+        f"{s.get('errors_24h', 0)} err/24h · cache {s.get('cache_hit_pct') or 0:.0f}% · "
+        f"today {_money(s.get('today_cost') or 0)}"
+    )
+
+
 def statusline_text(report: dict) -> str:
     """Single plain-text line, ready to print in a prompt / status bar."""
-    s = build_statusline(report)
-    rem = s["block_remaining_min"]
-    rem_str = f"{rem // 60}h{rem % 60:02d}m" if rem >= 60 else f"{rem}dk"
-    p90_flag = "⚠️ P90+" if s["block_past_p90"] else ""
-    return (
-        f"{s['verdict']} {s['active_model']} ${s['burn_rate_per_hour']:.0f}/h · "
-        f"blok {rem_str} {p90_flag}· {s['errors_24h']}err/24h · "
-        f"cache %{s['cache_hit_pct']:.0f} · gün ${s['today_cost']:.0f}"
-    )
+    return format_statusline(build_statusline(report))
