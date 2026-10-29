@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.3.5] — unreleased
+## [0.3.5] — 2026-10-29
 
 ### Fixed
 - **Claude 5.5 models were billed at older rates.** Opus 5.5 was priced as Opus 5,
