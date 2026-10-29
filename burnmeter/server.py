@@ -240,34 +240,41 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
             return rep
         return sel.get_report(_build, key=(source, plan), force=force)
 
-    # Pro sync: 20s cache for pulled remote devices (avoid hammering the relay).
+    # Pro sync. The free Firebase plan has 20k writes and 50k reads a day for every
+    # account together, so the dashboard's reads are cached for minutes, and pushes go
+    # through firebase_sync.AutoPush: a changed snapshot, at most every 10 min.
+    from . import firebase_sync as _fb
+    autopush = _fb.AutoPush()
+    SYNC_PULL_TTL_S = 5 * 60          # a pull reads every device doc of the account
+    SYNC_SLOW_TTL_S = 30 * 60         # ...and while the plan or quota is the problem
+    STATUS_TTL_S = 10 * 60            # verified + plan: an Identity Toolkit lookup + 1 read
     sync_cache = {"data": None, "ts": 0.0}
+    status_cache = {"data": None, "ts": 0.0, "uid": None}
 
-    # Pro sync: auto-push this device's snapshot every 60s, REUSING the cached
-    # reports (no re-parse). 60s (was 300s) so another device sees this one's live-ish
-    # burn within ~1 min instead of up to ~5 min. No-op if sync isn't configured.
-    def _sync_autopush():
+    def _sync_snapshot(cfg):
+        # snapshot_from_reports (in sync.py) builds the metadata-only blob from the cached
+        # reports (no re-parse); firebase_sync encrypts it (E2E) before it leaves.
         from . import sync as _sync
-        from . import firebase_sync as _fb
-        while True:
-            time.sleep(60)
+        reports = {}
+        for s in ("claude", "codex"):
+            if s == "codex" and codex_cache is None:
+                continue
             try:
-                cfg = _fb.load_config()
-                if not _fb.is_configured(cfg):
-                    continue
-                reports = {}
-                for s in ("claude", "codex"):
-                    if s == "codex" and codex_cache is None:
-                        continue
-                    try:
-                        reports[s] = build_for(s, None)
-                    except Exception:
-                        pass
-                # snapshot_from_reports (in sync.py) builds the metadata-only blob; firebase
-                # encrypts (E2E) + upserts it to Firestore. Silent no-op if unverified (403).
-                _fb.push_snapshot(cfg, _sync.snapshot_from_reports(cfg, reports))
+                reports[s] = build_for(s, None)
             except Exception:
                 pass
+        return _sync.snapshot_from_reports(cfg, reports)
+
+    def _sync_autopush():
+        time.sleep(60)   # let the first report build
+        while True:
+            try:
+                cfg = _fb.load_config()
+                if _fb.is_configured(cfg) and not cfg.get("signed_out") and autopush.due(cfg):
+                    autopush.push(cfg, _sync_snapshot(cfg))
+            except Exception:
+                pass
+            time.sleep(30)
     threading.Thread(target=_sync_autopush, daemon=True).start()
 
     # Local pre-limit ALERTS: every ~60s evaluate the cached reports and push to
@@ -497,8 +504,8 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 if self.headers.get("Host", "").rsplit(":", 1)[0] not in ("127.0.0.1", "localhost", "::1"):
                     _json_response(self, 403, {"ok": False, "error": "forbidden host"})
                     return
-                from . import firebase_sync as _fb
                 sync_cache["data"] = None      # bust the devices cache so the UI refreshes
+                status_cache["data"] = None
                 if path == "/api/pro/disconnect":
                     _fb.logout()
                     _json_response(self, 200, {"ok": True})
@@ -507,30 +514,22 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                     _json_response(self, 200, _fb.resend_verification())
                     return
                 if path == "/api/pro/push":
-                    # Push THIS device's snapshot to Firestore now (no 5-min wait), reusing
-                    # cached reports. Encrypted client-side; Firestore holds ciphertext only.
-                    from . import sync as _sync
+                    # Push THIS device's snapshot to Firestore now, reusing cached reports.
+                    # Encrypted client-side; Firestore holds ciphertext only. Within 5 min
+                    # of the last push it is queued instead: the rules would refuse it.
                     cfg2 = _fb.load_config()
                     if not _fb.is_configured(cfg2):
                         _json_response(self, 400, {"ok": False, "error": "not signed in"})
                         return
-                    reports = {}
-                    for s in ("claude", "codex"):
-                        if s == "codex" and codex_cache is None:
-                            continue
-                        try:
-                            reports[s] = build_for(s, None)
-                        except Exception:
-                            pass
-                    res = _fb.push_snapshot(cfg2, _sync.snapshot_from_reports(cfg2, reports))
-                    _json_response(self, 200 if res.get("ok") else 400, res)
+                    res = autopush.push(cfg2, _sync_snapshot(cfg2), force=True)
+                    _json_response(self, 200 if res.get("ok") or res.get("kind") == "wait" else 400, res)
                     return
                 if path == "/api/pro/rename":
                     # Rename THIS device. Sets a user label (name_source='user' so the
-                    # auto-IP migration never overwrites it) and re-pushes immediately so
-                    # the new name shows on every machine. Cross-device rename isn't here:
-                    # a remote device re-stamps its own label on its next push.
-                    from . import sync as _sync
+                    # auto-IP migration never overwrites it) and re-pushes so the new name
+                    # shows on every machine, or queues it if this device pushed in the
+                    # last 5 min. Cross-device rename isn't here: a remote device
+                    # re-stamps its own label on its next push.
                     try:
                         length = int(self.headers.get("Content-Length", 0) or 0)
                         body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
@@ -548,16 +547,11 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                     cfg3["label"] = label
                     cfg3["name_source"] = "user"
                     _fb.save_config(cfg3)
-                    reports = {}
-                    for s in ("claude", "codex"):
-                        if s == "codex" and codex_cache is None:
-                            continue
-                        try:
-                            reports[s] = build_for(s, None)
-                        except Exception:
-                            pass
-                    res = _fb.push_snapshot(cfg3, _sync.snapshot_from_reports(cfg3, reports))
-                    _json_response(self, 200 if res.get("ok") else 400, {"ok": bool(res.get("ok")), "label": label, "error": res.get("error")})
+                    res = autopush.push(cfg3, _sync_snapshot(cfg3), force=True)
+                    ok = bool(res.get("ok")) or res.get("kind") == "wait"   # saved; syncs when allowed
+                    _json_response(self, 200 if ok else 400, {"ok": ok, "label": label,
+                                                              "kind": res.get("kind"),
+                                                              "error": res.get("error")})
                     return
                 try:
                     length = int(self.headers.get("Content-Length", 0) or 0)
@@ -695,39 +689,59 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 if self.headers.get("Host", "").rsplit(":", 1)[0] not in ("127.0.0.1", "localhost", "::1"):
                     _json_response(self, 403, {"error": "forbidden host"})
                     return
-                from . import firebase_sync as _fb
                 cfg = _fb.load_config()
-                if not _fb.is_configured(cfg):
-                    _json_response(self, 200, {"configured": False})
+                if not _fb.is_configured(cfg) or cfg.get("signed_out"):
+                    # signed_out: Firebase ended the session (e.g. the password changed on
+                    # another device); the panel asks to sign in again.
+                    _json_response(self, 200, {"configured": False,
+                                               "signed_out": cfg.get("signed_out"),
+                                               "email": cfg.get("email")})
                     return
                 out = {"configured": True, "email": cfg.get("email"),
                        "device_id": cfg.get("device_id"), "label": cfg.get("label")}
-                try:
-                    out["verified"] = _fb.is_verified(cfg)
-                    out.update(_fb.account(cfg))   # plan, status
-                except Exception as e:
-                    out["error"] = str(e)
+                # The dashboard asks on every refresh; ?fresh=1 is "I've verified".
+                now = time.time()
+                remote = status_cache["data"]
+                if (remote is None or qs.get("fresh", ["0"])[0] == "1"
+                        or now - status_cache["ts"] >= STATUS_TTL_S
+                        or status_cache["uid"] != cfg.get("uid")):
+                    remote = {}
+                    try:
+                        remote["verified"] = _fb.is_verified(cfg)
+                        remote.update(_fb.account(cfg))   # plan, status
+                    except Exception as e:
+                        remote["error"] = str(e)
+                        remote["error_kind"] = getattr(e, "kind", "error")
+                    status_cache.update(data=remote, ts=now, uid=cfg.get("uid"))
+                out.update(remote)
+                if remote.get("plan") == "pro" and remote.get("status") == "active":
+                    autopush.clear_backoff("plan")
+                out["sync"] = autopush.state(cfg)   # last push, last failure, next attempt
                 _json_response(self, 200, out)
                 return
 
             if path == "/api/sync/devices":
                 # Pro: remote-device snapshots, decrypted HERE (this local server holds the
                 # E2E key) for the 127.0.0.1 UI. Firestore only ever holds ciphertext — E2E
-                # intact. 20s cache so we don't hammer Firebase.
-                from . import firebase_sync as _fb
+                # intact. Cached for minutes: the dashboard asks every 30 s, and each pull
+                # reads every device doc of the account.
                 cfg = _fb.load_config()
                 if not _fb.is_configured(cfg):
                     _json_response(self, 200, {"configured": False, "devices": []})
                     return
                 now = time.time()
-                if sync_cache["data"] is not None and now - sync_cache["ts"] < 20:
-                    _json_response(self, 200, sync_cache["data"])
+                cached = sync_cache["data"]
+                ttl = SYNC_SLOW_TTL_S if (cached or {}).get("kind") in ("plan", "quota", "auth") else SYNC_PULL_TTL_S
+                if (cached is not None and qs.get("fresh", ["0"])[0] != "1"
+                        and now - sync_cache["ts"] < ttl):
+                    _json_response(self, 200, cached)
                     return
                 try:
                     data = {"configured": True, "this_device": cfg.get("device_id"),
                             "devices": _fb.pull(cfg)}
                 except Exception as e:
-                    data = {"configured": True, "error": str(e), "devices": []}
+                    data = {"configured": True, "error": str(e),
+                            "kind": getattr(e, "kind", "error"), "devices": []}
                 sync_cache["data"] = data
                 sync_cache["ts"] = now
                 _json_response(self, 200, data)
