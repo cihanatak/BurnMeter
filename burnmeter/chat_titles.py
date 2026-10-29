@@ -4,14 +4,16 @@ Why: the project FOLDER is ambiguous ("repo" — which repo? one workspace hosts
 so the UI shows the CHAT TITLE the user sees in the desktop sidebar ("World Intelligence",
 "Burnmeter", …). The desktop app persists one small JSON per session at:
 
-  Windows:  %APPDATA%/Claude/claude-code-sessions/<org>/<user>/local_<id>.json
+  Windows:  %LOCALAPPDATA%/Claude-Data/claude_<id>/claude-code-sessions/<org>/<user>/local_<id>.json
+            (older builds: %APPDATA%/Claude/claude-code-sessions/...)
   macOS:    ~/Library/Application Support/Claude/claude-code-sessions/...
   Linux:    ~/.config/Claude/claude-code-sessions/...
 
 each carrying {cliSessionId, title, titleSource, ...}. cliSessionId == the session_id in
 ~/.claude/projects transcripts, so mapping is direct. Read-only, fail-silent (no desktop
-app → no titles → the UI falls back to the folder name). Cached with a short TTL — the
-store is ~dozens of tiny files, but report builds run every few seconds.
+app → no titles → the UI falls back to the folder name). Cached with a short TTL, and a
+file is parsed again only when it changed: the store has hundreds of files of up to
+~125 KB (20 MB on the maker's PC), and report builds run every few seconds.
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ from pathlib import Path
 
 _TTL_SECONDS = 30
 _cache: dict = {"ts": 0.0, "map": {}}
+_files: dict = {}   # path → (mtime_ns, size, session id, title, set by the user)
 
 
 def _store_roots() -> list[Path]:
@@ -31,6 +34,10 @@ def _store_roots() -> list[Path]:
         appdata = os.environ.get("APPDATA")
         if appdata:
             roots.append(Path(appdata) / "Claude" / "claude-code-sessions")
+        # Later desktop builds keep it per Windows account, in Claude-Data/claude_<id>.
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            roots.extend(sorted((Path(local) / "Claude-Data").glob("*/claude-code-sessions")))
     elif sys.platform == "darwin":
         roots.append(Path.home() / "Library" / "Application Support" / "Claude" / "claude-code-sessions")
     else:
@@ -46,22 +53,32 @@ def load_chat_titles(roots: list[Path] | None = None) -> dict[str, str]:
         if now - _cache["ts"] < _TTL_SECONDS:
             return _cache["map"]
         roots = _store_roots()
+    global _files
     out: dict[str, str] = {}
+    seen: dict = {}
     for root in roots:
         try:
             for p in root.rglob("local_*.json"):
                 try:
-                    j = json.loads(p.read_text(encoding="utf-8", errors="replace"))
-                    sid = j.get("cliSessionId")
-                    title = (j.get("title") or "").strip()
+                    st = p.stat()
+                    hit = _files.get(str(p))
+                    if hit and hit[0] == st.st_mtime_ns and hit[1] == st.st_size:
+                        sid, title, user_set = hit[2:]
+                    else:
+                        j = json.loads(p.read_text(encoding="utf-8", errors="replace"))
+                        sid = j.get("cliSessionId")
+                        title = (j.get("title") or "").strip()
+                        user_set = j.get("titleSource") == "user"
+                    seen[str(p)] = (st.st_mtime_ns, st.st_size, sid, title, user_set)
                     if sid and title:
                         # user-set titles win over auto ones if both files exist for a session
-                        if sid not in out or j.get("titleSource") == "user":
+                        if sid not in out or user_set:
                             out[sid] = title
                 except Exception:
                     continue
         except Exception:
             continue
+    _files = seen
     if use_cache:
         _cache["map"] = out
         _cache["ts"] = time.time()
