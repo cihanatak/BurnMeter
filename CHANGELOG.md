@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.3.6] — 2026-10-30
+
+### Fixed
+- **One-click update now runs the installer.** In 0.3.5 the Update button closed
+  Burnmeter and nothing else happened. The update command reached Windows' cmd with
+  its quotes escaped, so cmd could find neither the installer nor the app to reopen.
+  The fix ships in this version, so 0.3.5 has to install 0.3.6 once by hand: run
+  `BurnmeterSetup.exe` from this release. Updates from 0.3.6 on are one click.
+- **The Chats page reaches every chat.** It stopped at 60 rows with no way to see the
+  rest (60 of 195 on the maker's PC). It now shows 60 and a "Show all" button, and
+  "Most $" ranks every chat, not only the newest 200.
+- **Pro sync says why it stopped.** A refused push or pull used to fail silently. The
+  Pro bar now shows when this device last synced, or why it couldn't: no Pro plan,
+  an unverified email, the daily quota, the network, or a session that ended.
+- **A killed server's build worker kept running** for minutes at 1.2–1.8 GB, and its
+  temp files were never deleted. The worker now exits with its server.
+- **The gauge's "your typical" label** read "ypical"; it now stays on the canvas.
+- **The macOS release** gets its versioned dmg (`Burnmeter-0.3.6.dmg`) as well.
+
+### Changed
+- **Pro sync pushes only what changed.** It pushed every 60 s. It now checks every
+  10 minutes, pushes a changed snapshot (and one every 6 hours), never twice within
+  5 minutes, and doesn't pull while the window is hidden. The device name travels
+  inside the encrypted snapshot only. "Online" means synced in the last 25 minutes.
+- **Firebase gets a key derived from your Pro password, not the password.** An
+  account made before 0.3.6 moves over at its next sign-in. Firebase then signs the
+  account's other devices out, and they need 0.3.6 to sign back in.
+- **Electron 45, with a hardened shell.** A splash shows while the server starts,
+  the server is restarted if it stops, and navigation, permissions and page content
+  are locked to the local dashboard. `npm audit` went from 18 findings to 0.
+
+### Added
+- **`firestore.rules`**, which keep sync to verified Pro accounts, cap a snapshot at
+  256 KiB and allow one update per device every 5 minutes, with 50 tests that run on
+  Google's rules engine. They take effect once deployed (`docs/FIRESTORE_RULES.md`).
+
 ## [0.3.5] — 2026-10-29
 
 ### Fixed
