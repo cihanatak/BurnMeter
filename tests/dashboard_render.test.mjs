@@ -396,7 +396,9 @@ passed += 1;
   assert.equal(a.today, 0, "nor a today");
   assert.equal(a.month, 0, "nor a this-month");
   assert.equal(a.lifetime, 100, "lifetime totals stay valid at any age");
-  const fresh = bmDeviceAgg({ ...stale, _updated_at: new Date(Date.now() - 60e3).toISOString() }, ["claude"]);
+  // A minute ago, but never yesterday: in the first minute after midnight it would be.
+  const minuteAgo = Math.max(Date.now() - 60e3, new Date().setHours(0, 0, 0, 0));
+  const fresh = bmDeviceAgg({ ...stale, _updated_at: new Date(minuteAgo).toISOString() }, ["claude"]);
   assert.ok(near(fresh.burn, pcClaudeBBH["2"]) && fresh.today === 1 && fresh.month === 10,
     "a snapshot pushed a minute ago counts in full");
 
