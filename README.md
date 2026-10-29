@@ -1,132 +1,154 @@
 # Burnmeter
 
-**One dashboard for every AI coding agent — see exactly where your tokens go.**
+**See where your Claude Code and Codex tokens go, on your own machine.**
 
-A **local-first** dashboard that reads the session logs your AI coding agents
-already write to disk and turns them into a real-time view of token usage, cost,
-burn-rate, and — where the agent actually logs it (e.g. Codex) — **how close you
-are to your plan's rate limit**. No API keys. No cloud account. No phone-home.
-Your data never leaves your machine.
+Burnmeter reads the session logs that Claude Code and OpenAI Codex already write
+to your disk and turns them into a live dashboard: how fast you're burning, what
+each project, chat and model costs, how much the prompt cache saves you, and, for
+Codex (which logs it), how close you are to your plan's 5-hour and weekly limits.
+No API keys, no account. Your usage data stays on your machine.
 
-![The Burnmeter dashboard — burn-rate gauge, rate-limit hero, cache savings, per-project & per-model breakdowns, activity heatmap](docs/dashboard.png)
+![Burnmeter v0.3.4 overview: burn-rate gauge, local usage for the current 5-hour block and week, today's spend, cache savings, live models and recent activity](docs/dashboard.png)
 
 <p align="center">
-  <b><a href="https://burnmeter.dev">burnmeter.dev</a></b> ·
-  <code>pipx install git+https://github.com/cihanatak/BurnMeter</code> ·
-  Claude Code + OpenAI Codex · AGPL-3.0
+  <a href="https://github.com/cihanatak/BurnMeter/releases/latest/download/BurnmeterSetup.exe"><b>Download for Windows</b></a> ·
+  <a href="https://burnmeter.dev">burnmeter.dev</a> ·
+  Claude Code + OpenAI Codex · v0.3.4 · <a href="./LICENSE">AGPL-3.0</a>
 </p>
 
-> ℹ️ Screenshot uses synthetic demo data (`tests/generate_fixture.py`) — your real numbers never leave your machine.
-
----
-
-## Why this exists
-
-Neither Anthropic nor OpenAI exposes a real-time, per-token usage API for
-**individual** Pro / Max / ChatGPT-subscription plans. The in-app usage page and
-the CLI's `/usage` command are point-in-time only — not historical, not
-programmatic. So if you're on a flat-fee subscription, **your local session logs
-are the only accurate source of truth** for what you're actually burning.
-
-Burnmeter reads them — `~/.claude/projects/**/*.jsonl` and
-`~/.codex/sessions/**/*.jsonl` — and answers the one question that matters:
-**"Am I about to hit the wall?"**
-
-## Features
-
-- **Binding-constraint hero** — the single most-urgent number, front and center.
-  **Codex** logs real rate-limit usage, so its hero is your **rate-limit %** (5-hour +
-  weekly) — red ring at 90%+ means "about to get throttled." **Claude Code** exposes
-  *no* account-level limit (Anthropic doesn't write one to disk), so its hero is
-  burn-rate $ + live local usage — honestly labelled, never a guessed limit.
-- **Real per-model pricing** — Opus / Sonnet / Haiku and GPT-5.5 / 5.4 / Codex /
-  mini, each at its actual rate. Output costs 5–8× input — the model mix *is* the
-  cost story.
-- **Cache-efficiency panel** — cache reads cost ~10% of fresh input. burnmeter
-  shows your hit rate and the **dollars cache saved you** vs. an un-cached run
-  (often the "I'm getting $50k of value for $200" number).
-- **Per-project attribution** — which repo is eating your quota.
-- **Burn-rate trend, daily spend, per-turn activity, model split** — the full
-  "where did it go" picture, with sparklines and clean charts.
-- **Multi-device** — sync a second machine's logs in (e.g. via Syncthing) and see
-  per-device breakdowns.
-- **Terminal statusline** — `burnmeter statusline` prints a one-liner for your shell
-  prompt or Claude Code's status bar (verdict · model · $/h · block left · errors ·
-  cache · today). Same numbers as the dashboard, no server needed.
-- **Tiny footprint** — the long-running server holds ~30 MB; heavy parsing runs
-  in a short-lived worker so memory never balloons.
+<sub>Screenshots use synthetic demo data: the projects, chats and numbers are made up.</sub>
 
 ## Install
 
-Python 3.10+, **zero third-party dependencies** (Chart.js / GridStack load from a CDN in
-the browser). Recommended: [pipx](https://pipx.pypa.io) for an isolated install.
+### Windows
+
+Download **[BurnmeterSetup.exe](https://github.com/cihanatak/BurnMeter/releases/latest/download/BurnmeterSetup.exe)**
+from the latest release and run it. It installs for your user account only,
+doesn't need Python, and runs as a desktop app with a tray icon.
+
+The installer isn't code-signed yet, so Windows SmartScreen may say it doesn't
+recognize the app. Click **More info → Run anyway**.
+
+### macOS
+
+You need Python 3.10 or newer. Burnmeter isn't on PyPI yet, so install it from
+GitHub:
 
 ```bash
-pipx install git+https://github.com/cihanatak/BurnMeter   # PyPI release coming → `pipx install burnmeter`
-burnmeter serve            # starts the dashboard and opens it in your browser
-burnmeter desktop          # optional: adds a double-click "Burnmeter" desktop shortcut
+python3 -m pip install --upgrade "burnmeter[app] @ git+https://github.com/cihanatak/BurnMeter"
+burnmeter
 ```
 
-Or with pip, or straight from a source checkout:
+`burnmeter` opens the dashboard in its own window. `burnmeter serve` opens it in
+your browser instead, at <http://127.0.0.1:7654>. The `[app]` extra adds the
+native window and tray icon (pywebview, pystray, Pillow); without it, Burnmeter
+has no third-party dependencies and uses your browser.
+
+If pip stops with `externally-managed-environment` (common with Homebrew's
+Python), install into a virtual environment, or use [pipx](https://pipx.pypa.io)
+for the browser version: `pipx install git+https://github.com/cihanatak/BurnMeter`.
+
+Linux works the same way as macOS; `burnmeter serve` is the simplest option there.
+
+### From source
 
 ```bash
-pip install git+https://github.com/cihanatak/BurnMeter
-burnmeter serve
-# — or, from a source checkout —
 git clone https://github.com/cihanatak/BurnMeter
 cd BurnMeter
-python3 -m burnmeter serve
+python -m pip install -e .
+python -m burnmeter serve
 ```
 
-Multi-source (Claude + Codex) and a synced second machine:
+## What you get
 
-```bash
-burnmeter serve --extra-projects-dir ~/.claude/projects-pc --codex-extra-dir ~/.codex/sessions-pc
-```
+- **Burn rate against your own normal.** A gauge of your current $/hour next to
+  your typical, busy and heavy zones, and which models are driving it.
+- **Plan limits where they exist.** Codex writes your real rate-limit usage into
+  its logs, so the Codex view shows the 5-hour and weekly limits as percentages,
+  with reset times. Claude Code doesn't write plan limits to disk, so Burnmeter
+  does **not** show a "% of plan" for Claude; it shows your local usage and your
+  own history instead of a guess.
+- **Per-version model pricing.** Claude (Opus, Sonnet, Haiku, Fable) and OpenAI
+  (GPT-5.x, Codex) models each at their own rate, including cache reads and 5-minute
+  vs 1-hour cache writes. A model the price table doesn't know is flagged in the
+  dashboard instead of being priced silently.
+- **Cache savings.** Your cache hit rate, and what caching saved compared with
+  paying full input price.
+- **Chats, projects and commits.** Spend per chat (chat titles come from the
+  Claude desktop app, if you use it), per project and per git commit.
+- **Insights.** Daily trends, an activity heatmap, unusual days, and a monthly
+  budget with a month-end projection.
+- **Alerts.** Slack, webhook or email when Codex nears its limit or your burn rate
+  runs far above your heavy zone. They are sent from your machine to destinations
+  you set up.
+- **Terminal statusline** and **CSV export** (see below).
 
-## Running on another machine
+![Codex view: 67% of the weekly limit and 41% of the 5-hour limit used, with reset countdowns](docs/dashboard-codex.png)
 
-The whole app is in this repo — clone and run. Everything else is **machine-local by
-design** (not committed):
+## The numbers are estimates, not your bill
 
-```bash
-git clone https://github.com/cihanatak/BurnMeter
-cd BurnMeter
-python -m pip install -e .          # free core, zero third-party deps
-# Pro cross-device sync (optional): adds `cryptography`
-python -m pip install -e ".[sync]"
-python -m burnmeter serve --port 9876
-```
+Burnmeter multiplies the tokens in your logs by each provider's public **API list
+prices** (last checked 2026-09-06; `PRICES_VERIFIED_AT` in
+[`burnmeter/pricing.py`](./burnmeter/pricing.py)). That is what the same usage would
+cost through the API. If you're on a flat-fee plan such as Claude Pro/Max or
+ChatGPT Plus/Pro, it is **not** what you pay. Use it to compare models, projects
+and days, and to see how hard you're leaning on your plan. Your provider's console
+is the source of truth for billing.
 
-- **It reads *that* machine's own logs** — `~/.claude/projects` and `~/.codex/sessions`
-  (via `Path.home()`, so it works on macOS, Linux, and Windows: `C:\Users\<you>\.claude`).
-  No data is copied between machines.
-- **Auto-start is OS-specific and not in the repo.** macOS uses a launchd LaunchAgent;
-  on Windows use Task Scheduler or just run `python -m burnmeter serve`. (Caches under
-  `~/.claude` / `~/.codex` regenerate on first run.)
-- **Pro sync to link two machines:** install the `[sync]` extra on both, run a relay
-  somewhere (`burnmeter sync-relay`), then on each machine
-  `burnmeter sync login --relay <url> --token <same-token>` with the **same passphrase**,
-  and `burnmeter sync push`. Each shows up in the other's **Cihazlar** card. The relay
-  only ever stores ciphertext; the passphrase never leaves your machines.
+## Privacy: what stays local and what goes out
+
+Burnmeter reads these files on your machine:
+
+- `~/.claude/projects/**/*.jsonl` (Claude Code)
+- `~/.codex/sessions/**/*.jsonl` (Codex, the last 90 days by default)
+- the Claude desktop app's local chat titles, if the app is installed
+- `git log` of your project folders, for per-commit cost
+
+The dashboard server listens on `127.0.0.1` only, and it rejects API requests
+whose `Host` header isn't local, which blocks DNS-rebinding attacks from other
+websites.
+
+The free app makes these network requests. None of them carry your usage data:
+
+| Request | When |
+|---|---|
+| `cdn.jsdelivr.net`: loads Chart.js, the charting library | every time the dashboard opens |
+| `raw.githubusercontent.com`: reads the latest version number from this repo | when the dashboard opens, then every 3 hours; the tray icon checks every 6 hours |
+| `github.com`: downloads the update | only when you click Update |
+| your Slack, webhook or SMTP server: sends the alert text | only if you set up alerts |
+
+**Pro sync** (planned, see [Pricing](#pricing)) is off unless you sign in. When on,
+it uses Google Firebase:
+
+- Your account is a Firebase Authentication email and password. Signing in sends
+  the password to Firebase, as any login does.
+- Each machine uploads an **encrypted snapshot** to Cloud Firestore: summary
+  numbers, the last 14 days of daily cost, top projects and recent turns,
+  including project names, folder paths and chat titles. The encryption key is
+  derived from your password on your machine and is never uploaded, so the
+  stored snapshots can't be read without your password.
+- Stored **unencrypted** next to it: the device name (your computer's name unless
+  you rename it) and the time of the last sync. Like any web service, Firebase
+  also sees your email address, IP address and request times.
 
 ## Terminal statusline
 
-A one-line live readout for your prompt or Claude Code's status bar — verdict
-dot, active model, $/h burn, block time left, 24h errors, cache hit, today's spend:
-
 ```bash
-burnmeter statusline
-# 🟠 Sonnet 4.6 $48/h · blok 1h34m · 12err/24h · cache %97 · gün $42
-
-burnmeter statusline --source codex   # Codex instead of Claude
-burnmeter statusline --json           # machine-readable, same numbers
+burnmeter statusline                  # Claude Code
+burnmeter statusline --source codex   # Codex
+burnmeter statusline --json           # the same numbers as JSON
 ```
 
-It computes standalone (no running server needed) and shares its logic with the
-`/api/statusline` HTTP endpoint, so the terminal line and the dashboard never drift.
+Example output:
 
-Wire it into **Claude Code** (`~/.claude/settings.json`) so it refreshes in your prompt:
+```
+🟠 claude-sonnet-5 $4/h · blok 4h24m · 0err/24h · cache %97 · gün $32
+```
+
+That's the verdict, active model, burn rate, time left in the 5-hour block,
+errors in the last 24 hours, cache hit rate and today's spend. It runs on its own
+(no server needed) and uses the same code as the dashboard. To show it in Claude
+Code, add this to `~/.claude/settings.json`:
 
 ```json
 {
@@ -134,45 +156,63 @@ Wire it into **Claude Code** (`~/.claude/settings.json`) so it refreshes in your
 }
 ```
 
+The `burnmeter` command comes with the pip install; the Windows app doesn't add
+it to your `PATH`.
+
+## CSV export
+
+**Settings → Export → Download CSV** saves every parsed record as a CSV file.
+With `burnmeter serve` running you can also fetch
+`http://127.0.0.1:7654/api/records.csv` (add `?source=codex` for Codex).
+
 ## How it works
 
 ```
 ~/.claude/projects/**/*.jsonl  ─┐
-~/.codex/sessions/**/*.jsonl   ─┤→ parser → normalized UsageRecord
-                                │            ↓ (in a short-lived worker)
+~/.codex/sessions/**/*.jsonl   ─┤→ parsers → normalized UsageRecord
+                                │            ↓ (in a short-lived worker process)
                                 └──────────→ analytics → report JSON
                                                          ↓
-                                       local web dashboard (127.0.0.1)
+                                       local dashboard on 127.0.0.1
 ```
 
-No network calls except loading Chart.js from a CDN (vendor it for fully
-air-gapped use). Costs are **client-side estimates** based on published pricing —
-for billing, see your provider's console.
-
-## Privacy / local-first
-
-Everything stays on your disk. Burnmeter binds to `127.0.0.1` only. There is no
-telemetry, no account, no upload. The optional Pro **sync** feature (see
-[`PRICING.md`](./PRICING.md)) is end-to-end encrypted and entirely opt-in.
+Parsing runs in a worker process that exits after each build, so the long-running
+server stays small. Parsed records are cached in `~/.claude` and `~/.codex`
+(`.burnmeter_*_cache.json`), so later builds only re-read new or changed logs.
 
 ## Supported agents
 
-| Agent | Source | Status |
-|-------|--------|--------|
+| Agent | Logs | Status |
+|-------|------|--------|
 | Claude Code | `~/.claude/projects` | ✅ |
 | OpenAI Codex | `~/.codex/sessions` | ✅ |
-| Cursor / Copilot / Gemini / others | — | 🛣️ planned |
+| Cursor, Copilot, Gemini CLI, others | | planned |
 
-Adding an agent is a single parser module — see [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+Adding an agent is one parser module; see [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 ## Pricing
 
-The local dashboard is **free and open source forever**. A Pro tier adds
-cross-device sync, unlimited history, and pre-limit alerts; a Team tier adds
-cost aggregation & attribution. Details in [`PRICING.md`](./PRICING.md).
+The local app is free and open source, with every agent and every panel. Paid
+options are planned; **none are on sale yet**:
+
+- **Pro, $6/month:** hosted, end-to-end encrypted sync across your machines.
+- **Supporter, $99:** a way to back development; details at launch.
+- **Commercial license, $49/year:** for organizations that can't use AGPL
+  software; see [`LICENSING.md`](./LICENSING.md).
+
+More in [`PRICING.md`](./PRICING.md).
+
+## Contributing
+
+Bug reports, fixes and new agent parsers are welcome. Start with
+[`CONTRIBUTING.md`](./CONTRIBUTING.md); pull requests need a one-time
+[CLA](./.github/CLA.md) signature, and the
+[Code of Conduct](./CODE_OF_CONDUCT.md) applies. Report security problems
+privately, as described in [`SECURITY.md`](./SECURITY.md).
 
 ## License
 
-[AGPL-3.0-or-later](./LICENSE) for the open-source core, with a commercial
-dual-license available for organizations. Free for individuals, including
-commercial use.
+Burnmeter is free software under the
+[GNU Affero General Public License v3.0 or later](./LICENSE). A commercial license
+is planned for organizations that can't use the AGPL; see
+[`LICENSING.md`](./LICENSING.md).
