@@ -1,0 +1,71 @@
+rules_version = '2';
+
+// Burnmeter Pro sync. The deployed copy of this file is what keeps sync a Pro feature:
+// the client is open source, so every check it makes is a courtesy.
+//
+//   users/{uid}               plan + status. Written only with admin credentials (billing,
+//                             or `scripts/pro_admin.py grant`); the owner may read it.
+//   users/{uid}/devices/{id}  one end-to-end encrypted snapshot per device: blob (ciphertext)
+//                             and updated_at. 0.3.5 and older also wrote a plaintext label.
+//
+// Tests: tests/firestore_rules_cases.json, run against the real rules engine by
+// `python scripts/pro_admin.py rules-test` (nothing is deployed). Deploy and rollback:
+// docs/FIRESTORE_RULES.md.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedInAs(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    function verifiedAs(uid) {
+      return signedInAs(uid) && request.auth.token.email_verified == true;
+    }
+
+    // No users/{uid} document means free: get() returns null and reading .data fails,
+    // which denies. Costs one document read, so callers check it last.
+    function isPro(uid) {
+      let account = get(/databases/$(database)/documents/users/$(uid)).data;
+      return account.get('plan', 'free') == 'pro' && account.get('status', 'active') == 'active';
+    }
+
+    // device ids are uuid4().hex[:12]. A snapshot is a few tens of KB; 256 KiB leaves room.
+    function validSnapshot(device) {
+      let d = request.resource.data;
+      return device.matches('^[0-9a-f]{12}$')
+        && d.keys().hasAll(['blob', 'updated_at'])
+        && d.keys().hasOnly(['blob', 'updated_at', 'label'])
+        && d.blob is string && d.blob.size() > 0 && d.blob.size() <= 262144
+        && (!('label' in d) || (d.label is string && d.label.size() <= 200));
+    }
+
+    // 0.3.6 and later let Firestore stamp updated_at with the request time. 0.3.5 and older
+    // send their own clock; accept that within 2 minutes so they keep syncing until updated.
+    function stampedNow() {
+      let t = request.resource.data.updated_at;
+      return t is timestamp
+        && (t == request.time
+          || (t > request.time - duration.value(2, 'm') && t < request.time + duration.value(2, 'm')));
+    }
+
+    // One update per device every 5 minutes. A client that backdates its clock (the 0.3.5
+    // allowance above) gains at most 2 of them. Only for update: on create there is no
+    // stored document, and touching `resource` fails with a null value error.
+    function notTooSoon() {
+      return request.time > resource.data.get('updated_at', timestamp.value(0)) + duration.value(5, 'm');
+    }
+
+    match /users/{uid} {
+      allow get: if signedInAs(uid);
+
+      match /devices/{device} {
+        allow read: if verifiedAs(uid) && isPro(uid);
+        allow create: if verifiedAs(uid) && validSnapshot(device) && stampedNow() && isPro(uid);
+        allow update: if verifiedAs(uid) && validSnapshot(device) && stampedNow() && notTooSoon()
+          && isPro(uid);
+        // Removing your own data never needs a plan.
+        allow delete: if signedInAs(uid);
+      }
+    }
+  }
+}

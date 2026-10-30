@@ -280,14 +280,15 @@ main.gs-active { display:block; }
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .proj-cell { display:flex; align-items:center; gap:6px; flex-wrap:wrap; min-width:0; }
 /* ---------- CHATS (per-conversation cost) ---------- */
-.chats-scroll { max-height:none; height: clamp(360px, calc(100vh - 300px), 980px); }
+/* Two classes: the plain .scroll rule further down otherwise caps it at 320px (about 4 rows). */
+.scroll.chats-scroll { max-height:none; height: clamp(360px, calc(100vh - 300px), 980px); }
 #chats-tbl { table-layout: fixed; width:100%; }
 #chats-tbl th:nth-child(1) { width: 200px; }
 #chats-tbl th:nth-child(3) { width: 64px; }
-#chats-tbl th:nth-child(4) { width: 70px; }
+#chats-tbl th:nth-child(4) { width: 80px; }
 #chats-tbl th:nth-child(5) { width: 180px; }
 #chats-tbl th:nth-child(6) { width: 84px; }
-#chats-tbl th:nth-child(7) { width: 76px; }
+#chats-tbl th:nth-child(7) { width: 88px; }   /* "$10,489" needs 77px with the cell padding */
 #chats-tbl th:nth-child(8) { width: 64px; }
 #chats-tbl td { overflow:hidden; text-overflow:ellipsis; }
 .chats-goal { font:400 12px/1.45 var(--font-sans); color:var(--text-3); white-space:nowrap; }

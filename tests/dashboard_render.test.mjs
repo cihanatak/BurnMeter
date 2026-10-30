@@ -70,7 +70,7 @@ globalThis.location = windowStub.location;
 // Evaluate dashboard.js and capture the pure functions under test. Function declarations
 // are local to the wrapper; the appended assignment captures them out.
 const run = new Function(
-  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere, refresh, fetchT, renderPricingNote, modelDisplay, bmNewChart, renderOverviewFleet, renderDeviceBreakdown, renderCombinedFleet, bmDur, bmChatCost, computeGaugeSpec };"
+  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere, refresh, fetchT, renderPricingNote, modelDisplay, bmNewChart, renderOverviewFleet, renderDeviceBreakdown, renderCombinedFleet, bmDur, bmChatCost, computeGaugeSpec, drawGaugeSvg, bmOnlineState, bmSnapFresh, proSyncNote, proDevicesHtml, proNote, proNoteHtml, proSignedInHeader, renderChats, bmChatList };"
 );
 run();
 const { bmScopedHalf, bmScopedRep, liveBurnRate, bmPathParts, bmProjCell, liveWhere } = globalThis.__BM;
@@ -396,7 +396,9 @@ passed += 1;
   assert.equal(a.today, 0, "nor a today");
   assert.equal(a.month, 0, "nor a this-month");
   assert.equal(a.lifetime, 100, "lifetime totals stay valid at any age");
-  const fresh = bmDeviceAgg({ ...stale, _updated_at: new Date(Date.now() - 60e3).toISOString() }, ["claude"]);
+  // A minute ago, but never yesterday: in the first minute after midnight it would be.
+  const minuteAgo = Math.max(Date.now() - 60e3, new Date().setHours(0, 0, 0, 0));
+  const fresh = bmDeviceAgg({ ...stale, _updated_at: new Date(minuteAgo).toISOString() }, ["claude"]);
   assert.ok(near(fresh.burn, pcClaudeBBH["2"]) && fresh.today === 1 && fresh.month === 10,
     "a snapshot pushed a minute ago counts in full");
 
@@ -483,6 +485,116 @@ passed += 1;
   assert.equal(spec(6).below, true);
   assert.equal(spec(33, { insufficient_history: true }).ratio, null, "a market estimate is not your pace");
   passed += 5;
+}
+
+// === TEST 24: no gauge label runs off the canvas ===
+// The viewBox is 0..400 wide. "your typical" sits near the left end and read "ypical".
+{
+  const { computeGaugeSpec, drawGaugeSvg } = globalThis.__BM;
+  const cases = [
+    { typical: 12, busy: 45, heavy: 90, max: 135 },
+    { typical: 4, busy: 12, heavy: 25, max: 50 },
+    { typical: 4, busy: 12, heavy: 25, max: 50, insufficient_history: true },
+  ];
+  for (const z of cases) {
+    const { g } = computeGaugeSpec({ forecast: { burn_rates_by_hours: { "2": 6 } }, burn_rate_zones: z }, false, "2");
+    const svg = { innerHTML: "" };
+    drawGaugeSvg(svg, g);
+    const labels = [...svg.innerHTML.matchAll(/<text class="speedo-tick-label" x="([-\d.]+)" y="[-\d.]+" text-anchor="(\w+)"[^>]*>([^<]*)</g)];
+    assert.equal(labels.length, 4, "four tick labels");
+    for (const [, xs, anc, text] of labels) {
+      const x = Number(xs), w = text.length * 7;
+      const left = anc === "end" ? x - w : anc === "middle" ? x - w / 2 : x;
+      assert.ok(left >= 0 && left + w <= 400, `"${text}" spans ${left.toFixed(1)}..${(left + w).toFixed(1)} in a 400-wide box (${JSON.stringify(z)})`);
+      passed += 1;
+    }
+  }
+}
+
+// === TEST 25: device freshness follows the 0.3.6 sync cadence ===
+// A device now checks every 10 min and pushes only a changed snapshot; pulls are 5-min
+// cached. The old 6-min "online" and 15-min burn windows would call a busy device idle
+// between its pushes and drop its burn from the fleet gauge.
+{
+  const { bmOnlineState, bmSnapFresh, proSyncNote, proDevicesHtml } = globalThis.__BM;
+  const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
+  assert.equal(bmOnlineState(ago(20)).txt, "online");
+  assert.equal(bmOnlineState(ago(30)).txt, "idle");
+  assert.equal(bmOnlineState(ago(25 * 60)).txt, "offline");
+  assert.equal(bmSnapFresh({ _updated_at: ago(20) }).burn, true);
+  assert.equal(bmSnapFresh({ _updated_at: ago(30) }).burn, false);
+  // A refused push is shown instead of swallowed; a plan refusal links to Pro.
+  const note = proSyncNote({ sync: { error: { kind: "plan", message: "sync is a Pro feature, and this account has no Pro plan" } } });
+  assert.ok(note.includes("no Pro plan") && note.includes("--warn"), note);
+  assert.ok(proSyncNote({ sync: { last_ok_at: Date.now() / 1000 - 120 } }).includes("synced 2m ago"));
+  const refused = proDevicesHtml({ error: "sync is a Pro feature, and this account has no Pro plan", kind: "plan", devices: [] });
+  assert.ok(refused.includes("About Pro") && !refused.includes("couldn't reach"), refused);
+  assert.ok(proDevicesHtml({ error: "server" }).includes("local Burnmeter server"));
+  passed += 9;
+}
+
+// === TEST 26: the Push-now / rename note survives the next repaint of the Pro bar ===
+// It used to be written into #pro-msg after the re-render, so a render already in flight
+// (or the next tick) painted the bar again without it.
+{
+  const { proSyncNote, proNote, proNoteHtml, proSignedInHeader } = globalThis.__BM;
+  const st = { configured: true, verified: true, plan: "pro", email: "x",
+    sync: { last_ok_at: Date.now() / 1000 - 120, pending: true, next_in: 190 } };
+  assert.ok(proSyncNote(st).includes("synced 2m ago · next in 3m"), proSyncNote(st));
+  assert.ok(!proSyncNote({ sync: { last_ok_at: Date.now() / 1000 - 120, next_in: 400 } }).includes("next in"),
+    "the next check is only shown for a queued push");
+  window.__proNote = null;
+  proNote("queued: Firebase takes one update per device every 5 min");
+  assert.ok(proSignedInHeader(st).includes("queued: Firebase"), "the note is in the repainted bar");
+  assert.ok(proSignedInHeader(st).includes("queued: Firebase"), "and in the one after");
+  proNote("renamed on this device; not synced yet", true);
+  assert.ok(proNoteHtml().includes("--warn") && proNoteHtml().includes("not synced yet"));
+  window.__proNote.until = Date.now() - 1;
+  assert.ok(!proSignedInHeader(st).includes("not synced yet"), "a note expires after a minute");
+  passed += 6;
+}
+
+// === TEST 27: the Chats page reaches every chat ===
+// It stopped at 60 rows with no way to see the rest (60 of 195 on the maker's PC).
+{
+  const { renderChats } = globalThis.__BM;
+  const tbody = { innerHTML: "" };
+  const realQS = documentStub.querySelector, realFetch = globalThis.fetch;
+  documentStub.querySelector = (sel) => (sel === "#chats-tbl tbody" ? tbody : realQS(sel));
+  const chat = (i, cost = 1) => ({ session_id: "s" + i, total_tokens: 10, cost_usd: cost, models: [],
+    project_label: "p", ended_at: new Date(Date.now() - i * 60000).toISOString() });
+  const rows = () => (tbody.innerHTML.match(/class="chats-goal"/g) || []).length;   // chat rows only
+  window.__chatsSort = "recent"; window.__chatsAll = false; window.__chatsOlder = {};
+  const rep = { _meta: { source: "claude" }, by_session: Array.from({ length: 75 }, (_, i) => chat(i)), by_session_total: 75 };
+  window.__lastReport = rep;
+  renderChats(rep);
+  assert.equal(rows(), 60, "60 chats at first");
+  assert.ok(tbody.innerHTML.includes("Show all 75 chats"));
+  window.bmChatsShowAll();
+  assert.equal(rows(), 75, "then every chat");
+  assert.ok(!tbody.innerHTML.includes("Show all"));
+  passed += 4;
+
+  // Past the report's newest 200, the rest come from /api/chats, and "Most $" ranks them too.
+  window.__chatsAll = false; window.__chatsSort = "cost";
+  const asked = [];
+  globalThis.fetch = async (url) => { asked.push(url); return { ok: true,
+    json: async () => ({ by_session: Array.from({ length: 250 }, (_, i) => chat(i, i === 240 ? 999 : 1)) }) }; };
+  const big = { _meta: { source: "claude" }, by_session: Array.from({ length: 200 }, (_, i) => chat(i)), by_session_total: 250 };
+  window.__lastReport = big;
+  renderChats(big);
+  await window.__chatsLoading;
+  assert.deepEqual(asked, ["/api/chats?source=claude"]);
+  assert.ok(tbody.innerHTML.split("<tr>")[1].includes("$999"), "the costliest chat, older than the newest 200, comes first");
+  assert.equal(rows(), 60);
+  assert.ok(tbody.innerHTML.includes("Show all 250 chats"));
+  window.bmChatsShowAll();
+  assert.equal(rows(), 250);
+  renderChats(big);
+  assert.equal(asked.length, 1, "the full list is fetched once");
+  passed += 6;
+  documentStub.querySelector = realQS; globalThis.fetch = realFetch;
+  window.__chatsSort = "recent"; window.__chatsAll = false; window.__chatsOlder = {};
 }
 
 console.log(`dashboard_render: ${passed} assertions passed`);

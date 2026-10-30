@@ -1,10 +1,13 @@
 """Burnmeter Pro — public Firebase web config.
 
 These are NOT secrets: a Firebase web apiKey identifies the project, it does not grant
-access. Security is enforced by Firestore Security Rules + Firebase Auth (verified email,
-per-uid ownership) — exactly as in the Ages Tycoon app, whose config is likewise public.
-Safe to commit. Pro entitlement is gated server-side (the `plan` field, writable only by
-billing), so shipping this in the open-source client does not bypass Pro.
+access. What protects the data is Firebase Auth plus firestore.rules (repo root): an
+account reaches only its own documents, and only after verifying its email. Safe to commit.
+
+Pro is enforced by the deployed copy of those rules alone: device sync needs
+`plan == "pro"` on /users/{uid}, a document no client can write (billing, or
+scripts/pro_admin.py grant, sets it). The client is open source, so nothing it checks
+can enforce Pro. Deploying and rolling back the rules: docs/FIRESTORE_RULES.md.
 """
 
 FIREBASE = {

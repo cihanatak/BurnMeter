@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Local page, no network: the shell pushes status through the preload bridge. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Burnmeter</title>
+<style>
+  html { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #0F1011; color: #D0D6E0;
+    font: 14px/1.5 "Inter", "Segoe UI", system-ui, sans-serif; user-select: none; }
+  /* The native title bar is hidden, so the whole splash moves the window; the window
+     controls are drawn by the overlay at the top right. */
+  body { -webkit-app-region: drag; display: flex; align-items: center; justify-content: center; }
+  .box { width: min(440px, 100% - 48px); text-align: center; }
+  .brand { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: #62666D; margin-bottom: 22px; }
+  .spin { width: 22px; height: 22px; margin: 0 auto 18px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.09); border-top-color: #D97757; animation: spin .9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+  h1 { margin: 0 0 6px; font-size: 16px; font-weight: 600; color: #F7F8F8; }
+  p { margin: 0; font-size: 13px; color: #8A8F98; }
+  .err .spin { display: none; }
+  .err h1 { color: #F2555A; }
+  button { -webkit-app-region: no-drag; margin-top: 20px; padding: 7px 20px; border-radius: 6px;
+    border: 1px solid rgba(255,255,255,.14); background: #1C1D1F; color: #F7F8F8;
+    font: inherit; font-size: 13px; cursor: pointer; }
+  button:hover { background: #26272A; }
+  button:focus-visible { outline: 2px solid rgba(94,106,210,.45); outline-offset: 2px; }
+  .log { margin-top: 16px; font-size: 12px; color: #62666D; }
+  code { -webkit-app-region: no-drag; user-select: text; font-family: Consolas, ui-monospace, monospace; color: #8A8F98; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <main class="box" id="box">
+    <div class="brand">Burnmeter</div>
+    <div class="spin" aria-hidden="true"></div>
+    <h1 id="title">Starting Burnmeter…</h1>
+    <p id="detail"></p>
+    <button id="retry" type="button" hidden>Retry</button>
+    <p class="log" id="log" hidden>Server log: <code id="logpath"></code></p>
+  </main>
+<script>
+  const bridge = window.burnmeterShell;
+  const $ = (id) => document.getElementById(id);
+  function render(s) {
+    if (!s) return;
+    const err = s.state === "error";
+    $("box").classList.toggle("err", err);
+    $("title").textContent = s.title || "Starting Burnmeter…";
+    $("detail").textContent = s.detail || "";
+    $("retry").hidden = !err;
+    $("log").hidden = !err || !s.log;
+    $("logpath").textContent = s.log || "";
+  }
+  $("retry").addEventListener("click", () => {
+    render({ state: "starting", title: "Starting Burnmeter…" });
+    if (bridge) bridge.retry();
+  });
+  if (bridge) { bridge.onState(render); bridge.state().then(render); }
+</script>
+</body>
+</html>

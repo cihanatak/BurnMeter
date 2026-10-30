@@ -77,3 +77,34 @@ def test_build_report_attaches_chat_titles(monkeypatch):
     assert rep["recent_turns"][0]["chat"] == "World Intelligence"
     lam = rep["live_active_models_by_window"]["5"]["models"]
     assert lam and lam[0].get("chat") == "World Intelligence"
+
+
+def test_the_moved_windows_store_is_read(monkeypatch, tmp_path):
+    """Later desktop builds keep the store in %LOCALAPPDATA%/Claude-Data/claude_<id>;
+    reading only %APPDATA%/Claude left every chat on Windows with its folder name."""
+    import burnmeter.chat_titles as ct
+    new = tmp_path / "local" / "Claude-Data" / "claude_abc" / "claude-code-sessions"
+    (new / "org" / "user").mkdir(parents=True)
+    (new / "org" / "user" / "local_1.json").write_text(
+        json.dumps({"cliSessionId": "sid-1", "title": "Burnmeter", "titleSource": "user"}), encoding="utf-8")
+    monkeypatch.setattr(ct.sys, "platform", "win32")
+    monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))          # the old place: absent
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    assert ct._store_roots() == [new]
+    assert load_chat_titles(roots=ct._store_roots()) == {"sid-1": "Burnmeter"}
+
+
+def test_a_file_is_parsed_again_only_when_it_changes(monkeypatch, tmp_path):
+    import os
+    import burnmeter.chat_titles as ct
+    root = _store(tmp_path, [{"cliSessionId": "sid-1", "title": "first", "titleSource": "auto"}])
+    f = next(root.rglob("local_*.json"))
+    assert load_chat_titles(roots=[root]) == {"sid-1": "first"}
+    real_loads = ct.json.loads
+    monkeypatch.setattr(ct.json, "loads", lambda *a, **k: (_ for _ in ()).throw(AssertionError("parsed")))
+    assert load_chat_titles(roots=[root]) == {"sid-1": "first"}       # unchanged → from the cache
+    monkeypatch.setattr(ct.json, "loads", real_loads)
+    f.write_text(json.dumps({"cliSessionId": "sid-1", "title": "renamed", "titleSource": "user"}), encoding="utf-8")
+    st = f.stat()
+    os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))   # a coarse clock can't hide the change
+    assert load_chat_titles(roots=[root]) == {"sid-1": "renamed"}
