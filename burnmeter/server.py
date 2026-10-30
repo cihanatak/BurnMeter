@@ -22,6 +22,7 @@ from urllib.parse import urlparse, parse_qs
 from . import __version__
 from .parser import CLAUDE_PROJECTS_DIR, load_records
 from .codex_parser import CODEX_SESSIONS_DIR, load_codex_records
+from . import codex_parser as _codex_parser, parser as _parser
 from .analytics import build_report
 
 
@@ -48,11 +49,19 @@ class _Cache:
 
     def __init__(self, projects_dir: Path, ttl_seconds: int = 15,
                  extra_roots: Optional[list[Path]] = None, loader=None,
-                 worker_config: Optional[dict] = None):
+                 worker_config: Optional[dict] = None,
+                 quick_config: Optional[dict] = None,
+                 cache_file: Optional[Path] = None):
         self.projects_dir = projects_dir
         self.extra_roots = extra_roots or []
         self.ttl = ttl_seconds
         self.worker_config = worker_config
+        # Merged into worker_config for the quick report (recent logs only) that the
+        # dashboard shows while the first full read runs. Only when `cache_file`, the
+        # parser's per-file cache, doesn't exist yet: that is a fresh install. With it,
+        # a restart's build reads only the changed logs and is quick anyway.
+        self.quick_config = quick_config
+        self.cache_file = cache_file
         self._loader = loader or (
             lambda: load_records(self.projects_dir, extra_roots=self.extra_roots)
         )
@@ -61,8 +70,18 @@ class _Cache:
         self._report = None
         self._report_key = None
         self._report_at = 0.0
+        # The first build of a cold cache (a fresh install reads its whole history):
+        self._partial = None          # the quick report, until the full one is in
+        self._partial_key = None
+        self._progress_path = None    # the worker's progress file while it reads
+        self._cold_started = None     # when that build started
+        self._cold_failed_at = 0.0    # when one last failed (no instant retry loop)
+        self._cold_error = None
+        self._cold_fresh = False      # no parse cache on disk: a fresh install's first read
 
-    def _run_worker(self) -> Optional[dict]:
+    def _run_worker(self, overrides: Optional[dict] = None,
+                    progress_path: Optional[str] = None,
+                    timeout: int = 1200) -> Optional[dict]:
         """Spawn the build worker; return its report dict or None on failure.
 
         Config and result go through TEMP FILES (env vars), not stdin/stdout — a
@@ -82,12 +101,15 @@ class _Cache:
         out_fd, out_path = tempfile.mkstemp(suffix=".json", prefix="bm-wk-out-")
         os.close(out_fd)
         try:
-            Path(in_path).write_text(json.dumps(self.worker_config or {}), encoding="utf-8")
+            Path(in_path).write_text(json.dumps({**(self.worker_config or {}), **(overrides or {})}),
+                                     encoding="utf-8")
             env = dict(os.environ, BURNMETER_WORKER_IN=in_path,
                        BURNMETER_WORKER_OUT=out_path, PYTHONUTF8="1",
                        BURNMETER_WORKER_PARENT=str(os.getpid()))   # it exits if we die
+            if progress_path:
+                env["BURNMETER_WORKER_PROGRESS"] = progress_path
             proc = subprocess.run(
-                worker_argv, capture_output=True, text=True, timeout=1200,
+                worker_argv, capture_output=True, text=True, timeout=timeout,
                 creationflags=NO_WINDOW, env=env,   # NO_WINDOW: no cmd flash per rebuild
             )
             if proc.returncode != 0:
@@ -104,12 +126,14 @@ class _Cache:
                 except Exception:
                     pass
 
-    def _do_build(self, build_fn, key):
+    def _do_build(self, build_fn, key, progress_path: Optional[str] = None,
+                  timeout: int = 1200):
         """Run the heavy build (worker subprocess, RAM-bounded; in-process on
         worker failure) and store it. Assumes self._build_lock is held."""
         report = None
         if self.worker_config is not None:
-            report = self._run_worker()   # heavy work in a process that then dies
+            # heavy work in a process that then dies
+            report = self._run_worker(progress_path=progress_path, timeout=timeout)
         if report is None:
             # Fallback: in-process (records discarded right after to limit RSS).
             records, stats, intents, errors = self._loader()
@@ -173,7 +197,106 @@ class _Cache:
         with self._build_lock:
             if self._report is not None and self._report_key == key:
                 return self._report                   # another thread built it
-            return self._do_build(build_fn, key)
+            return self._cold_build(build_fn, key)
+
+    def _cold_build(self, build_fn, key):
+        """The first build of a cold cache; the build lock is held. On a fresh install
+        it reads the whole history (minutes on a big one), so the dashboard doesn't wait
+        on it (peek): with no parse cache on disk yet, a quick report of the last day's
+        logs goes up first, and the full read writes its progress to a file that the
+        loading screen shows."""
+        import tempfile
+        self._cold_started = time.time()
+        self._cold_error = None
+        fd, prog = tempfile.mkstemp(suffix=".json", prefix="bm-wk-progress-")
+        os.close(fd)
+        try:
+            fresh = self.cache_file is not None and not self.cache_file.exists()
+            self._cold_fresh = fresh
+            Path(prog).write_text(json.dumps({"phase": "quick" if fresh else "reading"}),
+                                  encoding="utf-8")
+            self._progress_path = prog
+            if fresh and self.worker_config is not None and self.quick_config is not None:
+                quick = self._run_worker(self.quick_config, timeout=300)
+                if quick is not None:
+                    with self._lock:
+                        self._partial, self._partial_key = quick, key
+            # No 20-minute cap here: a slow PC's first read may need longer, and a
+            # killed worker meant reading everything again in-process.
+            return self._do_build(build_fn, key, progress_path=prog, timeout=4 * 3600)
+        except Exception as e:
+            self._cold_error = str(e)
+            self._cold_failed_at = time.time()
+            raise
+        finally:
+            self._progress_path = None
+            with self._lock:
+                if self._report is not None and self._report_key == key:
+                    self._partial = self._partial_key = None
+            for p in (prog, prog + ".tmp"):
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+
+    def _bg_cold(self, build_fn, key):
+        """_cold_build off the request path; release the build lock after."""
+        try:
+            if not (self._report is not None and self._report_key == key):
+                self._cold_build(build_fn, key)
+        except Exception as e:
+            sys.stderr.write(f"[burnmeter] first build failed: {e}\n")
+        finally:
+            self._build_lock.release()
+
+    def peek(self, build_fn, key, wait_s: float = 3.0):
+        """get_report for the dashboard, which must never wait long on a cold build.
+
+        Returns (report, quick, progress). With a report (fresh, or stale and being
+        refreshed): (report, None, None). Without one, the first build is started in
+        the background if nothing is building yet, and a small history that's read
+        within `wait_s` is returned as usual; else (None, the quick report once it's
+        built, the first build's progress)."""
+        if self._report is not None and self._report_key == key:
+            return self.get_report(build_fn, key), None, None
+        if time.time() - self._cold_failed_at >= 30 and self._build_lock.acquire(blocking=False):
+            try:
+                threading.Thread(target=self._bg_cold, args=(build_fn, key), daemon=True).start()
+            except RuntimeError as e:
+                self._build_lock.release()
+                sys.stderr.write(f"[burnmeter] first build thread failed to start: {e}\n")
+        until = time.monotonic() + wait_s
+        while time.monotonic() < until:
+            if self._report is not None and self._report_key == key:
+                return self._report, None, None
+            time.sleep(0.05)
+        with self._lock:
+            quick = self._partial if self._partial_key == key else None
+        return None, quick, self.progress()
+
+    def progress(self) -> dict:
+        """What the loading screen shows while the first build runs: the worker's counts
+        (files_done/files_total, bytes_done/bytes_total, phase), seconds so far, and an
+        estimate of the seconds left once enough has been read to judge."""
+        path = self._progress_path
+        out: dict = {}
+        if path:
+            try:
+                out = json.loads(Path(path).read_text(encoding="utf-8") or "{}")
+            except (OSError, ValueError):
+                out = {}
+        out["building"] = bool(path)
+        out["fresh"] = bool(path and self._cold_fresh)
+        if path and self._cold_started:
+            out["elapsed_s"] = round(time.time() - self._cold_started, 1)
+        done, total = out.get("bytes_done") or 0, out.get("bytes_total") or 0
+        started = out.get("started_at")
+        if out.get("phase") == "reading" and started and total and done >= 0.02 * total:
+            spent = max(time.time() - started, 0.1)
+            out["eta_s"] = round(spent * (total - done) / done)
+        if self._cold_error:
+            out["error"] = self._cold_error
+        return out
 
 
 def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict):
@@ -201,6 +324,10 @@ def _file_response(handler: BaseHTTPRequestHandler, path: Path, content_type: st
     handler.wfile.write(data)
 
 
+# How long the dashboard's /api/report waits on a first build before it answers 202 and
+# the progress: a small history is read in that time and skips the loading screen.
+_FIRST_BUILD_WAIT_S = 3.0
+
 # Per-process identity, set by setup_server() and echoed by /api/health. The
 # single-instance guard matches THIS token so it recognises the exact instance
 # the pidfile describes (not merely "a" Burnmeter on that port).
@@ -227,10 +354,7 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
 
     POLL_SESSIONS = 200   # chats in each /api/report; the full list only grows
 
-    def build_for(source, plan, force=False):
-        """Cached report for a source (worker-backed). Used by /api/report
-        and /api/statusline so both share one RAM-bounded build per TTL."""
-        sel = codex_cache if (source == "codex" and codex_cache) else cache
+    def _builder(source, plan):
         def _build(records, stats, loaded_at, intents, error_events):
             rep = build_report(records, plan=plan, user_intents=intents,
                                error_events=error_events, source=source)
@@ -241,7 +365,19 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
             # choke point. Do NOT hook it here: with worker_config set this callback is only
             # the fallback path and the worker build would miss it (bit us in 0.1.73 dev).
             return rep
-        return sel.get_report(_build, key=(source, plan), force=force)
+        return _build
+
+    def build_for(source, plan, force=False):
+        """Cached report for a source (worker-backed). Used by /api/report
+        and /api/statusline so both share one RAM-bounded build per TTL."""
+        sel = codex_cache if (source == "codex" and codex_cache) else cache
+        return sel.get_report(_builder(source, plan), key=(source, plan), force=force)
+
+    def peek_for(source, plan, wait_s=None):
+        """build_for that never waits long on a first build: (report, quick, progress)."""
+        sel = codex_cache if (source == "codex" and codex_cache) else cache
+        return sel.peek(_builder(source, plan), key=(source, plan),
+                        wait_s=_FIRST_BUILD_WAIT_S if wait_s is None else wait_s)
 
     # Pro sync. The free Firebase plan has 20k writes and 50k reads a day for every
     # account together, so the dashboard's reads are cached for minutes, and pushes go
@@ -641,11 +777,19 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 # `burnmeter statusline` CLI subcommand, so HTTP pull + terminal never drift).
                 from .statusline import build_statusline, statusline_text
                 src = (qs.get("source", ["claude"])[0] or "claude").lower()
-                report = build_for(src, None)   # shared worker-backed cached report
-                if qs.get("format", [""])[0] == "json":
+                # Never waits on a first build: Claude Code runs the statusline every few
+                # seconds, and each call held a server thread for the whole first read
+                # (minutes on a fresh install). The CLI computes its own on a 503.
+                report, _quick, _ = peek_for(src, None, wait_s=0)
+                as_json = qs.get("format", [""])[0] == "json"
+                if report is None and as_json:
+                    _json_response(self, 503, {"warming": True, "source": src})
+                    return
+                if as_json:
                     _json_response(self, 200, build_statusline(report))
                     return
-                body = statusline_text(report).encode("utf-8")
+                body = (statusline_text(report) if report is not None
+                        else "Burnmeter · reading your history…").encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")
                 self.send_header("Cache-Control", "no-store")
@@ -658,7 +802,21 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                 force = qs.get("refresh", ["0"])[0] == "1"
                 plan = (qs.get("plan", [None])[0] or None)
                 _, source = pick_cache(qs)
-                report = build_for(source, plan, force=force)
+                if force or qs.get("wait", ["0"])[0] == "1":
+                    report = build_for(source, plan, force=force)
+                else:
+                    # The dashboard never waits on a first build (a fresh install reads
+                    # its whole history: minutes). It gets the quick last-day report
+                    # once that's built, or 202 and the progress for its loading screen.
+                    report, quick, progress = peek_for(source, plan)
+                    if report is None and quick is None:
+                        _json_response(self, 202, {"warming": True, "source": source,
+                                                   "version": __version__,
+                                                   "progress": progress})
+                        return
+                    if report is None:
+                        report = {**quick, "_meta": {**(quick.get("_meta") or {}),
+                                                     "partial": True, "progress": progress}}
                 report.setdefault("_meta", {})
                 report["_meta"]["version"] = __version__
                 report["_meta"]["served_at"] = time.time()
@@ -673,8 +831,9 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
             if path == "/api/chats":
                 # Every chat of a source, for the Chats page's "Show all" and "Most $".
                 _, source = pick_cache(qs)
-                _json_response(self, 200, {"source": source,
-                                           "by_session": build_for(source, None).get("by_session") or []})
+                report, quick, _ = peek_for(source, None)   # never waits on a first build
+                _json_response(self, 200, {"source": source, "partial": report is None,
+                                           "by_session": (report or quick or {}).get("by_session") or []})
                 return
 
             if path == "/api/alerts/config":
@@ -988,8 +1147,10 @@ class _ServerHandle:
             time.sleep(1.0)
             for p in self._warm_paths:
                 try:
+                    # wait=1 blocks until the build is done, so the two sources are
+                    # read one after the other, not at once.
                     urllib.request.urlopen(
-                        f"http://{self.host}:{self.port}{p}", timeout=620).read()
+                        f"http://{self.host}:{self.port}{p}", timeout=4 * 3600).read()
                 except Exception:
                     pass
         threading.Thread(target=_warm, daemon=True).start()
@@ -1041,6 +1202,8 @@ def setup_server(host: str = "127.0.0.1", port: int = 7654,
             "projects_dir": str(projects_dir),
             "extra_roots": [str(r) for r in (extra_roots or [])],
         },
+        quick_config={"since_hours": 24},
+        cache_file=_parser._CLAUDE_CACHE_PATH,
     )
 
     # burnmeter — second source. Codex sessions are huge (16GB+); the build
@@ -1057,6 +1220,8 @@ def setup_server(host: str = "127.0.0.1", port: int = 7654,
             "codex_extra_roots": [str(r) for r in (codex_extra_roots or [])],
             "codex_since_days": codex_since_days,
         },
+        quick_config={"codex_since_days": 1},
+        cache_file=_codex_parser._CACHE_PATH,
     )
 
     if not projects_dir.exists():
@@ -1131,7 +1296,7 @@ def setup_server(host: str = "127.0.0.1", port: int = 7654,
     view_host = "127.0.0.1" if host in ("0.0.0.0", "") else host
     url = f"http://{view_host}:{port}"
     handle = _ServerHandle(server, host, port, url, _pidfile,
-                           ("/api/report", "/api/report?source=codex"))
+                           ("/api/report?wait=1", "/api/report?source=codex&wait=1"))
     # Normal interpreter exit also cleans up (does NOT run on SIGKILL/taskkill —
     # the guard's self-heal covers those).
     atexit.register(handle.close)

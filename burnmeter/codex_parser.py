@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Callable, Iterator, Optional
 
 from .parser import UsageRecord, _local_device, _parse_timestamp, _root_prefixes, _under
 
@@ -245,15 +245,32 @@ def _compact_to_usages(meta: dict, turns: list, device: str):
         )
 
 
+def _bytes_to_read(cached: Optional[dict], sig: list) -> int:
+    """How much of a log load_codex_records reads: nothing if it's unchanged, the new
+    bytes if it only grew, else all of it (its three cases, for the progress counts)."""
+    if cached and cached.get("v") == _PARSE_VERSION and "meta" in cached:
+        old_sig = cached.get("sig") or [0, 0]
+        off0 = int(cached.get("offset") or 0)
+        if old_sig == sig:
+            return 0
+        if sig[1] > old_sig[1] and off0 <= sig[1]:
+            return sig[1] - off0
+    return sig[1]
+
+
 def load_codex_records(
     root: Path = CODEX_SESSIONS_DIR,
     extra_roots: Optional[list[Path]] = None,
     since_days: int = 90,
+    progress: Optional[Callable[[dict], None]] = None,
 ) -> tuple[list[UsageRecord], dict, dict[str, str]]:
     """Load Codex usage records with an incremental (path,mtime,size) cache.
 
     Returns (records sorted by time, stats, user_intents) — same shape as
     parser.load_records so the analytics pipeline is source-agnostic.
+
+    progress: called about twice a second with files_done/files_total and
+    bytes_done/bytes_total (the bytes that need reading, not served from the cache).
     """
     cache = _load_cache()
     new_cache: dict = {}
@@ -280,11 +297,13 @@ def load_codex_records(
 
     import time
     cutoff_ts = (time.time() - since_days * 86400) if since_days and since_days > 0 else 0.0
+    # Every log first (a stat each), so a long first read can say how far it is.
+    plan = []
     for scan_root, device in roots:
         if not scan_root.exists():
             continue
+        logs = []
         for path in iter_codex_files(scan_root):
-            key = str(path)
             try:
                 st = path.stat()
                 sig = [st.st_mtime, st.st_size]
@@ -296,6 +315,19 @@ def load_codex_records(
             # signal — the active file keeps a fresh mtime; old sessions fall out.
             if cutoff_ts and st.st_mtime < cutoff_ts:
                 continue
+            logs.append((path, sig, _bytes_to_read(cache.get(str(path)), sig)))
+        plan.append((device, logs))
+    files_total = sum(len(logs) for _dev, logs in plan)
+    read_total = sum(need for _dev, logs in plan for _p, _s, need in logs)
+    read_done = 0
+    reported = time.monotonic()
+    for device, logs in plan:
+        for path, sig, need in logs:
+            if progress is not None and time.monotonic() - reported >= 0.5:
+                progress({"files_done": files, "files_total": files_total,
+                          "bytes_done": read_done, "bytes_total": read_total})
+                reported = time.monotonic()
+            key = str(path)
             files += 1
             cached = cache.get(key)
             if cached and cached.get("v") == _PARSE_VERSION and "meta" in cached:
@@ -324,6 +356,7 @@ def load_codex_records(
                 meta, turns, intent, rl, offset, state = parse_codex_file(path)
                 reparsed += 1
             state["intent"] = intent          # keep resume intent in sync
+            read_done += need
             # KOMPAKT cache + byte offset & resume state for incremental reparse.
             new_cache[key] = {"sig": sig, "v": _PARSE_VERSION, "meta": meta,
                               "turns": turns, "intent": intent, "device": device,
@@ -356,6 +389,10 @@ def load_codex_records(
             if reparsed and reparsed % 25 == 0 and reparsed != saved_at:
                 _save_cache({**cache, **new_cache})   # unvisited entries stay valid
                 saved_at = reparsed                   # cache hits don't move `reparsed`
+
+    if progress is not None:
+        progress({"files_done": files, "files_total": files_total,
+                  "bytes_done": read_done, "bytes_total": read_total})
 
     # Keep the entries of logs under other roots while those files exist:
     # scanning one tree (a test's temp dir) must not evict another's cache.

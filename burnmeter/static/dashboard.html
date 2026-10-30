@@ -94,6 +94,15 @@
 
     <main>
 
+      <!-- FIRST READ: a fresh install reads the whole history once (minutes on a big one).
+           The loading screen, above every section while that runs; hidden otherwise. -->
+      <section class="card warming-card" id="warming-card" role="status" aria-live="polite" style="display:none">
+        <div class="wm-lead" id="wm-lead"></div>
+        <div class="wm-bar"><div class="wm-fill" id="wm-fill"></div></div>
+        <div class="wm-line" id="wm-line"></div>
+        <div class="wm-body" id="wm-body"></div>
+      </section>
+
       <!-- ===== OVERVIEW ===== -->
       <div class="section active" data-section="overview">
 
