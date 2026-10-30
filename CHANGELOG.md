@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **A fresh install shows something at once.** Burnmeter reads every log once after
+  it's installed, and the page waited on that read: after 45 s it gave up and showed
+  "failed to load: signal is aborted without reason" until the read was done, minutes
+  later on a big history. It now opens on a loading screen that counts the logs and GB
+  read and the time left, shows your last 24 hours while the rest is read, and fills in
+  the totals, charts and older chats when it's done. On the maker's PC (7.9 GB of Claude
+  Code logs): the loading screen in 4 s, the last 24 hours in 12–16 s, everything in
+  about 2 min.
+- **The first read is twice as fast.** Each log line was decoded four times, now once:
+  the maker's 7.9 GB took 66 s to read instead of 145 s, with the same records.
+- **Quitting during the first read keeps what was read.** It's saved every minute, so
+  the next start goes on from there instead of starting over.
+- **The statusline doesn't tie up the server during a first read.** Each call waited
+  for the read to finish; the CLI now works it out itself until it's done.
+
 ## [0.3.6] — 2026-10-30
 
 ### Fixed
