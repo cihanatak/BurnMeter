@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest an idea, a new panel, or support for another agent.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: The question you're trying to answer, or what's slowing you down.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: agent
+    attributes:
+      label: New agent support?
+      description: If you're asking for another coding agent (Cursor, Copilot, Gemini CLI, …), say where it stores its session logs and whether they include token counts. Adding an agent is one parser module; see CONTRIBUTING.md.
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I'd like to work on this myself.

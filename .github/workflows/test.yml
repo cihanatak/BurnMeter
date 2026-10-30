@@ -1,0 +1,58 @@
+name: test
+
+# Runs the Python suite (pytest) and the Node render tests (tests/*.mjs) on every
+# OS Burnmeter ships for, at the oldest supported Python (requires-python in
+# pyproject.toml) and the one the release builds use.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ['3.10', '3.12']
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      # [sync] pulls in cryptography so the E2E sync tests run instead of skipping;
+      # Pillow is needed by the tray icon test.
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[sync]" pytest Pillow
+
+      - name: pytest
+        run: python -m pytest -q -rs
+
+      - name: Node tests (tests/*.mjs)
+        shell: bash
+        run: |
+          for f in tests/*.mjs; do
+            echo "::group::node $f"
+            node "$f"
+            echo "::endgroup::"
+          done
