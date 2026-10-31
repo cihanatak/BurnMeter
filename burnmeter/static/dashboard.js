@@ -137,7 +137,9 @@ window.__renderSig = null;   // signature of what's painted now → skip redunda
 function repSig(rep){
   if (!rep) return "";
   if (rep._combined) return "both:" + repSig(rep.claude) + "|" + repSig(rep.codex);
-  return (rep.record_count||0) + ":" + ((rep._meta && rep._meta.files_scanned) || 0) + ":" + ((rep._meta && rep._meta.source) || "");
+  // A stale or partial report and the full one after it can have the same counts.
+  const m = rep._meta || {};
+  return (rep.record_count||0) + ":" + (m.files_scanned || 0) + ":" + (m.source || "") + ":" + (m.stale ? "stale" : m.partial ? "partial" : "");
 }
 
 // A fetch that can NEVER hang forever. A dead socket (laptop sleep/resume leaving a
@@ -165,6 +167,79 @@ async function loadReportFor(src, force) {
 }
 const loadReport = (force) => loadReportFor(window.__source, force);
 
+// ---------- first read: the loading screen ----------
+// A fresh install has no parse cache and reads the whole history once (8.9 min for
+// 7.8 GB on the maker's PC). The page used to wait on that read, give up after 45 s
+// and print "failed to load: signal is aborted without reason" until it finished. The
+// server now answers at once: 202 with the read's progress, then a quick report of the
+// last 24 hours (_meta.partial) while the full read goes on.
+const fmtGB = (b) => (b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : Math.max(0, Math.round(b / 1e6)) + " MB");
+function fmtEta(s) {
+  if (s < 50) return "less than a minute";
+  const m = Math.round(s / 60);
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+// "14:32", "yesterday 23:10" or "Oct 28 09:05": when a stale report was built.
+function fmtAsOf(t) {
+  if (!t) return "your last visit";
+  const d = new Date(t * 1000), now = new Date(), y = new Date(now);
+  y.setDate(now.getDate() - 1);
+  const hm = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  if (d.toDateString() === now.toDateString()) return hm;
+  if (d.toDateString() === y.toDateString()) return "yesterday " + hm;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " " + hm;
+}
+// staleAt: a restart's first report is the last run's (_meta.stale, built then); the card
+// says it's updating instead of loading.
+function showWarming(src, p, partial, staleAt) {
+  const el = $("warming-card"); if (!el) return;
+  p = p || {};
+  const stale = staleAt !== undefined;
+  const tool = src === "codex" ? "Codex" : src === "both" ? "Claude Code and Codex" : "Claude Code";
+  let pct = null, line;
+  if (p.error) line = "The first read stopped: " + p.error + " — trying again…";
+  else if (p.phase === "quick") line = "Getting your last 24 hours first…";
+  else if (p.phase === "building") line = "Putting your dashboard together…";   // ~30 s on 7.9 GB: sliding bar, not a stuck 100%
+  else if (p.files_total) {
+    pct = Math.min(99, Math.floor(100 * (p.bytes_total ? p.bytes_done / p.bytes_total : p.files_done / p.files_total)));
+    line = `${fmtInt(p.files_done)} of ${fmtInt(p.files_total)} logs`
+      + (p.bytes_total ? ` · ${fmtGB(p.bytes_done)} of ${fmtGB(p.bytes_total)}` : "")
+      + (p.eta_s != null ? ` · about ${fmtEta(p.eta_s)} left` : "");
+  } else line = p.phase === "reading" ? "Reading your logs…" : "Starting…";
+  $("wm-lead").textContent = stale ? `Updating your ${tool} figures`
+    : p.fresh ? `Reading your ${tool} history for the first time` : `Loading your ${tool} history`;
+  const fill = $("wm-fill");
+  fill.classList.toggle("indet", pct == null);
+  fill.style.width = pct == null ? "" : pct + "%";
+  $("wm-line").textContent = (pct != null ? pct + "% · " : "") + line;
+  $("wm-body").textContent = stale
+    ? `Showing them as of ${fmtAsOf(staleAt)} while Burnmeter reads what changed. Your burn rate, today and this block fill in when it's done.`
+    : partial
+    ? "Showing your last 24 hours while the rest loads. Totals, charts and older chats fill in when it's done."
+    : p.fresh
+      ? "Burnmeter reads your local logs once; after this it opens in seconds. Nothing leaves your computer."
+      : "Only the logs that changed since last time are read.";
+  el.style.display = "";
+  if (!partial && !stale) $("last-updated").textContent = pct != null ? `Reading your history · ${pct}%` : "Reading your history…";
+}
+function hideWarming() { const el = $("warming-card"); if (el) el.style.display = "none"; }
+// While the first read runs, ask again in 1.5 s instead of the 10 s poll.
+function warmSoon() {
+  if (window.__warmTimer) return;
+  window.__warmTimer = setTimeout(() => { window.__warmTimer = null; refresh(false); }, 1500);
+}
+// After a render: on a quick (last-24h) report, keep the loading screen up and blank what
+// needs the whole history (the KPIs, the aside and the gauges check it themselves).
+// A restart's first report is the last run's (stale): the card says it's updating, and the
+// right-now figures (the needle, today, this block) wait for the fresh one.
+function afterRender(src, progress, asOf) {
+  const partial = !!window.__bmPartial, stale = !partial && !!window.__bmStale;
+  const bd = $("speedo-breakdown"); if (bd) bd.style.display = partial || stale ? "none" : "";
+  if (!partial && !stale) { hideWarming(); return; }
+  showWarming(src, progress, partial, stale ? (asOf ?? null) : undefined);
+  warmSoon();
+}
+
 async function refresh(force = false) {
   // In-flight guard with a ZOMBIE TAKEOVER: a poll stuck >60s is presumed dead (OS
   // slept mid-fetch, wedged socket) — the next tick takes over instead of no-oping
@@ -185,27 +260,52 @@ async function refresh(force = false) {
       const [cl, cx] = await Promise.all([loadReportFor("claude", force), loadReportFor("codex", force)]);
       if (token !== window.__refreshToken) return;          // superseded (zombie) → never paint
       if (window.__source !== "both") return;               // switched away mid-fetch
+      if (cl.warming || cx.warming) {                        // a first read: nothing to draw yet
+        window.__bmWarming = true;
+        showWarming("both", (cl.warming ? cl : cx).progress, false);
+        warmSoon();
+        return;
+      }
+      window.__bmPartial = !!(cl._meta?.partial || cx._meta?.partial);
+      window.__bmStale = !!(cl._meta?.stale || cx._meta?.stale);
+      window.__bmWarming = window.__bmPartial || window.__bmStale;
       window.__reportCache.claude = cl; window.__reportCache.codex = cx;
       window.__lastReport = { _combined: true, claude: cl, codex: cx };
       const sig = repSig(window.__lastReport);
       if (sig !== window.__renderSig || fullDue()) { renderCombined(cl, cx); window.__renderSig = sig; window.__fullRenderMs = Date.now(); }
       else { paintCombinedActive("claude", bmScopedHalf(cl, "claude")); paintCombinedActive("codex", bmScopedHalf(cx, "codex")); }  // scoped → shows remote devices' live model
       window.__lastRefreshMs = Date.now();
+      const im = (cl._meta?.partial || cl._meta?.stale ? cl : cx)._meta || {};
+      afterRender("both", im.progress, im.as_of);
       return;
     }
     const rep = await loadReport(force);
     if (token !== window.__refreshToken) return;            // superseded (zombie) → never paint
+    if (rep.warming) {                                      // a first read: nothing to draw yet
+      if ((rep.source || "claude") !== window.__source) return;
+      window.__bmWarming = true;
+      showWarming(rep.source, rep.progress, false);
+      warmSoon();
+      return;
+    }
     if ((rep._meta?.source || "claude") !== window.__source) return; // stale
+    window.__bmPartial = !!rep._meta?.partial;
+    window.__bmStale = !!rep._meta?.stale;
+    window.__bmWarming = window.__bmPartial || window.__bmStale;
     window.__reportCache[rep._meta?.source || "claude"] = rep;
     window.__lastReport = rep;
     const sig = repSig(rep);
     if (sig !== window.__renderSig || fullDue()) { render(rep); window.__renderSig = sig; window.__fullRenderMs = Date.now(); }
     else { renderActiveModel(bmScopedRep(rep) || rep); }   // scoped → keeps cross-device live model (no merged→local flicker)
     window.__lastRefreshMs = Date.now();
+    afterRender(rep._meta?.source || "claude", rep._meta?.progress, rep._meta?.as_of);
   } catch (e) {
     if (token !== window.__refreshToken) return;            // a superseded zombie failing late is noise
     console.error(e);
-    $("last-updated").textContent = "failed to load: " + e.message;
+    // Not the raw exception ("signal is aborted without reason" told a new user nothing).
+    $("last-updated").textContent = e && e.name === "AbortError"
+      ? "Burnmeter is slow to answer — still trying…"
+      : "Can't reach Burnmeter's engine — retrying…";
   } finally {
     if (token === window.__refreshToken) window.__refreshInFlight = false;
   }
@@ -772,7 +872,7 @@ function renderWelcome(rep) {
   const el = $("welcome-card"); if (!el) return;
   const n = rep.record_count || 0;
   const dismissed = localStorage.getItem("burnmeter_welcome_dismissed") === "1";
-  if (n >= 200 || dismissed) { el.style.display = "none"; return; }
+  if (n >= 200 || dismissed || window.__bmPartial) { el.style.display = "none"; return; }
   const tool = (rep._meta?.source || "claude") === "codex" ? "Codex" : "Claude Code";
   let lead, body;
   if (n === 0) {
@@ -889,7 +989,7 @@ function bmScopedHalf(localRep, source) {
   // at any picker position AND sums across devices. CRITICAL: we null recent_costs below
   // so liveBurnRate() reads this aggregate instead of recomputing from local turns only
   // (that bug made "both"-tab Codex show $0 on the PC / undercount on the Mac).
-  const WINS = ["0.0833", "0.25", "1", "2", "4", "6"];
+  const WINS = ["0.0833", "0.25", "1", "2", "4", "6", "12", "24", "48"];
   const hrs = localStorage.getItem("burnmeter_burn_hours_" + source) || "2";
   const burnByH = {}; WINS.forEach((w) => (burnByH[w] = 0));
   let today = 0, month = 0, lifetime = 0, tokens = 0, records = 0, chSum = 0, chW = 0, k = 0;
@@ -1036,7 +1136,7 @@ function renderCombined(cl, cx) {
   if (!window.__devicesCache) renderSyncDevices();
 }
 
-// her yarıda GERÇEK burn-rate speedometer (kendi tab'larındaki gibi) + 15dk/1h/2h/4h/6h picker
+// her yarıda GERÇEK burn-rate speedometer (kendi tab'larındaki gibi) + 5dk…48h picker
 function paintCombinedSide(side, rep, isCodex) {
   const root = document.getElementById("cv-" + side); if (!root) return;
   const els = () => ({ svg: root.querySelector(".cv-speedo"), zone: root.querySelector(".cv-zone2"), breakdown: root.querySelector(".cv-breakdown"), title: root.querySelector(".cvb-trow .cvb-t") });
@@ -1101,7 +1201,10 @@ function liveBurnRate(fc, hoursStr) {
 
 function computeGaugeSpec(rep, isCodex, hoursStr) {
   const fc = rep.forecast || {};
-  const rate = liveBurnRate(fc, hoursStr);
+  // No needle yet: the last run's report (stale) can't say what burns now, and a quick
+  // last-24h report (partial) can't fill a longer window.
+  const unknown = !!rep._meta?.stale || (!!rep._meta?.partial && parseFloat(hoursStr) > 24);
+  const rate = unknown ? 0 : liveBurnRate(fc, hoursStr);
   // Hem Claude HEM Codex → AYNI burn-rate $/saat göstergesi (tutarlılık — kullanıcı
   // talebi). Codex'in rate-limit %'si hero'da DEĞİL; yan kutuda ("Plan limiti · duvar")
   // gösterilir (renderHeroAside) → bilgi kaybolmaz, ama hero her iki araçta da burn.
@@ -1112,7 +1215,7 @@ function computeGaugeSpec(rep, isCodex, hoursStr) {
     ticks: zd
       ? [{ v: 0, l: "$0" }, { v: z.typical, l: "typical (est.)" }, { v: z.busy, l: "busy (est.)" }, { v: z.heavy, l: "heavy (est.)" }]
       : [{ v: 0, l: "$0" }, { v: z.typical, l: "your typical" }, { v: z.busy, l: "your heavy" }, { v: z.heavy, l: "very heavy" }],
-    valueText: fmtMoney(rate),
+    valueText: unknown ? "…" : fmtMoney(rate),
     unitText: `/hr · last ${hoursStr === "0.0833" ? "5m" : hoursStr === "0.25" ? "15m" : hoursStr + "h"} avg (est.)`,
     zone: rate >= z.heavy ? ["bad", "🔴 heavy zone · burning very hot"]
         : rate >= z.busy ? ["warn", "🟠 busy zone"]
@@ -1164,14 +1267,16 @@ function paintBurnGauge(els, rep, isCodex, hoursStr) {
   drawGaugeSvg(els.svg, g);
   if (els.title) els.title.textContent = isLimit ? "Limit · how far to the wall?" : "Burn rate · burning too fast?";
   if (els.zone) {
-    els.zone.className = "cv-zone2 " + g.zone[0];
+    const partial = !!rep._meta?.partial;   // last 24h only: "normal" needs the whole history
+    const stale = !partial && !!rep._meta?.stale;   // the last run's report: nothing "now" yet
+    els.zone.className = "cv-zone2" + (partial || stale ? "" : " " + g.zone[0]);
     let txt = g.zone[1];
     if (g.ratio != null && g.ratio > 0) txt += ` · ${g.ratio.toFixed(1)}× normal`;
     else if (g.below) txt += " · below normal";
-    els.zone.textContent = txt;
+    els.zone.textContent = partial ? "Calibrating to your history…" : stale ? "Updating…" : txt;
   }
   if (els.breakdown) {
-    const bd = (fc.burn_rates_by_hours_by_model || {})[hoursStr] || [];
+    const bd = rep._meta?.stale ? [] : (fc.burn_rates_by_hours_by_model || {})[hoursStr] || [];
     const vis = bd.filter(m => !String(m.model_id).startsWith("<")).slice(0, 4);
     els.breakdown.innerHTML = vis.length ? vis.map(m =>
       `<span class="sb-row ${modelToFamily(m.model_id)}"><span class="sb-name">${esc(modelDisplay(m.model_id))}</span><span class="sb-val">${fmtMoney(m.cost_per_hour)}/hr</span><span class="sb-share">${(m.share * 100).toFixed(0)}%</span></span>`).join("") : "";
@@ -1181,7 +1286,7 @@ function paintBurnGauge(els, rep, isCodex, hoursStr) {
 // bir yarının iskeleti: head + GERÇEK speedometer (svg + window picker) + canlı model + son işler
 function halfStructure(rep, isCodex, side) {
   const h = localStorage.getItem("burnmeter_burn_hours_" + side) || "2";
-  const picker = [["0.0833", "5m"], ["0.25", "15m"], ["1", "1h"], ["2", "2h"], ["4", "4h"], ["6", "6h"]]
+  const picker = [["0.0833", "5m"], ["0.25", "15m"], ["1", "1h"], ["2", "2h"], ["4", "4h"], ["6", "6h"], ["12", "12h"], ["24", "24h"], ["48", "48h"]]
     .map(([v, l]) => `<button data-h="${v}"${v === h ? ' class="active"' : ""}>${l}</button>`).join("");
   const ago = (iso) => { const s = (Date.now() - new Date(iso).getTime()) / 1000; return s < 60 ? "now" : s < 3600 ? Math.round(s / 60) + "m" : s < 86400 ? Math.round(s / 3600) + "h" : Math.round(s / 86400) + "d"; };
   let aw = localStorage.getItem("burnmeter_active_window3_" + side) || "live"; if (!["live", "1", "5", "15"].includes(aw)) aw = "live";
@@ -1209,7 +1314,7 @@ function arcPath(cx, cy, r, sv, ev, mv) {
   return `M ${p1.x.toFixed(1)} ${p1.y.toFixed(1)} A ${r} ${r} 0 0 1 ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
 }
 // "Bu araba çok mu yakıyor?" — burn rate $/sa, referans zone'lara (tipik/yoğun/
-// ağır) göre iğne + verdict. Window picker (15dk/1h/2h/4h/6h) ortalama penceresi.
+// ağır) göre iğne + verdict. Window picker (5dk…48h) ortalama penceresi.
 function renderSpeedometer(rep, isCodex) {
   const hoursStr = localStorage.getItem("burnmeter_burn_hours_" + (isCodex ? "codex" : "claude")) || "2";
   // picker'ı aktif kaynağın penceresine senkronla (kaynak değişince doğru buton yansısın)
@@ -1244,6 +1349,18 @@ function renderSpeedometer(rep, isCodex) {
     ? `<div style="font-size:12px;margin-top:4px;color:var(--text-3);line-height:1.5">Market-normal (${planName}): <b style="color:var(--text-2)">typical ${fmtMoney(mz.typical)}</b> · busy ${fmtMoney(mz.busy)} · heavy ${fmtMoney(mz.heavy)} /hr</div>`
     : "";
   $("hero-detail").innerHTML = `<strong>${esc(fe.label || "")}</strong>${fe.detail ? " — " + esc(fe.detail) : ""}${noteHtml}${marketHtml}`;
+  if (rep._meta?.partial) {
+    // A quick last-24h report: where "typical" and "heavy" sit needs the whole history.
+    // Here, not after the refresh: the live tick repaints the gauge every few seconds.
+    zoneEl.className = "speedo-zone-txt";
+    zoneEl.textContent = "Calibrating to your history…";
+    $("hero-detail").textContent = "The needle is your burn rate right now. Where “typical” and “heavy” sit comes from your full history, which is still loading.";
+  } else if (rep._meta?.stale) {
+    // The last run's report, shown at once on a restart: what burns now comes with the fresh one.
+    zoneEl.className = "speedo-zone-txt";
+    zoneEl.textContent = "Updating…";
+    $("hero-detail").textContent = "Your burn rate right now shows once Burnmeter has read what changed since you last opened it.";
+  }
 
   // per-model breakdown of this burn (which model is eating the $/hr)
   const bd = (fc.burn_rates_by_hours_by_model || {})[hoursStr] || [];
@@ -1289,15 +1406,19 @@ function renderHeroAside(rep, isCodex) {
           <span class="num" style="font-size:32px;font-weight:600;color:var(--text-1)">${val}</span>
           <span style="color:var(--text-3);font-size:12px;font-weight:600">${label}</span></div>
         <div class="dim" style="font-size:11px;margin-top:6px">${sub}</div></div>`;
-    const used = cw.cost_usd || 0, p90 = cw.baseline_cost_p90 || 0;
+    const partial = !!window.__bmPartial;   // last 24h only: no week, no "heaviest"
+    const used = cw.cost_usd || 0, p90 = partial ? 0 : cw.baseline_cost_p90 || 0;
     const wc = rep.weekly_cap || {};
     const rate = cw.cost_per_hour;
-    body += bigFact("~" + fmtMoney0(used), "this 5-hour block",
+    const stale = !partial && !!rep._meta?.stale;   // the last run's: this block and week were then
+    body += stale ? bigFact("…", "this 5-hour block", "updating…") : bigFact("~" + fmtMoney0(used), "this 5-hour block",
       (cw.active ? "open now" : "block closed")
       + (rate ? ` · ~${fmtMoney(rate)}/hr` : "")
       + (p90 ? ` · your heaviest block ~${fmtMoney0(p90)}` : ""));
-    body += bigFact("~" + fmtMoney0(wc.rolling_7d_cost || 0), "this week (7 days)",
-      wc.historical_7d_p95 ? `your heaviest week ~${fmtMoney0(wc.historical_7d_p95)}` : "local total");
+    body += partial ? bigFact("…", "this week (7 days)", "after your history loads")
+      : stale ? bigFact("…", "this week (7 days)", "updating…")
+      : bigFact("~" + fmtMoney0(wc.rolling_7d_cost || 0), "this week (7 days)",
+        wc.historical_7d_p95 ? `your heaviest week ~${fmtMoney0(wc.historical_7d_p95)}` : "local total");
     body += `<div class="dim" style="font-size:10.5px;line-height:1.45;margin:-4px 0 14px;color:var(--text-4)">Anthropic exposes no account limit/quota — these are local usage only (est. $).</div>`;
   }
 
@@ -1306,6 +1427,7 @@ function renderHeroAside(rep, isCodex) {
   rows.push(["Today", fmtMoney0(fc.today?.so_far ?? 0)]);
   if (fc.today?.projected_eod != null) rows.push(["End-of-day estimate", fmtMoney0(fc.today.projected_eod)]);
   if (!isCodex && cw.projected_close_cost != null) rows.push(["This block ~close", fmtMoney0(cw.projected_close_cost)]);
+  if (rep._meta?.stale) rows.forEach((r) => { r[1] = "…"; });
   body += `<div style="margin-top:4px;padding-top:12px;border-top:1px solid var(--border-subtle)">` +
     rows.map(([l, v]) => `<div style="display:flex;justify-content:space-between;padding:5px 0">
       <span style="color:var(--text-3);font-size:12px">${l}</span>
@@ -1338,6 +1460,12 @@ function renderKPIs(rep, isCodex) {
     // no spark: it duplicated "Spent today"'s daily series pixel-for-pixel (visual noise)
     { l: "Total spent", v: "~" + fmtMoney0(t.cost_usd || 0), s: `${fmtCompact(t.total_tokens || 0)} tokens · all-time${est}`, spark: null },
   ];
+  if (window.__bmPartial) {   // a quick last-24h report: all-time figures would read as wrong
+    for (const k of kpis.slice(2)) { k.v = "…"; k.s = "after your history loads"; }
+    if (parseFloat(bhrs) > 24) { kpis[1].v = "…"; kpis[1].s = "after your history loads"; }
+  } else if (rep._meta?.stale) {   // the last run's report: today and the burn rate were then
+    for (const k of kpis.slice(0, 2)) { k.v = "…"; k.s = "updating…"; }
+  }
   kpis.forEach((k, i) => {
     const n = i + 1;
     $(`kpi${n}-l`).textContent = k.l;
@@ -2246,8 +2374,12 @@ function updateLiveStamp() {
     const ra = Math.floor((Date.now() - new Date(window.__scopedAsOf).getTime()) / 1000);
     if (isFinite(ra) && ra >= 0) txt = "synced " + (ra < 60 ? ra + "s" : Math.floor(ra / 60) + "m") + " ago";
   }
+  const lr = window.__lastReport || {};
+  if (window.__bmStale && !window.__bmPartial)
+    txt = "as of " + fmtAsOf(lr._combined ? (lr.claude?._meta?.as_of || lr.codex?._meta?.as_of) : lr._meta?.as_of) + " · updating…";
   $("last-updated").textContent = txt;
-  if (dot) { dot.classList.toggle("live", s < 30); dot.classList.toggle("stale", s >= 30); }
+  const old = s >= 30 || !!window.__bmStale;
+  if (dot) { dot.classList.toggle("live", !old); dot.classList.toggle("stale", old); }
 }
 
 // ---------- init ----------
@@ -2397,7 +2529,7 @@ function start() {
     b.addEventListener("click", () => bmShowSection(b.dataset.section)));
   bmShowSection(localStorage.getItem("burnmeter_section") || "overview");
   window.addEventListener("resize", applyZoom);
-  $("refresh").addEventListener("click", () => refresh(true));
+  $("refresh").addEventListener("click", () => refresh(!window.__bmWarming));   // no blocking rebuild mid first read
   wireAlerts();
   $("export-csv")?.addEventListener("click", () => {
     const s = window.__source === "both" ? "claude" : (window.__source || "claude");
@@ -2417,7 +2549,7 @@ function start() {
       window.__refreshInFlight = false; refresh(false);     // silent background revalidate (SWR)
     });
   });
-  // burn-window picker (speedometer ortalama penceresi: 15dk/1h/2h/4h/6h)
+  // burn-window picker (speedometer ortalama penceresi: 5dk…48h)
   const bh0 = localStorage.getItem("burnmeter_burn_hours_" + window.__source) || "2";
   document.querySelectorAll("#burn-window-picker button").forEach(b => {
     b.classList.toggle("active", b.dataset.h === bh0);
@@ -2475,9 +2607,8 @@ function start() {
   initModularGrid();
   const rl = $("reset-layout");
   if (rl) rl.addEventListener("click", () => { localStorage.removeItem("burnmeter_layout_v8"); location.reload(); });
-  // First paint is cold until the local logs are parsed — on large histories that
-  // first read can take a few seconds. Say so instead of showing a blank "…" gauge.
-  $("last-updated").textContent = "Reading your Burnmeter logs — the first run can take a minute or two on large histories…";
+  // Until the first answer (a long first read shows its loading screen within ~3 s).
+  $("last-updated").textContent = "Loading your logs…";
   refresh(false);
   setInterval(() => refresh(false), 10000);
   // ---- self-heal wiring: the poll loop must survive sleep/resume, tray-hide, ----

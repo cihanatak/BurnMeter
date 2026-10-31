@@ -22,10 +22,11 @@ therefore folds a response's lines into one record by field-wise max — see
 from __future__ import annotations
 import json
 import os
+import time
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Callable, Iterator, Optional
 
 
 CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
@@ -154,7 +155,11 @@ def parse_line(line: str, source_file: str = "") -> Optional[UsageRecord]:
         rec = json.loads(line)
     except json.JSONDecodeError:
         return None
+    return _record_from(rec, source_file)
 
+
+def _record_from(rec: dict, source_file: str = "") -> Optional[UsageRecord]:
+    """parse_line for a line that is already decoded."""
     msg = rec.get("message")
     if not isinstance(msg, dict):
         return None
@@ -217,7 +222,11 @@ def parse_user_intent(line: str) -> Optional[tuple[str, str, datetime]]:
         rec = json.loads(line)
     except json.JSONDecodeError:
         return None
+    return _intent_from(rec)
 
+
+def _intent_from(rec: dict) -> Optional[tuple[str, str, datetime]]:
+    """parse_user_intent for a line that is already decoded."""
     # Only what the user typed. Claude Code also logs role-"user" lines that aren't:
     # copies of each API request ("api-request-blob", undated, so they read as 1970
     # and won "earliest"), meta lines such as image notes, compaction summaries, and
@@ -307,6 +316,11 @@ def parse_tool_events(line: str) -> Optional[dict]:
         rec = json.loads(line)
     except json.JSONDecodeError:
         return None
+    return _tool_events_from(rec)
+
+
+def _tool_events_from(rec: dict) -> Optional[dict]:
+    """parse_tool_events for a line that is already decoded."""
     # Request copies ("api-request-blob") repeat the session's tool results.
     if rec.get("type") not in (None, "user", "assistant"):
         return None
@@ -378,6 +392,8 @@ _CLAUDE_CACHE_PATH = CLAUDE_PROJECTS_DIR.parent / ".burnmeter_claude_cache.json"
 # v3: speed (fast mode bills 2x); intents from the user's own turns only; tool
 # errors carry their tool_use_id.
 _CLAUDE_CACHE_VERSION = 3
+# While a long read runs, the cache is saved this often (seconds).
+_CACHE_SAVE_EVERY = 60.0
 
 
 def _claude_load_cache() -> dict:
@@ -457,12 +473,15 @@ def parse_claude_file(path: Path, scan_device: str = "mac"):
     intent_ts: dict[str, datetime] = {}
     errs: list[dict] = []
     perr = 0
+    source_file = str(path)
+    # One JSON decode per line. Each line used to be decoded four times (here, then
+    # again inside parse_user_intent, parse_tool_events and parse_line), which made
+    # the first read of a big history (no parse cache yet: a fresh install) about
+    # four times slower than the work needs.
+    uuid_map: dict[str, tuple[str, str, bool]] = {}
     try:
-        file_lines: list[str] = []
-        uuid_map: dict[str, tuple[str, str, bool]] = {}
         with path.open("r", encoding="utf-8", errors="replace") as fh:
             for raw in fh:
-                file_lines.append(raw)
                 s = raw.strip()
                 if not s:
                     continue
@@ -471,70 +490,72 @@ def parse_claude_file(path: Path, scan_device: str = "mac"):
                 except json.JSONDecodeError:
                     continue
                 if not isinstance(parsed, dict):   # valid JSON of another shape: skip
-                    continue                       # the line, don't abort the whole load
-                u = parsed.get("uuid")
-                if not u:
+                    perr += 1                      # the line, don't abort the whole load
                     continue
-                typ = str(parsed.get("type") or "")
-                parent = str(parsed.get("parentUuid") or "")
-                is_human = False
-                if typ == "user":
-                    msg = parsed.get("message")
-                    msg = msg if isinstance(msg, dict) else {}
-                    content = msg.get("content")
-                    if isinstance(content, str) and content.strip():
-                        is_human = True
-                    elif isinstance(content, list):
-                        has_tool_result = any(
-                            isinstance(b, dict) and b.get("type") == "tool_result"
-                            for b in content
-                        )
-                        if not has_tool_result:
+                u = parsed.get("uuid")
+                if u:
+                    typ = str(parsed.get("type") or "")
+                    parent = str(parsed.get("parentUuid") or "")
+                    is_human = False
+                    if typ == "user":
+                        msg = parsed.get("message")
+                        msg = msg if isinstance(msg, dict) else {}
+                        content = msg.get("content")
+                        if isinstance(content, str) and content.strip():
                             is_human = True
-                uuid_map[str(u)] = (parent, typ, is_human)
+                        elif isinstance(content, list):
+                            has_tool_result = any(
+                                isinstance(b, dict) and b.get("type") == "tool_result"
+                                for b in content
+                            )
+                            if not has_tool_result:
+                                is_human = True
+                    uuid_map[str(u)] = (parent, typ, is_human)
 
-        def resolve_turn(start_uuid: str) -> str:
-            cur = start_uuid
-            for _ in range(2000):
-                entry = uuid_map.get(cur)
-                if entry is None:
-                    return cur
-                parent_uuid, typ, is_human = entry
-                if typ == "user" and is_human:
-                    return cur
-                if not parent_uuid:
-                    return cur
-                cur = parent_uuid
-            return cur
+                intent = None
+                try:
+                    intent = _intent_from(parsed)
+                except Exception:
+                    pass
+                if intent:
+                    sid, text, ts = intent
+                    prev = intent_ts.get(sid)
+                    if prev is None or (ts and ts < prev):
+                        intents[sid] = (text[:240], ts.isoformat() if ts else None)
+                        intent_ts[sid] = ts
 
-        for raw in file_lines:
-            intent = None
-            try:
-                intent = parse_user_intent(raw)
-            except Exception:
-                pass
-            if intent:
-                sid, text, ts = intent
-                prev = intent_ts.get(sid)
-                if prev is None or (ts and ts < prev):
-                    intents[sid] = (text[:240], ts.isoformat() if ts else None)
-                    intent_ts[sid] = ts
+                errs.extend(_tool_errors_from(parsed))
 
-            errs.extend(_tool_errors(raw))
-
-            try:
-                rec = parse_line(raw, source_file=str(path))
-            except Exception:
-                perr += 1
-                continue
-            if rec is None:
-                continue
-            if rec.uuid:
-                rec.turn_id = resolve_turn(rec.uuid)
-            rec.device = scan_device
-            records.append(rec)
+                try:
+                    rec = _record_from(parsed, source_file)
+                except Exception:
+                    perr += 1
+                    continue
+                if rec is None:
+                    continue
+                rec.device = scan_device
+                records.append(rec)
     except OSError:
-        perr += 1
+        return [], {}, [], perr + 1   # as before: nothing from a log that can't be read
+
+    def resolve_turn(start_uuid: str) -> str:
+        cur = start_uuid
+        for _ in range(2000):
+            entry = uuid_map.get(cur)
+            if entry is None:
+                return cur
+            parent_uuid, typ, is_human = entry
+            if typ == "user" and is_human:
+                return cur
+            if not parent_uuid:
+                return cur
+            cur = parent_uuid
+        return cur
+
+    # After the whole file: a turn's chain can reach lines further down.
+    for rec in records:
+        if rec.uuid:
+            rec.turn_id = resolve_turn(rec.uuid)
     return records, intents, errs, perr
 
 
@@ -544,6 +565,19 @@ def _tool_errors(line: str, since: Optional[datetime] = None) -> list[dict]:
         evt = parse_tool_events(line)
     except Exception:
         return []
+    return _errors_of(evt, since)
+
+
+def _tool_errors_from(rec: dict, since: Optional[datetime] = None) -> list[dict]:
+    """_tool_errors for a line that is already decoded."""
+    try:
+        evt = _tool_events_from(rec)
+    except Exception:
+        return []
+    return _errors_of(evt, since)
+
+
+def _errors_of(evt: Optional[dict], since: Optional[datetime]) -> list[dict]:
     if not (evt and evt["errors"]):
         return []
     ts = evt["timestamp"]
@@ -620,6 +654,7 @@ def load_records(
     deduplicate: bool = True,
     extra_roots: Optional[list[Path]] = None,
     since: Optional[datetime] = None,
+    progress: Optional[Callable[[dict], None]] = None,
 ) -> tuple[list[UsageRecord], dict, dict[str, str]]:
     """Load all usage records from a Claude projects directory tree.
 
@@ -634,6 +669,9 @@ def load_records(
     bytes and never decoded, and the parse cache is bypassed entirely: loading a
     big history's cache costs more than reading one day of logs. For the
     statusline's no-server fallback.
+
+    progress: called about twice a second with files_done/files_total and
+    bytes_done/bytes_total (the bytes that need reading, not served from the cache).
     """
     records: list[UsageRecord] = []
     by_message: dict[str, UsageRecord] = {}   # message id → its merged record
@@ -668,6 +706,10 @@ def load_records(
     dirty = False                 # did any entry change? An unchanged cache isn't rewritten.
     since_ts = since.timestamp() if since is not None else None
 
+    # Every log first, so a long read can say how far it is. A fresh install has no
+    # parse cache and reads the whole history (minutes on a big one); its loading
+    # screen shows these counts.
+    scan: list[tuple[Path, str, Optional[list]]] = []
     for scan_root in all_roots:
         if not scan_root.exists():
             continue
@@ -678,68 +720,98 @@ def load_records(
         for path in iter_jsonl_files(scan_root):
             try:
                 st = path.stat()
-                sig = [st.st_mtime, st.st_size]
+                scan.append((path, scan_device, [st.st_mtime, st.st_size]))
             except OSError:
-                files += 1
-                errors += 1
-                continue
-            if since_ts is not None and st.st_mtime < since_ts:
-                continue
-            files += 1
-            key = str(path)
-            c = cache.get(key)
-            if since is not None:
-                f_recs, f_intents, f_errs, f_perr = parse_claude_recent(path, scan_device, since)
-                entry = None              # not cached: only part of the file was read
-            elif c and c.get("v") == _CLAUDE_CACHE_VERSION and c.get("sig") == sig:
-                # unchanged file → reconstruct from cache (no re-read)
-                f_recs = [_rec_from_dict(d) for d in c.get("recs", [])]
-                f_intents = c.get("intents", {})
-                f_errs = c.get("errors", [])
-                f_perr = c.get("perr", 0)
-                entry = c
-            else:
-                f_recs, f_intents, f_errs, f_perr = parse_claude_file(path, scan_device)
-                entry = {
-                    "v": _CLAUDE_CACHE_VERSION, "sig": sig,
-                    "recs": [r.to_dict() for r in f_recs],
-                    "intents": f_intents, "errors": f_errs, "perr": f_perr,
-                }
-                dirty = True
-            if use_cache:
-                new_cache[key] = entry
+                scan.append((path, scan_device, None))
 
-            # cross-file aggregation: merge each response's lines, earliest intent, errors
-            errors += f_perr
-            for r in f_recs:
-                r.device = scan_device          # re-apply (cache-hit safety)
-                if deduplicate and r.message_id:
-                    if r.uuid:
-                        if r.uuid in seen_lines:
-                            continue            # the very same line again (mirrored root)
-                        seen_lines.add(r.uuid)
-                    first = by_message.get(r.message_id)
-                    if first is not None:
-                        _merge_usage(first, r)
-                        continue
-                    by_message[r.message_id] = r
-                records.append(r)
-            for sid, val in f_intents.items():
-                text = val[0] if isinstance(val, (list, tuple)) else val
-                ts_iso = val[1] if isinstance(val, (list, tuple)) and len(val) > 1 else None
-                ts = _parse_timestamp(ts_iso) if ts_iso else None
-                prev = user_intent_ts.get(sid)
-                if ts and (prev is None or ts < prev):
-                    user_intents[sid] = (text or "")[:240]
-                    user_intent_ts[sid] = ts
-            # A forked or resumed session's log repeats the tool results it inherited.
-            for e in f_errs:
-                tid = e.get("tool_use_id")
-                if tid:
-                    if tid in seen_errors:
-                        continue
-                    seen_errors.add(tid)
-                error_events.append(e)
+    def _cached(key: str, sig: list):
+        c = cache.get(key)
+        return c if (c and c.get("v") == _CLAUDE_CACHE_VERSION and c.get("sig") == sig) else None
+
+    # Bytes that have to be read rather than taken from the cache.
+    read_total = sum(sig[1] for path, _, sig in scan
+                     if sig and (since_ts is None or sig[0] >= since_ts)
+                     and (since is not None or not _cached(str(path), sig)))
+    read_done = 0
+    reported = saved = time.monotonic()
+
+    for done, (path, scan_device, sig) in enumerate(scan, 1):
+        if progress is not None and time.monotonic() - reported >= 0.5:
+            progress({"files_done": done - 1, "files_total": len(scan),
+                      "bytes_done": read_done, "bytes_total": read_total})
+            reported = time.monotonic()
+        # Save what a long first read has parsed so far: closing the app midway then
+        # costs the last minute, not the whole read.
+        if use_cache and dirty and time.monotonic() - saved >= _CACHE_SAVE_EVERY:
+            _claude_save_cache({**cache, **new_cache})
+            saved = time.monotonic()
+        if sig is None:
+            files += 1
+            errors += 1
+            continue
+        if since_ts is not None and sig[0] < since_ts:
+            continue
+        files += 1
+        key = str(path)
+        c = _cached(key, sig) if since is None else None
+        if since is not None:
+            f_recs, f_intents, f_errs, f_perr = parse_claude_recent(path, scan_device, since)
+            entry = None              # not cached: only part of the file was read
+            read_done += sig[1]
+        elif c:
+            # unchanged file → reconstruct from cache (no re-read)
+            f_recs = [_rec_from_dict(d) for d in c.get("recs", [])]
+            f_intents = c.get("intents", {})
+            f_errs = c.get("errors", [])
+            f_perr = c.get("perr", 0)
+            entry = c
+        else:
+            f_recs, f_intents, f_errs, f_perr = parse_claude_file(path, scan_device)
+            entry = {
+                "v": _CLAUDE_CACHE_VERSION, "sig": sig,
+                "recs": [r.to_dict() for r in f_recs],
+                "intents": f_intents, "errors": f_errs, "perr": f_perr,
+            }
+            dirty = True
+            read_done += sig[1]
+        if use_cache:
+            new_cache[key] = entry
+
+        # cross-file aggregation: merge each response's lines, earliest intent, errors
+        errors += f_perr
+        for r in f_recs:
+            r.device = scan_device          # re-apply (cache-hit safety)
+            if deduplicate and r.message_id:
+                if r.uuid:
+                    if r.uuid in seen_lines:
+                        continue            # the very same line again (mirrored root)
+                    seen_lines.add(r.uuid)
+                first = by_message.get(r.message_id)
+                if first is not None:
+                    _merge_usage(first, r)
+                    continue
+                by_message[r.message_id] = r
+            records.append(r)
+        for sid, val in f_intents.items():
+            text = val[0] if isinstance(val, (list, tuple)) else val
+            ts_iso = val[1] if isinstance(val, (list, tuple)) and len(val) > 1 else None
+            ts = _parse_timestamp(ts_iso) if ts_iso else None
+            prev = user_intent_ts.get(sid)
+            if ts and (prev is None or ts < prev):
+                user_intents[sid] = (text or "")[:240]
+                user_intent_ts[sid] = ts
+        # A forked or resumed session's log repeats the tool results it inherited.
+        for e in f_errs:
+            tid = e.get("tool_use_id")
+            if tid:
+                if tid in seen_errors:
+                    continue
+                seen_errors.add(tid)
+            error_events.append(e)
+
+    if progress is not None:
+        progress({"files_done": len(scan), "files_total": len(scan),
+                  "bytes_done": read_done, "bytes_total": read_total})
 
     if use_cache:
         # Keep the entries of logs under other roots (another --projects-dir, a

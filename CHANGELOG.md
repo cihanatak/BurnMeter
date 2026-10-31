@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.3.7] — 2026-11-01
+
+### Added
+- **The burn-rate gauge reads 12, 24 and 48 hours.** Its windows went from 5 minutes to
+  6 hours; they now also cover the last half day, day and two days.
+
+### Fixed
+- **Burnmeter opens on your figures at once.** Every launch read what changed in your
+  logs and rebuilt the report before showing anything: 45 s behind a loading card on the
+  maker's PC. It now keeps its newest report on disk and opens on it in under a second,
+  marked "as of 02:45 · updating…", until the fresh one is in (48 s on that PC). Until
+  then the needle, today and this 5-hour block read "…", since they'd be from your last
+  visit.
+- **A fresh install shows something at once.** Burnmeter reads every log once after
+  it's installed, and the page waited on that read: after 45 s it gave up and showed
+  "failed to load: signal is aborted without reason" until the read was done, minutes
+  later on a big history. It now opens on a loading screen that counts the logs and GB
+  read and the time left, shows your last 24 hours while the rest is read, and fills in
+  the totals, charts and older chats when it's done. On the maker's PC (7.9 GB of Claude
+  Code logs): the loading screen in 4 s, the last 24 hours in 12–16 s, everything in
+  about 2 min.
+- **The first read is twice as fast.** Each log line was decoded four times, now once:
+  the maker's 7.9 GB took 66 s to read instead of 145 s, with the same records.
+- **Quitting during the first read keeps what was read.** It's saved every minute, so
+  the next start goes on from there instead of starting over.
+- **The statusline doesn't tie up the server during a first read.** Each call waited
+  for the read to finish; the CLI now works it out itself until it's done.
+
 ## [0.3.6] — 2026-10-30
 
 ### Fixed

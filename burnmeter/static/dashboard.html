@@ -94,6 +94,15 @@
 
     <main>
 
+      <!-- FIRST READ: a fresh install reads the whole history once (minutes on a big one).
+           The loading screen, above every section while that runs; hidden otherwise. -->
+      <section class="card warming-card" id="warming-card" role="status" aria-live="polite" style="display:none">
+        <div class="wm-lead" id="wm-lead"></div>
+        <div class="wm-bar"><div class="wm-fill" id="wm-fill"></div></div>
+        <div class="wm-line" id="wm-line"></div>
+        <div class="wm-body" id="wm-body"></div>
+      </section>
+
       <!-- ===== OVERVIEW ===== -->
       <div class="section active" data-section="overview">
 
@@ -110,6 +119,7 @@
             <span class="picker" id="burn-window-picker">
               <button data-h="0.0833">5m</button><button data-h="0.25">15m</button><button data-h="1">1h</button>
               <button data-h="2" class="active">2h</button><button data-h="4">4h</button><button data-h="6">6h</button>
+              <button data-h="12">12h</button><button data-h="24">24h</button><button data-h="48">48h</button>
             </span>
           </div>
           <div class="speedo-wrap">

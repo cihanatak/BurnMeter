@@ -70,7 +70,7 @@ globalThis.location = windowStub.location;
 // Evaluate dashboard.js and capture the pure functions under test. Function declarations
 // are local to the wrapper; the appended assignment captures them out.
 const run = new Function(
-  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere, refresh, fetchT, renderPricingNote, modelDisplay, bmNewChart, renderOverviewFleet, renderDeviceBreakdown, renderCombinedFleet, bmDur, bmChatCost, computeGaugeSpec, drawGaugeSvg, bmOnlineState, bmSnapFresh, proSyncNote, proDevicesHtml, proNote, proNoteHtml, proSignedInHeader, renderChats, bmChatList };"
+  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere, refresh, fetchT, renderPricingNote, modelDisplay, bmNewChart, renderOverviewFleet, renderDeviceBreakdown, renderCombinedFleet, bmDur, bmChatCost, computeGaugeSpec, drawGaugeSvg, bmOnlineState, bmSnapFresh, proSyncNote, proDevicesHtml, proNote, proNoteHtml, proSignedInHeader, renderChats, bmChatList, showWarming };"
 );
 run();
 const { bmScopedHalf, bmScopedRep, liveBurnRate, bmPathParts, bmProjCell, liveWhere } = globalThis.__BM;
@@ -595,6 +595,65 @@ passed += 1;
   passed += 6;
   documentStub.querySelector = realQS; globalThis.fetch = realFetch;
   window.__chatsSort = "recent"; window.__chatsAll = false; window.__chatsOlder = {};
+}
+
+// The loading screen of a fresh install's first read: what it says at each stage.
+{
+  const { showWarming } = globalThis.__BM;
+  const els = Object.fromEntries(["warming-card", "wm-lead", "wm-fill", "wm-line", "wm-body", "last-updated"]
+    .map((id) => [id, { textContent: "", style: {}, classList: { toggle() {} } }]));
+  const realGet = documentStub.getElementById;
+  documentStub.getElementById = (id) => els[id] || realGet(id);
+  showWarming("claude", { phase: "reading", fresh: true, files_done: 10, files_total: 40,
+                          bytes_done: 1.5e9, bytes_total: 6e9, eta_s: 125 }, false);
+  assert.equal(els["wm-lead"].textContent, "Reading your Claude Code history for the first time");
+  assert.equal(els["wm-line"].textContent, "25% · 10 of 40 logs · 1.5 GB of 6.0 GB · about 2 min left");
+  assert.equal(els["wm-fill"].style.width, "25%");
+  assert.equal(els["last-updated"].textContent, "Reading your history · 25%");
+  assert.equal(els["warming-card"].style.display, "", "the card is shown");
+  showWarming("both", { phase: "quick", fresh: true }, false);
+  assert.equal(els["wm-line"].textContent, "Getting your last 24 hours first…");
+  assert.equal(els["wm-lead"].textContent, "Reading your Claude Code and Codex history for the first time");
+  showWarming("codex", { phase: "reading" }, false);
+  assert.equal(els["wm-lead"].textContent, "Loading your Codex history");
+  assert.equal(els["wm-line"].textContent, "Reading your logs…");
+  showWarming("claude", { error: "the logs drive was unplugged" }, false);
+  assert.equal(els["wm-line"].textContent, "The first read stopped: the logs drive was unplugged — trying again…");
+  els["last-updated"].textContent = "kept";
+  showWarming("claude", { phase: "building", fresh: true }, true);
+  assert.equal(els["wm-line"].textContent, "Putting your dashboard together…");
+  assert.ok(els["wm-body"].textContent.startsWith("Showing your last 24 hours"));
+  assert.equal(els["last-updated"].textContent, "kept", "a partial report keeps its own header line");
+  documentStub.getElementById = realGet;
+  passed += 13;
+}
+
+// A restart's first answer is the last run's report (_meta.stale): no needle, and the card
+// says it's updating. A quick last-24h report has no needle past 24 hours.
+{
+  const { computeGaugeSpec, showWarming } = globalThis.__BM;
+  const z = { typical: 4, busy: 12, heavy: 25, max: 50 };
+  const fc = { burn_rates_by_hours: { "2": 9, "24": 3, "48": 2 } };
+  const g = (meta, h) => computeGaugeSpec({ forecast: fc, burn_rate_zones: z, _meta: meta }, false, h).g;
+  assert.equal(g({}, "48").value, 2, "the 48 h window reads its own key");
+  assert.equal(g({ stale: true }, "2").valueText, "…", "no needle from the last run's report");
+  assert.equal(g({ stale: true }, "2").value, 0);
+  assert.equal(g({ partial: true }, "48").valueText, "…", "a quick 24 h report has no 48 h");
+  assert.equal(g({ partial: true }, "24").value, 3, "but it has 24 h");
+  const els = Object.fromEntries(["warming-card", "wm-lead", "wm-fill", "wm-line", "wm-body", "last-updated"]
+    .map((id) => [id, { textContent: "", style: {}, classList: { toggle() {} } }]));
+  const realGet = documentStub.getElementById;
+  documentStub.getElementById = (id) => els[id] || realGet(id);
+  els["last-updated"].textContent = "kept";
+  const t = new Date(); t.setHours(14, 32, 0, 0);
+  showWarming("claude", { phase: "reading", files_done: 5, files_total: 3499 }, false, t.getTime() / 1000);
+  assert.equal(els["wm-lead"].textContent, "Updating your Claude Code figures");
+  assert.ok(els["wm-body"].textContent.startsWith("Showing them as of 14:32 "), els["wm-body"].textContent);
+  assert.equal(els["last-updated"].textContent, "kept", "the live stamp writes 'as of … · updating…'");
+  showWarming("claude", {}, false, null);
+  assert.ok(els["wm-body"].textContent.includes("as of your last visit"));
+  documentStub.getElementById = realGet;
+  passed += 9;
 }
 
 console.log(`dashboard_render: ${passed} assertions passed`);

@@ -46,12 +46,32 @@ def _exit_with_parent(poll: float = 2.0) -> None:
     else:
         while os.getppid() == ppid:                      # re-parented once it dies
             time.sleep(poll)
-    for var in ("BURNMETER_WORKER_IN", "BURNMETER_WORKER_OUT"):
+    for var in ("BURNMETER_WORKER_IN", "BURNMETER_WORKER_OUT", "BURNMETER_WORKER_PROGRESS"):
         try:
             os.unlink(os.environ[var])
         except (KeyError, OSError):
             pass
     os._exit(3)
+
+
+def _progress_writer(path):
+    """A callback that keeps the read's progress in `path` for the server's loading
+    screen: the latest counts, merged and written whole (temp file, then rename), so
+    the server never reads half a file. None when no path was given."""
+    if not path:
+        return None
+    state = {"phase": "reading", "started_at": time.time()}
+
+    def write(update: dict) -> None:
+        state.update(update)
+        tmp = f"{path}.tmp"
+        try:
+            Path(tmp).write_text(json.dumps(state), encoding="utf-8")
+            os.replace(tmp, path)
+        except OSError:
+            pass
+    write({})
+    return write
 
 
 def main() -> int:
@@ -73,6 +93,7 @@ def main() -> int:
 
     source = cfg.get("source", "claude")
     plan = cfg.get("plan")
+    progress = _progress_writer(os.environ.get("BURNMETER_WORKER_PROGRESS"))
 
     from .analytics import build_report
 
@@ -81,14 +102,23 @@ def main() -> int:
         root = Path(cfg["codex_dir"]) if cfg.get("codex_dir") else CODEX_SESSIONS_DIR
         extra = [Path(p) for p in (cfg.get("codex_extra_roots") or [])]
         records, stats, intents = load_codex_records(
-            root, extra_roots=extra, since_days=int(cfg.get("codex_since_days", 90)))
+            root, extra_roots=extra, since_days=int(cfg.get("codex_since_days", 90)),
+            progress=progress)
         errors = []
     else:
+        from datetime import datetime, timedelta, timezone
         from .parser import load_records, CLAUDE_PROJECTS_DIR
         root = Path(cfg["projects_dir"]) if cfg.get("projects_dir") else CLAUDE_PROJECTS_DIR
         extra = [Path(p) for p in (cfg.get("extra_roots") or [])]
-        records, stats, intents, errors = load_records(root, extra_roots=extra)
+        # since_hours: the quick report a fresh install shows while its first full
+        # read runs (only the recent logs, no parse cache).
+        since = (datetime.now(timezone.utc) - timedelta(hours=float(cfg["since_hours"]))
+                 if cfg.get("since_hours") else None)
+        records, stats, intents, errors = load_records(root, extra_roots=extra, since=since,
+                                                       progress=progress)
 
+    if progress:
+        progress({"phase": "building"})
     report = build_report(records, plan=plan, user_intents=intents,
                           error_events=errors, source=source)
     report["_meta"] = {**stats, "source": source}

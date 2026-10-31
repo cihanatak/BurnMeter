@@ -395,6 +395,10 @@ def aggregate_by_tool(records: Iterable[UsageRecord]) -> list[dict]:
 
 WINDOW = timedelta(hours=5)
 
+# The burn-rate gauge's windows, in hours (0.0833 h ≈ 5 min). The dashboard's picker
+# buttons read the keys: "0.0833", "0.25", "1", ... "48".
+BURN_WINDOWS_H = (0.0833, 0.25, 1, 2, 4, 6, 12, 24, 48)
+
 
 def detect_billing_windows(records: list[UsageRecord]) -> list[dict]:
     """Group records into Anthropic-style 5-hour windows.
@@ -1562,16 +1566,19 @@ def forecast(records: list[UsageRecord], daily: list[dict]) -> dict:
     # which model is eating most of the dollars-per-hour.
     burn_rates_by_hours = {}
     burn_rates_by_hours_by_model: dict[str, list[dict]] = {}
-    for hours in (0.0833, 0.25, 1, 2, 4, 6):   # 0.0833h ≈ 5dk (anlık)
+    # One pass over everything for the longest window, then each window over that.
+    longest = now - timedelta(hours=max(BURN_WINDOWS_H))
+    recent = [(r.timestamp, r.model or "unknown", record_cost_usd(r))
+              for r in records if r.timestamp >= longest]
+    for hours in BURN_WINDOWS_H:
         c = now - timedelta(hours=hours)
         cost = 0.0
         per_model: dict[str, float] = defaultdict(float)
-        for r in records:
-            if r.timestamp < c:
+        for ts, model, rc in recent:
+            if ts < c:
                 continue
-            rc = record_cost_usd(r)
             cost += rc
-            per_model[r.model or "unknown"] += rc
+            per_model[model] += rc
         burn_rates_by_hours[str(hours)] = round(cost / hours, 2)
         # Sort models by $/hr desc, drop tiny contributions (< $0.01/hr).
         rows = []
@@ -1908,12 +1915,11 @@ def build_report(
     # düştüğüne göre cost ekle. Önceki implementasyon her cihaz × 5 hour
     # için ayrı iter ediyordu → 10× iterasyon. Bu 366MB+ PC JSONL'lerle
     # 18s API gecikmesi yaratıyordu.
-    # Key format: "0.25", "1", "2", "4", "6" — frontend butonları data-h ile
+    # Key format: "0.25", "1", "2", ... "48" — frontend butonları data-h ile
     # bu key'leri okuyor. Karma int+float liste tut, str(int(h)) if h.is_integer.
     def _hk(h):
         return str(int(h)) if float(h).is_integer() else str(h)
-    burn_hours_tuple = (0.0833, 0.25, 1, 2, 4, 6)   # 0.0833h ≈ 5dk (anlık)
-    burn_cutoffs = {_hk(h): (now_utc - timedelta(hours=h), float(h)) for h in burn_hours_tuple}
+    burn_cutoffs = {_hk(h): (now_utc - timedelta(hours=h), float(h)) for h in BURN_WINDOWS_H}
     # Build per-device totals DYNAMICALLY from the devices that actually appear in
     # the records — NOT a hardcoded ("mac","pc"). Pre-seeding both meant a
     # single-machine user always had two device keys (so the UI thought it was
