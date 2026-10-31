@@ -1,8 +1,18 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.7] — 2026-11-01
+
+### Added
+- **The burn-rate gauge reads 12, 24 and 48 hours.** Its windows went from 5 minutes to
+  6 hours; they now also cover the last half day, day and two days.
 
 ### Fixed
+- **Burnmeter opens on your figures at once.** Every launch read what changed in your
+  logs and rebuilt the report before showing anything: 45 s behind a loading card on the
+  maker's PC. It now keeps its newest report on disk and opens on it in under a second,
+  marked "as of 02:45 · updating…", until the fresh one is in (48 s on that PC). Until
+  then the needle, today and this 5-hour block read "…", since they'd be from your last
+  visit.
 - **A fresh install shows something at once.** Burnmeter reads every log once after
   it's installed, and the page waited on that read: after 45 s it gave up and showed
   "failed to load: signal is aborted without reason" until the read was done, minutes
