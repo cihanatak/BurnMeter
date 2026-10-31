@@ -51,7 +51,8 @@ class _Cache:
                  extra_roots: Optional[list[Path]] = None, loader=None,
                  worker_config: Optional[dict] = None,
                  quick_config: Optional[dict] = None,
-                 cache_file: Optional[Path] = None):
+                 cache_file: Optional[Path] = None,
+                 snapshot_file: Optional[Path] = None):
         self.projects_dir = projects_dir
         self.extra_roots = extra_roots or []
         self.ttl = ttl_seconds
@@ -78,6 +79,47 @@ class _Cache:
         self._cold_failed_at = 0.0    # when one last failed (no instant retry loop)
         self._cold_error = None
         self._cold_fresh = False      # no parse cache on disk: a fresh install's first read
+        # The newest full report, kept on disk: the next launch shows it at once (marked
+        # stale) while its own first build reads what changed (45 s on the maker's PC).
+        self.snapshot_file = snapshot_file
+        self._stale = None            # (report, key) from the last run, until a build is in
+        self._stale_loaded = False
+        self._snap_saved = 0.0
+
+    def _load_snapshot(self):
+        """The last run's report, marked stale. Only one this version built: another
+        version's report may not have what this version's page reads."""
+        self._stale_loaded = True
+        if self.snapshot_file is None:
+            return
+        try:
+            snap = json.loads(self.snapshot_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if (not isinstance(snap, dict) or snap.get("version") != __version__
+                or snap.get("config") != self.worker_config
+                or not isinstance(snap.get("report"), dict)):
+            return
+        rep = snap["report"]
+        rep["_meta"] = {**(rep.get("_meta") or {}), "stale": True, "as_of": snap.get("built_at")}
+        self._stale = (rep, tuple(snap.get("key") or ()))
+
+    def _save_snapshot(self, report, key):
+        """Keep the newest full report on disk for the next launch: at most every 5 min,
+        and through a temp file, so a launch never reads half of one."""
+        if self.snapshot_file is None or time.time() - self._snap_saved < _SNAPSHOT_EVERY_S:
+            return
+        self._snap_saved = time.time()
+        tmp = self.snapshot_file.with_name(self.snapshot_file.name + ".tmp")
+        try:
+            self.snapshot_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(json.dumps({"version": __version__, "key": list(key),
+                                       "config": self.worker_config,
+                                       "built_at": time.time(), "report": report},
+                                      default=str, separators=(",", ":")), encoding="utf-8")
+            os.replace(tmp, self.snapshot_file)
+        except (OSError, TypeError, ValueError) as e:
+            sys.stderr.write(f"[burnmeter] report snapshot not saved: {e}\n")
 
     def _run_worker(self, overrides: Optional[dict] = None,
                     progress_path: Optional[str] = None,
@@ -140,10 +182,13 @@ class _Cache:
             report = build_fn(records, stats, time.time(), intents, errors)
             records = None
             import gc; gc.collect()
+        # Before it's served: the handler adds to its _meta while it's being written.
+        self._save_snapshot(report, key)
         with self._lock:
             self._report = report
             self._report_key = key
             self._report_at = time.time()
+            self._stale = None
         return report
 
     def _bg_rebuild(self, build_fn, key):
@@ -219,6 +264,7 @@ class _Cache:
             if fresh and self.worker_config is not None and self.quick_config is not None:
                 quick = self._run_worker(self.quick_config, timeout=300)
                 if quick is not None:
+                    quick["_meta"] = {**(quick.get("_meta") or {}), "partial": True}
                     with self._lock:
                         self._partial, self._partial_key = quick, key
             # No 20-minute cap here: a slow PC's first read may need longer, and a
@@ -252,27 +298,33 @@ class _Cache:
     def peek(self, build_fn, key, wait_s: float = 3.0):
         """get_report for the dashboard, which must never wait long on a cold build.
 
-        Returns (report, quick, progress). With a report (fresh, or stale and being
+        Returns (report, interim, progress). With a report (fresh, or stale and being
         refreshed): (report, None, None). Without one, the first build is started in
-        the background if nothing is building yet, and a small history that's read
-        within `wait_s` is returned as usual; else (None, the quick report once it's
-        built, the first build's progress)."""
+        the background if nothing is building yet; the last run's report (_meta.stale)
+        is returned at once, else a small history that's read within `wait_s` is returned
+        as usual; else (None, the quick report (_meta.partial) once it's built, the first
+        build's progress)."""
         if self._report is not None and self._report_key == key:
             return self.get_report(build_fn, key), None, None
+        if not self._stale_loaded:
+            self._load_snapshot()
         if time.time() - self._cold_failed_at >= 30 and self._build_lock.acquire(blocking=False):
             try:
                 threading.Thread(target=self._bg_cold, args=(build_fn, key), daemon=True).start()
             except RuntimeError as e:
                 self._build_lock.release()
                 sys.stderr.write(f"[burnmeter] first build thread failed to start: {e}\n")
-        until = time.monotonic() + wait_s
+        stale = self._stale[0] if self._stale and self._stale[1] == key else None
+        until = time.monotonic() + (0 if stale is not None else wait_s)
         while time.monotonic() < until:
             if self._report is not None and self._report_key == key:
                 return self._report, None, None
             time.sleep(0.05)
+        if self._report is not None and self._report_key == key:
+            return self._report, None, None
         with self._lock:
             quick = self._partial if self._partial_key == key else None
-        return None, quick, self.progress()
+        return None, stale if stale is not None else quick, self.progress()
 
     def progress(self) -> dict:
         """What the loading screen shows while the first build runs: the worker's counts
@@ -327,6 +379,10 @@ def _file_response(handler: BaseHTTPRequestHandler, path: Path, content_type: st
 # How long the dashboard's /api/report waits on a first build before it answers 202 and
 # the progress: a small history is read in that time and skips the loading screen.
 _FIRST_BUILD_WAIT_S = 3.0
+
+# Each source's newest full report is kept here for the next launch, at most every 5 min.
+_SNAPSHOT_DIR = Path.home() / ".burnmeter"
+_SNAPSHOT_EVERY_S = 300.0
 
 # Per-process identity, set by setup_server() and echoed by /api/health. The
 # single-instance guard matches THIS token so it recognises the exact instance
@@ -808,15 +864,17 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                     # The dashboard never waits on a first build (a fresh install reads
                     # its whole history: minutes). It gets the quick last-day report
                     # once that's built, or 202 and the progress for its loading screen.
-                    report, quick, progress = peek_for(source, plan)
-                    if report is None and quick is None:
+                    # A restart shows the last run's report at once (_meta.stale) while
+                    # it reads what changed.
+                    report, interim, progress = peek_for(source, plan)
+                    if report is None and interim is None:
                         _json_response(self, 202, {"warming": True, "source": source,
                                                    "version": __version__,
                                                    "progress": progress})
                         return
                     if report is None:
-                        report = {**quick, "_meta": {**(quick.get("_meta") or {}),
-                                                     "partial": True, "progress": progress}}
+                        report = {**interim, "_meta": {**(interim.get("_meta") or {}),
+                                                       "progress": progress}}
                 report.setdefault("_meta", {})
                 report["_meta"]["version"] = __version__
                 report["_meta"]["served_at"] = time.time()
@@ -831,9 +889,11 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
             if path == "/api/chats":
                 # Every chat of a source, for the Chats page's "Show all" and "Most $".
                 _, source = pick_cache(qs)
-                report, quick, _ = peek_for(source, None)   # never waits on a first build
-                _json_response(self, 200, {"source": source, "partial": report is None,
-                                           "by_session": (report or quick or {}).get("by_session") or []})
+                report, interim, _ = peek_for(source, None)   # never waits on a first build
+                stale = bool(report is None and interim and (interim.get("_meta") or {}).get("stale"))
+                _json_response(self, 200, {"source": source, "partial": report is None and not stale,
+                                           "stale": stale,
+                                           "by_session": (report or interim or {}).get("by_session") or []})
                 return
 
             if path == "/api/alerts/config":
@@ -1204,6 +1264,7 @@ def setup_server(host: str = "127.0.0.1", port: int = 7654,
         },
         quick_config={"since_hours": 24},
         cache_file=_parser._CLAUDE_CACHE_PATH,
+        snapshot_file=_SNAPSHOT_DIR / "report-claude.json",
     )
 
     # burnmeter — second source. Codex sessions are huge (16GB+); the build
@@ -1222,6 +1283,7 @@ def setup_server(host: str = "127.0.0.1", port: int = 7654,
         },
         quick_config={"codex_since_days": 1},
         cache_file=_codex_parser._CACHE_PATH,
+        snapshot_file=_SNAPSHOT_DIR / "report-codex.json",
     )
 
     if not projects_dir.exists():

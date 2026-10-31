@@ -628,4 +628,32 @@ passed += 1;
   passed += 13;
 }
 
+// A restart's first answer is the last run's report (_meta.stale): no needle, and the card
+// says it's updating. A quick last-24h report has no needle past 24 hours.
+{
+  const { computeGaugeSpec, showWarming } = globalThis.__BM;
+  const z = { typical: 4, busy: 12, heavy: 25, max: 50 };
+  const fc = { burn_rates_by_hours: { "2": 9, "24": 3, "48": 2 } };
+  const g = (meta, h) => computeGaugeSpec({ forecast: fc, burn_rate_zones: z, _meta: meta }, false, h).g;
+  assert.equal(g({}, "48").value, 2, "the 48 h window reads its own key");
+  assert.equal(g({ stale: true }, "2").valueText, "…", "no needle from the last run's report");
+  assert.equal(g({ stale: true }, "2").value, 0);
+  assert.equal(g({ partial: true }, "48").valueText, "…", "a quick 24 h report has no 48 h");
+  assert.equal(g({ partial: true }, "24").value, 3, "but it has 24 h");
+  const els = Object.fromEntries(["warming-card", "wm-lead", "wm-fill", "wm-line", "wm-body", "last-updated"]
+    .map((id) => [id, { textContent: "", style: {}, classList: { toggle() {} } }]));
+  const realGet = documentStub.getElementById;
+  documentStub.getElementById = (id) => els[id] || realGet(id);
+  els["last-updated"].textContent = "kept";
+  const t = new Date(); t.setHours(14, 32, 0, 0);
+  showWarming("claude", { phase: "reading", files_done: 5, files_total: 3499 }, false, t.getTime() / 1000);
+  assert.equal(els["wm-lead"].textContent, "Updating your Claude Code figures");
+  assert.ok(els["wm-body"].textContent.startsWith("Showing them as of 14:32 "), els["wm-body"].textContent);
+  assert.equal(els["last-updated"].textContent, "kept", "the live stamp writes 'as of … · updating…'");
+  showWarming("claude", {}, false, null);
+  assert.ok(els["wm-body"].textContent.includes("as of your last visit"));
+  documentStub.getElementById = realGet;
+  passed += 9;
+}
+
 console.log(`dashboard_render: ${passed} assertions passed`);

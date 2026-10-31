@@ -224,3 +224,78 @@ def test_the_codex_read_counts_its_files_and_bytes(tmp_path, monkeypatch):
     assert first[-1] == {"files_done": 2, "files_total": 2, "bytes_done": size, "bytes_total": size}
     assert again[-1]["bytes_total"] == 0 and again[-1]["files_done"] == 2
     assert grown[-1]["bytes_total"] == 21, "a log that only grew is read from where it was"
+
+
+# A restart: the parse cache is there, but reading what changed and building the report
+# still took 45 s on the maker's PC. The last run's report is kept on disk and shown at
+# once (_meta.stale) until the fresh one is in.
+
+def _snapshot_worker(go=None):
+    def run(overrides=None, progress_path=None, timeout=1200):
+        if go is not None:
+            go.wait(10)
+        return {"by_session": [{"session_id": "s1"}], "record_count": 7, "_meta": {"source": "claude"}}
+    return run
+
+
+def test_a_restart_shows_the_last_report_at_once_then_the_fresh_one(monkeypatch, tmp_path):
+    monkeypatch.setattr(srv, "_FIRST_BUILD_WAIT_S", 5.0)   # the stale report must not wait on it
+    snap, cfg = tmp_path / "report-claude.json", {"source": "claude"}
+    first = srv._Cache(projects_dir=tmp_path, ttl_seconds=999, worker_config=cfg, snapshot_file=snap)
+    first._run_worker = _snapshot_worker()
+    first.get_report(lambda *a: None, KEY)
+    saved = json.loads(snap.read_text(encoding="utf-8"))
+    assert saved["version"] == srv.__version__ and saved["key"] == ["claude", None]
+
+    go = threading.Event()
+    restarted = srv._Cache(projects_dir=tmp_path, ttl_seconds=999, worker_config=cfg, snapshot_file=snap)
+    restarted._run_worker = _snapshot_worker(go)          # its first build reads what changed
+    httpd = _serve(restarted)
+    try:
+        port = httpd.server_address[1]
+        t0 = time.monotonic()
+        status, body = _get(port, "/api/report")
+        assert status == 200 and time.monotonic() - t0 < 1.0
+        assert body["_meta"]["stale"] is True and body["_meta"]["as_of"] == saved["built_at"]
+        assert "progress" in body["_meta"] and body["record_count"] == 7
+        status, chats = _get(port, "/api/chats")
+        assert (chats["stale"], chats["partial"]) == (True, False)
+        assert chats["by_session"] == [{"session_id": "s1"}]
+        go.set()
+        status, body = _poll(port, "/api/report", lambda s, b: not b["_meta"].get("stale"))
+        assert status == 200 and "stale" not in body["_meta"]
+    finally:
+        go.set()
+        httpd.shutdown()
+
+
+def test_another_versions_or_folders_report_is_not_shown(monkeypatch, tmp_path):
+    monkeypatch.setattr(srv, "_FIRST_BUILD_WAIT_S", 0.1)
+    for i, (version, config) in enumerate((("0.0.1", {"source": "claude"}),
+                                           (srv.__version__, {"source": "claude", "projects_dir": "x"}))):
+        snap = tmp_path / f"report-{i}.json"
+        snap.write_text(json.dumps({"version": version, "key": ["claude", None], "config": config,
+                                    "built_at": 1.0, "report": {"record_count": 1, "_meta": {}}}),
+                        encoding="utf-8")
+        go = threading.Event()
+        cache = srv._Cache(projects_dir=tmp_path, ttl_seconds=999, worker_config={"source": "claude"},
+                           snapshot_file=snap)
+        cache._run_worker = _snapshot_worker(go)
+        httpd = _serve(cache)
+        try:
+            status, body = _get(httpd.server_address[1], "/api/report")
+            assert status == 202, (version, config)
+        finally:
+            go.set()
+            httpd.shutdown()
+
+
+def test_the_report_is_kept_at_most_every_5_minutes(tmp_path):
+    snap = tmp_path / "report-claude.json"
+    cache = srv._Cache(projects_dir=tmp_path, ttl_seconds=0, worker_config={"source": "claude"},
+                       snapshot_file=snap)
+    cache._run_worker = _snapshot_worker()
+    cache.get_report(lambda *a: None, KEY, force=True)
+    kept = snap.read_text(encoding="utf-8")
+    cache.get_report(lambda *a: None, KEY, force=True)
+    assert snap.read_text(encoding="utf-8") == kept       # not rewritten 0 s later
