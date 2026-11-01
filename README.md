@@ -8,13 +8,13 @@ each project, chat and model costs, how much the prompt cache saves you, and, fo
 Codex (which logs it), how close you are to your plan's 5-hour and weekly limits.
 No API keys, no account. Your usage data stays on your machine.
 
-![The Burnmeter dashboard: the burn-rate gauge across 15-minute to 24-hour windows, then the share card for the last 30 days](docs/burnmeter-demo.gif)
+![The Burnmeter dashboard: the burn-rate gauge across 15-minute to 24-hour windows, then the share card for the last 30 days](https://raw.githubusercontent.com/cihanatak/BurnMeter/main/docs/burnmeter-demo.gif)
 
 <p align="center">
   <a href="https://github.com/cihanatak/BurnMeter/releases/latest/download/BurnmeterSetup.exe"><b>Download for Windows</b></a> ·
-  <code>pipx install git+https://github.com/cihanatak/BurnMeter</code> ·
+  <code>pipx install burnmeter</code> ·
   <a href="https://burnmeter.dev">burnmeter.dev</a> ·
-  Claude Code + OpenAI Codex · <a href="./LICENSE">AGPL-3.0</a>
+  Claude Code + OpenAI Codex · <a href="https://github.com/cihanatak/BurnMeter/blob/main/LICENSE">AGPL-3.0</a>
 </p>
 
 <sub>The demo and the screenshots use synthetic logs (<code>tests/generate_fixture.py</code>): the projects, chats and numbers are made up.</sub>
@@ -32,11 +32,10 @@ recognize the app. Click **More info → Run anyway**.
 
 ### macOS
 
-You need Python 3.10 or newer. Burnmeter isn't on PyPI yet, so install it from
-GitHub:
+You need Python 3.10 or newer:
 
 ```bash
-python3 -m pip install --upgrade "burnmeter[app] @ git+https://github.com/cihanatak/BurnMeter"
+python3 -m pip install --upgrade "burnmeter[app]"
 burnmeter
 ```
 
@@ -47,7 +46,7 @@ has no third-party dependencies and uses your browser.
 
 If pip stops with `externally-managed-environment` (common with Homebrew's
 Python), install into a virtual environment, or use [pipx](https://pipx.pypa.io)
-for the browser version: `pipx install git+https://github.com/cihanatak/BurnMeter`.
+for the browser version: `pipx install burnmeter`.
 
 Linux works the same way as macOS; `burnmeter serve` is the simplest option there.
 
@@ -89,7 +88,7 @@ python -m burnmeter serve
   you set up.
 - **Terminal statusline** and **CSV export** (see below).
 
-![Codex view: 67% of the weekly limit and 41% of the 5-hour limit used, with reset countdowns](docs/dashboard-codex.png)
+![Codex view: 67% of the weekly limit and 41% of the 5-hour limit used, with reset countdowns](https://raw.githubusercontent.com/cihanatak/BurnMeter/main/docs/dashboard-codex.png)
 
 ## Share your month
 
@@ -99,13 +98,13 @@ post it on X. The card holds totals only, with no project names, prompts or code
 Nothing leaves your machine unless you click **Post on X**: that opens a draft post
 on x.com with the card's text and copies the picture for you to paste.
 
-![A share card from the demo data: $1,637 of Claude Code usage over the last 30 days, 8.2× a $200/mo plan](docs/share-card.png)
+![A share card from the demo data: $1,637 of Claude Code usage over the last 30 days, 8.2× a $200/mo plan](https://raw.githubusercontent.com/cihanatak/BurnMeter/main/docs/share-card.png)
 
 ## The numbers are estimates, not your bill
 
 Burnmeter multiplies the tokens in your logs by each provider's public **API list
 prices** (last checked 2026-10-29; `PRICES_VERIFIED_AT` in
-[`burnmeter/pricing.py`](./burnmeter/pricing.py)). That is what the same usage would
+[`burnmeter/pricing.py`](https://github.com/cihanatak/BurnMeter/blob/main/burnmeter/pricing.py)). That is what the same usage would
 cost through the API. If you're on a flat-fee plan such as Claude Pro/Max or
 ChatGPT Plus/Pro, it is **not** what you pay. Use it to compare models, projects
 and days, and to see how hard you're leaning on your plan. Your provider's console
@@ -231,7 +230,7 @@ server stays small. Parsed records are cached in `~/.claude` and `~/.codex`
 | OpenAI Codex | `~/.codex/sessions` | ✅ |
 | Cursor, Copilot, Gemini CLI, others | | planned |
 
-Adding an agent is one parser module; see [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+Adding an agent is one parser module; see [`CONTRIBUTING.md`](https://github.com/cihanatak/BurnMeter/blob/main/CONTRIBUTING.md).
 
 ## Pricing
 
@@ -241,21 +240,21 @@ options are planned; **none are on sale yet**:
 - **Pro, $6/month:** hosted, end-to-end encrypted sync across your machines.
 - **Supporter, $99:** a way to back development; details at launch.
 - **Commercial license, $49/year:** for organizations that can't use AGPL
-  software; see [`LICENSING.md`](./LICENSING.md).
+  software; see [`LICENSING.md`](https://github.com/cihanatak/BurnMeter/blob/main/LICENSING.md).
 
-More in [`PRICING.md`](./PRICING.md).
+More in [`PRICING.md`](https://github.com/cihanatak/BurnMeter/blob/main/PRICING.md).
 
 ## Contributing
 
 Bug reports, fixes and new agent parsers are welcome. Start with
-[`CONTRIBUTING.md`](./CONTRIBUTING.md); pull requests need a one-time
-[CLA](./.github/CLA.md) signature, and the
-[Code of Conduct](./CODE_OF_CONDUCT.md) applies. Report security problems
-privately, as described in [`SECURITY.md`](./SECURITY.md).
+[`CONTRIBUTING.md`](https://github.com/cihanatak/BurnMeter/blob/main/CONTRIBUTING.md); pull requests need a one-time
+[CLA](https://github.com/cihanatak/BurnMeter/blob/main/.github/CLA.md) signature, and the
+[Code of Conduct](https://github.com/cihanatak/BurnMeter/blob/main/CODE_OF_CONDUCT.md) applies. Report security problems
+privately, as described in [`SECURITY.md`](https://github.com/cihanatak/BurnMeter/blob/main/SECURITY.md).
 
 ## License
 
 Burnmeter is free software under the
-[GNU Affero General Public License v3.0 or later](./LICENSE). A commercial license
+[GNU Affero General Public License v3.0 or later](https://github.com/cihanatak/BurnMeter/blob/main/LICENSE). A commercial license
 is planned for organizations that can't use the AGPL; see
-[`LICENSING.md`](./LICENSING.md).
+[`LICENSING.md`](https://github.com/cihanatak/BurnMeter/blob/main/LICENSING.md).

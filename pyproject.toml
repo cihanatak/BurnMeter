@@ -1,14 +1,15 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "burnmeter"
 version = "0.3.8"
-description = "Local-first dashboard for AI coding agent token usage & cost (Claude Code + OpenAI Codex)"
+description = "A live $/hour meter for Claude Code and Codex, against your own normal pace, chat by chat."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "AGPL-3.0-or-later" }
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE", "LICENSING.md"]
 authors = [{ name = "Cihan Atak" }]
 keywords = ["claude-code", "codex", "tokens", "cost", "burn-rate", "dashboard", "ai-coding", "usage"]
 # Runtime is Python standard library ONLY — no third-party deps (Chart.js / GridStack are
@@ -19,7 +20,6 @@ classifiers = [
   "Environment :: Console",
   "Environment :: Web Environment",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
@@ -38,9 +38,10 @@ tray = ["pystray>=0.19.4", "Pillow>=10.3"]
 app = ["pywebview>=5.0", "pystray>=0.19.4", "Pillow>=10.3"]
 
 [project.urls]
-Homepage = "https://github.com/cihanatak/BurnMeter"
+Homepage = "https://burnmeter.dev"
 Repository = "https://github.com/cihanatak/BurnMeter"
 Issues = "https://github.com/cihanatak/BurnMeter/issues"
+Changelog = "https://github.com/cihanatak/BurnMeter/blob/main/CHANGELOG.md"
 
 [project.scripts]
 burnmeter = "burnmeter.cli:main"
