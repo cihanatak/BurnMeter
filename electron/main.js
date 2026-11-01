@@ -373,11 +373,12 @@ app.on("web-contents-created", (_e, contents) => {
 
 // ---------- session: permissions + CSP ----------
 function hardenSession(ses) {
-  // No camera, mic, geolocation, clipboard, HID, … Our own dashboard gets exactly two:
-  // notifications (its limit-alert toggle warns through them while the window sits in the
-  // tray) and fullscreen (a browser grants it without asking; on Electron 45 a DENIED
-  // fullscreen request leaves the page hanging and took the renderer down in testing).
-  const GRANTED = new Set(["notifications", "fullscreen"]);
+  // No camera, mic, geolocation, clipboard reads, HID, … Our own dashboard gets exactly
+  // three: notifications (its limit-alert toggle warns through them while the window sits
+  // in the tray), fullscreen (a browser grants it without asking; on Electron 45 a DENIED
+  // fullscreen request leaves the page hanging and took the renderer down in testing) and
+  // clipboard writes (the share card's "Copy image"; writing only, it can't read it back).
+  const GRANTED = new Set(["notifications", "fullscreen", "clipboard-sanitized-write"]);
   const allowed = (perm, url) => GRANTED.has(perm) && isAppUrl(url);
   ses.setPermissionRequestHandler((_wc, perm, cb, details) => {
     const ok = allowed(perm, details && details.requestingUrl);
