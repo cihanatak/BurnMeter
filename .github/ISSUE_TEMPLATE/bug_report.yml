@@ -1,0 +1,76 @@
+name: Bug report
+description: Something is broken, or a number looks wrong.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Security problems** go through [private reporting](https://github.com/cihanatak/BurnMeter/security/advisories/new), not here.
+
+        Screenshots and logs can show project names, folder paths and chat titles. Blur or crop anything you don't want public.
+  - type: input
+    id: version
+    attributes:
+      label: Burnmeter version
+      description: Shown under the logo in the app's sidebar. For pip installs, `pip show burnmeter` also prints it.
+      placeholder: "0.3.5"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - Windows installer (BurnmeterSetup.exe)
+        - pip / pipx on macOS
+        - pip / pipx on Linux
+        - pip on Windows
+        - Running from a source checkout
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS and version
+      placeholder: "Windows 11 24H2 / macOS 15.5 / Ubuntu 24.04"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: What is affected?
+      multiple: true
+      options:
+        - Claude Code data
+        - Codex data
+        - A cost or price looks wrong
+        - Rate-limit / burn-rate numbers
+        - Dashboard layout or display
+        - Alerts
+        - Pro sync / devices
+        - Install, update or startup
+        - Statusline / CLI
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: For a wrong cost, include the model id, what Burnmeter shows, and the rate you expected (with a link to the provider's pricing page if you can).
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Click …
+        3. See …
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Terminal output, browser console errors, or a screenshot (redacted).

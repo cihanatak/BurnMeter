@@ -1,47 +1,77 @@
-# Deploy — Burnmeter landing page
+# Deploying burnmeter.dev
 
-The public landing/home page is **`docs/index.html`** — one self-contained file
-(inline CSS, **no build step**, no dependencies). To go live, point any static
-host at the **`docs/`** folder. Pick one option below.
+The website at **<https://burnmeter.dev>** is the `docs/` folder of this public
+repository, served as static files. There is no build step.
 
-## Read first — the repo is PRIVATE
-- **Netlify / Cloudflare Pages / Vercel** can host from a *private* repo for free
-  — easiest path, no visibility change needed.
-- **GitHub Pages** on a *private* repo requires **GitHub Pro/Team** (paid). On a
-  free account, Pages only works for a **public** repo.
-- The "GitHub" and "★ Star on GitHub" buttons link to
-  `https://github.com/cihanatak/BurnMeter`. While the repo is private those 404
-  for the public — either make the repo public, or edit those two `<a href>` lines
-  in `docs/index.html`.
+| File | What it is |
+|---|---|
+| `docs/index.html` | The landing page: one self-contained file with inline CSS and no dependencies |
+| `docs/dashboard.png` | Dashboard screenshot (Claude view), used by the landing page and the README |
+| `docs/dashboard-codex.png` | Dashboard screenshot (Codex view), used by the README |
+| `docs/og.png` | Social preview image (1200×630), rendered from `docs/og.html` |
+| `docs/.nojekyll` | Only matters on GitHub Pages: it turns off the Jekyll build |
 
-## Option A — Netlify (easiest, free, private repo OK)
-1. netlify.com → **Add new site → Import from Git** → pick `cihanatak/BurnMeter`.
-2. **Build command:** *(leave empty)*  ·  **Publish directory:** `docs`
-3. Deploy → you get a `*.netlify.app` URL.
-   *(No-Git alternative: drag the `docs/` folder onto app.netlify.com/drop.)*
+## How it deploys
 
-## Option B — Cloudflare Pages (free, private repo OK)
-1. dash.cloudflare.com → **Workers & Pages → Create → Pages → Connect to Git** →
-   `cihanatak/BurnMeter`.
-2. **Framework preset:** None  ·  **Build command:** *(empty)*  ·  **Build output dir:** `docs`
-3. Save & Deploy.
+The site runs on **Vercel**, connected to this repository through Vercel's Git
+integration:
 
-## Option C — Vercel (free, private repo OK)
-1. vercel.com → **Add New → Project** → import `cihanatak/BurnMeter`.
-2. **Framework:** Other  ·  **Root Directory:** `docs`  ·  no build command.
-3. Deploy.
+- **Root Directory:** `docs` · **Framework preset:** Other · no build command
+- Every push to `main` deploys to Production on burnmeter.dev.
+- Branches and pull requests may get Vercel preview deployments, depending on
+  the Vercel project settings.
 
-## Option D — GitHub Pages (only if repo is PUBLIC, or you have GitHub Pro)
-1. GitHub → repo → **Settings → Pages**.
-2. **Source:** Deploy from a branch → **Branch:** `main` → **Folder:** `/docs` → Save.
-3. Live at `https://cihanatak.github.io/BurnMeter/` in ~1 min.
-   `docs/.nojekyll` is already present, so files are served as-is (no Jekyll build).
+## Everything in `docs/` is public
 
-## Custom domain (optional, any host)
-Set the domain in the host's dashboard. For GitHub Pages, also drop a `CNAME`
-file containing your domain into `docs/`.
+Any file in `docs/` is served at `https://burnmeter.dev/<file name>`. Keep design
+notes, plans and anything internal out of it; design documents live in
+[`design/`](./design/).
 
----
-**Note:** `docs/` also contains `SYNC.md`; with GitHub Pages it'd be reachable at
-`/SYNC.md` (harmless — no secrets). Move it out of `docs/` if you'd rather it not
-be web-reachable.
+## Screenshots: synthetic data only
+
+Screenshots must never show real usage: no real project names, folder paths,
+chat titles, user names or email addresses. Take them from a Burnmeter instance
+that only sees made-up logs:
+
+1. Generate synthetic logs into a throwaway folder that stands in for your home
+   folder. For Claude-only data:
+   `python tests/generate_fixture.py --out <fake-home>/.claude/projects`
+2. Start Burnmeter with its home and app-data folders pointed at the throwaway
+   folder, on a spare port. On Windows (bash):
+   ```bash
+   USERPROFILE='<fake-home>' HOME='<fake-home>' APPDATA='<fake-appdata>' \
+   LOCALAPPDATA='<fake-localappdata>' COMPUTERNAME='DEV-LAPTOP' \
+   python -m burnmeter serve --port 8780 --no-browser --no-shortcut
+   ```
+   On macOS or Linux, setting `HOME` is enough for the logs and chat titles; the
+   computer name still comes from the system.
+3. Check that it really reads the fake data: every project, chat title and
+   device name on screen must be made up. Then take a 1440×900 screenshot of
+   <http://127.0.0.1:8780> and replace the PNG in `docs/`.
+4. Stop the server and delete the throwaway folders.
+
+The current screenshots show Burnmeter v0.3.4 on synthetic data.
+
+## Social preview image
+
+`docs/og.png` is rendered from `docs/og.html` with headless Chrome:
+
+```bash
+chrome --headless --window-size=1200,630 --screenshot=docs/og.png "file:///<absolute path to repo>/docs/og.html"
+```
+
+The landing page refers to it by absolute URL (`https://burnmeter.dev/og.png`),
+so a new image appears in link previews after the next deploy (and after the
+social network refreshes its cache).
+
+## Other hosts
+
+`docs/` works on any static host. Point the host at the `docs` folder with no
+build command:
+
+- **Netlify:** Build command empty, Publish directory `docs`.
+- **Cloudflare Pages:** Framework preset None, Build command empty, Build output
+  directory `docs`.
+- **GitHub Pages:** Settings → Pages → Deploy from a branch → `main`, folder
+  `/docs`. `docs/.nojekyll` is already there. For a custom domain, also add a
+  `CNAME` file containing the domain to `docs/`.

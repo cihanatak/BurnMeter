@@ -6,7 +6,8 @@ Vendor-neutral: the tool tracks **Claude Code + OpenAI Codex** today (more agent
 planned), so the original Claude-only `cc`-prefixed name no longer fit. Short,
 pronounceable, and it maps straight to the product's hero metric — your **burn rate**.
 
-`burnmeter.dev` and the PyPI name `burnmeter` are secured.
+`burnmeter.dev` is registered and hosts the website. The PyPI name `burnmeter` is
+not registered yet; until it is, install from GitHub as the README describes.
 
 ## Considered & rejected
 - **ccmeter** — the original name; vendor-locked to Claude Code (`cc`) and now misleading
