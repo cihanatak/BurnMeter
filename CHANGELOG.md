@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Share your month.** A Share button in the top bar draws a card of your usage: what
+  your tokens would have cost at API list prices, set against what your plan costs, with a
+  bar per day. Copy it, save it as a PNG or post it on X. It holds totals only (no project
+  names, prompts or code), and nothing leaves your machine unless you post it.
+
 ## [0.3.7] — 2026-11-01
 
 ### Added
