@@ -8,15 +8,16 @@ burn-rate, and — where the agent actually logs it (e.g. Codex) — **how close
 are to your plan's rate limit**. No API keys. No cloud account. No phone-home.
 Your data never leaves your machine.
 
-![The Burnmeter dashboard — burn-rate gauge, rate-limit hero, cache savings, per-project & per-model breakdowns, activity heatmap](docs/dashboard.png)
+![The Burnmeter dashboard: the burn-rate gauge across 15-minute to 24-hour windows, then the share card for the last 30 days](docs/burnmeter-demo.gif)
 
 <p align="center">
-  <b><a href="https://burnmeter.dev">burnmeter.dev</a></b> ·
+  <a href="https://github.com/cihanatak/BurnMeter/releases/latest/download/BurnmeterSetup.exe"><b>Download for Windows</b></a> ·
   <code>pipx install git+https://github.com/cihanatak/BurnMeter</code> ·
+  <a href="https://burnmeter.dev">burnmeter.dev</a> ·
   Claude Code + OpenAI Codex · AGPL-3.0
 </p>
 
-> ℹ️ Screenshot uses synthetic demo data (`tests/generate_fixture.py`) — your real numbers never leave your machine.
+> ℹ️ The demo uses synthetic logs (`tests/generate_fixture.py --heavy`): the projects and numbers are made up. Your real numbers never leave your machine.
 
 ---
 
@@ -55,6 +56,15 @@ Burnmeter reads them — `~/.claude/projects/**/*.jsonl` and
   cache · today). Same numbers as the dashboard, no server needed.
 - **Tiny footprint** — the long-running server holds ~30 MB; heavy parsing runs
   in a short-lived worker so memory never balloons.
+
+## Share your month
+
+**Share** (top right) draws a card of your usage: what your tokens would have cost
+at API list prices, set against what your plan costs. Copy it, save it as a PNG or
+post it on X. The card holds totals only, with no project names, prompts or code,
+and nothing leaves your machine unless you post it.
+
+![A share card from the demo data: $1,637 of Claude Code usage over the last 30 days, 8.2× a $200/mo plan](docs/share-card.png)
 
 ## Install
 
