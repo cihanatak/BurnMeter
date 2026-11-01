@@ -2674,9 +2674,23 @@ function bmDrawShare() {
   sh.file = `burnmeter-${sh.src}-${st.period === "30d" ? "last-30-days" : st.period === "all" ? "all-time" : st.from.slice(0, 7)}.png`;
 }
 
+// On a phone the page is wider than the screen, so a fixed overlay spans the wider layout
+// viewport and the dialog ran off the right edge, × included: pin it to what's visible.
+function bmFitShare() {
+  const ov = $("share-ov"), vv = window.visualViewport;
+  if (!ov || ov.hidden) return;
+  const z = ov.getBoundingClientRect().width / (ov.offsetWidth || 1) || 1;   // the page's zoom (Settings, big screens)
+  const narrow = vv && (vv.width < window.innerWidth - 20 || vv.offsetLeft > 0 || vv.offsetTop > 0);
+  Object.assign(ov.style, narrow
+    ? { left: vv.offsetLeft / z + "px", top: vv.offsetTop / z + "px", width: vv.width / z + "px",
+        height: vv.height / z + "px", right: "auto", bottom: "auto" }
+    : { left: "", top: "", width: "", height: "", right: "", bottom: "" });
+}
+
 async function bmOpenShare() {
   const src = window.__source || "claude";
   $("share-ov").hidden = false;
+  bmFitShare();
   $("share-status").textContent = "";
   // A quick last-24h report (a first read still going) would draw a wrong month.
   const reps = [];
@@ -2712,6 +2726,8 @@ function wireShare() {
   $("share-close").addEventListener("click", bmCloseShare);
   ov.addEventListener("click", (e) => { if (e.target === ov) bmCloseShare(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !ov.hidden) bmCloseShare(); });
+  window.visualViewport?.addEventListener("resize", bmFitShare);
+  window.visualViewport?.addEventListener("scroll", bmFitShare);
   $("share-period").addEventListener("change", () => {
     localStorage.setItem("burnmeter_share_period", $("share-period").value); bmDrawShare();
   });
