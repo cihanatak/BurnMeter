@@ -1,6 +1,6 @@
 # Burnmeter
 
-**See where your Claude Code and Codex tokens go, on your own machine.**
+**A live $/hour meter for Claude Code and Codex, against your own normal pace, chat by chat.**
 
 Burnmeter reads the session logs that Claude Code and OpenAI Codex already write
 to your disk and turns them into a live dashboard: how fast you're burning, what
@@ -8,15 +8,16 @@ each project, chat and model costs, how much the prompt cache saves you, and, fo
 Codex (which logs it), how close you are to your plan's 5-hour and weekly limits.
 No API keys, no account. Your usage data stays on your machine.
 
-![Burnmeter v0.3.4 overview: burn-rate gauge, local usage for the current 5-hour block and week, today's spend, cache savings, live models and recent activity](docs/dashboard.png)
+![The Burnmeter dashboard: the burn-rate gauge across 15-minute to 24-hour windows, then the share card for the last 30 days](docs/burnmeter-demo.gif)
 
 <p align="center">
   <a href="https://github.com/cihanatak/BurnMeter/releases/latest/download/BurnmeterSetup.exe"><b>Download for Windows</b></a> ·
+  <code>pipx install git+https://github.com/cihanatak/BurnMeter</code> ·
   <a href="https://burnmeter.dev">burnmeter.dev</a> ·
-  Claude Code + OpenAI Codex · v0.3.5 · <a href="./LICENSE">AGPL-3.0</a>
+  Claude Code + OpenAI Codex · <a href="./LICENSE">AGPL-3.0</a>
 </p>
 
-<sub>Screenshots show v0.3.4 with synthetic demo data: the projects, chats and numbers are made up.</sub>
+<sub>The demo and the screenshots use synthetic logs (<code>tests/generate_fixture.py</code>): the projects, chats and numbers are made up.</sub>
 
 ## Install
 
@@ -61,8 +62,12 @@ python -m burnmeter serve
 
 ## What you get
 
-- **Burn rate against your own normal.** A gauge of your current $/hour next to
-  your typical, busy and heavy zones, and which models are driving it.
+- **Burn rate against your own normal.** A gauge of your $/hour over the last
+  5 minutes to 48 hours, next to your own typical, busy and heavy zones, worked out
+  from your past 5-hour blocks (a market-normal estimate until there's enough
+  history), and which models are driving it.
+- **Live chats.** Each chat that's running right now, with its own $/hour, so you
+  can see which one is burning.
 - **Plan limits where they exist.** Codex writes your real rate-limit usage into
   its logs, so the Codex view shows the 5-hour and weekly limits as percentages,
   with reset times. Claude Code doesn't write plan limits to disk, so Burnmeter
@@ -72,8 +77,9 @@ python -m burnmeter serve
   (GPT-5.x, Codex) models each at their own rate, including cache reads and 5-minute
   vs 1-hour cache writes. A model the price table doesn't know is flagged in the
   dashboard instead of being priced silently.
-- **Cache savings.** Your cache hit rate, and what caching saved compared with
-  paying full input price.
+- **Cache savings.** Your cache hit rate, and what cache reads saved compared with
+  paying full input price for those tokens. The extra cost of writing to the cache
+  isn't subtracted, so this is the gross saving.
 - **Chats, projects and commits.** Spend per chat (chat titles come from the
   Claude desktop app, if you use it), per project and per git commit.
 - **Insights.** Daily trends, an activity heatmap, unusual days, and a monthly
@@ -84,6 +90,16 @@ python -m burnmeter serve
 - **Terminal statusline** and **CSV export** (see below).
 
 ![Codex view: 67% of the weekly limit and 41% of the 5-hour limit used, with reset countdowns](docs/dashboard-codex.png)
+
+## Share your month
+
+**Share** (top right) draws a card of your usage: what your tokens would have cost
+at API list prices, set against what your plan costs. Copy it, save it as a PNG or
+post it on X. The card holds totals only, with no project names, prompts or code.
+Nothing leaves your machine unless you click **Post on X**: that opens a draft post
+on x.com with the card's text and copies the picture for you to paste.
+
+![A share card from the demo data: $1,637 of Claude Code usage over the last 30 days, 8.2× a $200/mo plan](docs/share-card.png)
 
 ## The numbers are estimates, not your bill
 
@@ -114,6 +130,7 @@ The free app makes only these network requests:
 |---|---|
 | `raw.githubusercontent.com`: reads the latest version number from this repo | when the dashboard opens, then every 3 hours; the tray icon checks every 6 hours |
 | `github.com`: downloads the update | only when you click Update |
+| `x.com`: opens a draft post with your share card's text (the period, the cost at API prices, the multiple of your plan) | only when you click **Post on X** |
 | your Slack, webhook or SMTP server: sends the alert message, including the numbers that triggered it (a Codex limit percentage, your burn rate or weekly spend) | only if you set up alerts |
 
 The version check and the update download carry none of your usage data. The

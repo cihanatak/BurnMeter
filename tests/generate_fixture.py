@@ -20,6 +20,13 @@ MODELS = [
     ("claude-opus-4-5-20250901",    0.20),
     ("claude-haiku-4-5-20251001",   0.15),
 ]
+# --heavy: a heavy Max user on today's models, with long agentic sessions whose cached
+# context grows to a few hundred K tokens (the README's demo data).
+HEAVY_MODELS = [
+    ("claude-opus-5-5",   0.50),
+    ("claude-sonnet-5-5", 0.35),
+    ("claude-haiku-5-5",  0.15),
+]
 TOOLS = ["Read", "Bash", "Edit", "Grep", "Glob", "Write", "WebFetch"]
 
 
@@ -41,7 +48,7 @@ def _encoded_cwd(cwd: str) -> str:
 
 
 def make_session(out_root: Path, cwd: str, session_start: datetime,
-                 turns: int, branch: str = "main"):
+                 turns: int, branch: str = "main", heavy: bool = False):
     enc = _encoded_cwd(cwd)
     project_dir = out_root / enc
     project_dir.mkdir(parents=True, exist_ok=True)
@@ -71,14 +78,20 @@ def make_session(out_root: Path, cwd: str, session_start: datetime,
 
         for i in range(turns):
             cur = cur + timedelta(seconds=random.randint(15, 240))
-            model = _pick(MODELS)
-            # As a session grows, cache reads tend to dominate, but keep
-            # the magnitude realistic for a fixture (~100K range per turn).
-            cache_read = int(random.gauss(2000 + 200 * i, 600))
-            cache_read = max(0, min(cache_read, 25_000))
-            cache_create = random.choice([0, 0, 0, 600, 1800])
-            input_tok = random.randint(120, 1200)
-            output_tok = random.randint(150, 2200)
+            model = _pick(HEAVY_MODELS if heavy else MODELS)
+            if heavy:
+                cache_read = max(0, min(int(random.gauss(60_000 + 4_000 * i, 15_000)), 400_000))
+                cache_create = random.choice([0, 0, 2_000, 8_000, 20_000])
+                input_tok = random.randint(50, 800)
+                output_tok = random.randint(300, 6_000)
+            else:
+                # As a session grows, cache reads tend to dominate, but keep
+                # the magnitude realistic for a fixture (~100K range per turn).
+                cache_read = int(random.gauss(2000 + 200 * i, 600))
+                cache_read = max(0, min(cache_read, 25_000))
+                cache_create = random.choice([0, 0, 0, 600, 1800])
+                input_tok = random.randint(120, 1200)
+                output_tok = random.randint(150, 2200)
 
             content = []
             tools_in_turn = []
@@ -127,6 +140,8 @@ def main(argv=None):
     p.add_argument("--out", required=True, help="root projects/ dir to populate")
     p.add_argument("--days", type=int, default=14)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--heavy", action="store_true",
+                   help="a heavy Max user on today's models (the README's demo data)")
     args = p.parse_args(argv)
 
     random.seed(args.seed)
@@ -143,7 +158,7 @@ def main(argv=None):
     for d in range(args.days):
         # day 0 = oldest; day = args.days - 1 == today
         day = (now - timedelta(days=args.days - 1 - d)).replace(hour=9)
-        sessions_today = random.randint(2, 6)
+        sessions_today = random.randint(4, 10) if args.heavy else random.randint(2, 6)
         # inject one anomalous day mid-history
         is_anomaly = (d == args.days - 4)
         if is_anomaly:
@@ -156,16 +171,16 @@ def main(argv=None):
             start = day + timedelta(hours=offset_hours, minutes=random.randint(0, 59))
             if start > now - timedelta(minutes=30):
                 start = now - timedelta(hours=random.randint(1, 4))
-            turns = random.randint(8, 60)
+            turns = random.randint(20, 120) if args.heavy else random.randint(8, 60)
             if is_anomaly:
                 turns = random.randint(80, 140)
-            make_session(root, cwd, start, turns, branch=branch)
+            make_session(root, cwd, start, turns, branch=branch, heavy=args.heavy)
 
     # Also include an *active* session that started ~25 minutes ago so the
     # current-window UI has something to show.
     now_session_start = datetime.now(timezone.utc) - timedelta(minutes=25)
     cwd, branch = random.choice(projects)
-    make_session(root, cwd, now_session_start, turns=20, branch=branch)
+    make_session(root, cwd, now_session_start, turns=20, branch=branch, heavy=args.heavy)
 
     print(f"Wrote synthetic data to {root}")
 

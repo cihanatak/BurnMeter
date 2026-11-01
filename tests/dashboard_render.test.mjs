@@ -70,7 +70,7 @@ globalThis.location = windowStub.location;
 // Evaluate dashboard.js and capture the pure functions under test. Function declarations
 // are local to the wrapper; the appended assignment captures them out.
 const run = new Function(
-  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere, refresh, fetchT, renderPricingNote, modelDisplay, bmNewChart, renderOverviewFleet, renderDeviceBreakdown, renderCombinedFleet, bmDur, bmChatCost, computeGaugeSpec, drawGaugeSvg, bmOnlineState, bmSnapFresh, proSyncNote, proDevicesHtml, proNote, proNoteHtml, proSignedInHeader, renderChats, bmChatList, showWarming };"
+  code + "\n; globalThis.__BM = { bmScopedHalf, bmScopedRep, bmDeviceAgg, bmDeviceAggFresh, liveBurnRate, bmPathParts, bmProjCell, liveWhere, refresh, fetchT, renderPricingNote, modelDisplay, bmNewChart, renderOverviewFleet, renderDeviceBreakdown, renderCombinedFleet, bmDur, bmChatCost, computeGaugeSpec, drawGaugeSvg, bmOnlineState, bmSnapFresh, proSyncNote, proDevicesHtml, proNote, proNoteHtml, proSignedInHeader, renderChats, bmChatList, showWarming, shareStats, sharePlanLine, shareText };"
 );
 run();
 const { bmScopedHalf, bmScopedRep, liveBurnRate, bmPathParts, bmProjCell, liveWhere } = globalThis.__BM;
@@ -654,6 +654,40 @@ passed += 1;
   assert.ok(els["wm-body"].textContent.includes("as of your last visit"));
   documentStub.getElementById = realGet;
   passed += 9;
+}
+
+// ---- the share card's figures: periods, both tools summed per day, the plan line ----
+{
+  const { shareStats, sharePlanLine, shareText } = globalThis.__BM;
+  const now = new Date(2026, 10, 1, 15, 0);   // 1 Nov 2026, local time
+  const row = (date, cost) => ({ date, cost_usd: cost, total_tokens: cost * 1e6,
+                                 input_tokens: 10, cache_creation_tokens: 90, cache_read_tokens: 900 });
+  const claude = { daily: [row("2026-09-30", 999), row("2026-10-03", 40), row("2026-10-14", 300),
+                           row("2026-10-31", 60), row("2026-11-01", 5)] };
+  const codex = { daily: [row("2026-10-14", 20), row("2026-11-01", 1)] };
+  const d30 = shareStats([claude], "30d", now);
+  assert.deepEqual([d30.from, d30.to, d30.days.length], ["2026-10-03", "2026-11-01", 30], "30 days, quiet ones kept");
+  assert.equal(d30.cost, 405, "30 Sep is outside the last 30 days");
+  assert.equal(d30.activeDays, 4);
+  assert.deepEqual([d30.busiest.date, d30.busiest.cost], ["2026-10-14", 300]);
+  assert.equal(d30.cacheHit, 0.9);
+  const oct = shareStats([claude, codex], "lastmonth", now);
+  assert.deepEqual([oct.label, oct.days.length, oct.cost, oct.busiest.cost], ["October 2026", 31, 420, 320],
+    "both tools, summed per day");
+  assert.equal(shareStats([claude], "month", now).cost, 5);
+  const all = shareStats([claude], "all", now);
+  assert.deepEqual([all.from, all.days.length, all.cost], ["2026-09-30", 33, 1404]);
+  assert.equal(sharePlanLine(d30, 0), "", "no plan, no comparison");
+  assert.equal(sharePlanLine(d30, 200), "2× my $200/mo plan");
+  assert.equal(sharePlanLine({ ...d30, cost: 9412 }, 200), "47× my $200/mo plan");
+  assert.equal(sharePlanLine({ ...d30, cost: 50 }, 200), "25% of my $200/mo plan");
+  assert.equal(sharePlanLine(all, 100), "13× my $100/mo plan", "all time: the plan paid every month since day one");
+  assert.equal(shareText({ ...d30, cost: 9412 }, "claude", 200),
+    "My Claude Code usage over the last 30 days: $9,412 at API list prices, 47× my $200/mo plan. " +
+    "Tracked locally with Burnmeter: https://burnmeter.dev");
+  assert.equal(shareText(oct, "both", 0),
+    "My Claude Code + Codex usage in October 2026: $420 at API list prices. Tracked locally with Burnmeter: https://burnmeter.dev");
+  passed += 15;
 }
 
 console.log(`dashboard_render: ${passed} assertions passed`);

@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.8] — 2026-11-01
+
+### Added
+- **Share your month.** A Share button in the top bar draws a card of your usage: what
+  your tokens would have cost at API list prices, set against what your plan costs, with a
+  bar per day. Pick the last 30 days, this month, last month or all time. Copy it, save it
+  as a PNG or post it on X. It holds totals only (no project names, prompts or code).
+  Nothing leaves your machine unless you click Post on X, which opens a draft post on
+  x.com with the card's text.
+
+### Changed
+- **The license file is the plain AGPL-3.0 text**, so GitHub shows the license. The
+  commercial-license notice moved to `LICENSING.md`. Pull requests now ask for a one-time
+  CLA, and the tests run on Windows, macOS and Linux.
+
 ## [0.3.7] — 2026-11-01
 
 ### Added

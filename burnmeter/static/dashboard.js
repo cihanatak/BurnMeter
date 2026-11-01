@@ -2522,6 +2522,237 @@ window.bmShowSection = function (name) {
   });
 };
 
+// ---------- share card ----------
+// A picture of your usage to post: what your tokens would have cost at API list prices,
+// set against what your plan costs. Drawn on a canvas from the daily totals the page
+// already has; it holds totals only (no project names, prompts or code) and leaves the
+// machine only if you post it.
+const SHARE_PLAN_USD = { pro: 20, max5: 100, max20: 200 };
+const SHARE_SRC_NAME = { claude: "Claude Code", codex: "Codex", both: "Claude Code + Codex" };
+const bmDayKey = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+const bmDayDate = (k) => new Date(k + "T00:00:00");
+
+// The reports' daily rows summed per date over a period ending today: "30d", "month"
+// (so far), "lastmonth" or "all". Quiet days are kept (they're bars on the card).
+function shareStats(reports, period, now) {
+  now = now || new Date();
+  const byDate = new Map();
+  for (const rep of reports) for (const r of (rep && rep.daily) || []) {
+    const t = byDate.get(r.date) || { date: r.date, cost: 0, tokens: 0, read: 0, fresh: 0 };
+    t.cost += Number(r.cost_usd) || 0;
+    t.tokens += Number(r.total_tokens) || 0;
+    t.read += Number(r.cache_read_tokens) || 0;
+    t.fresh += (Number(r.input_tokens) || 0) + (Number(r.cache_creation_tokens) || 0);
+    byDate.set(r.date, t);
+  }
+  const today = bmDayKey(now);
+  const monthOf = (d, opts) => d.toLocaleString("en-US", { month: "long", ...opts });
+  let from, to = today, label, phrase;
+  if (period === "month") {
+    from = today.slice(0, 8) + "01";
+    label = monthOf(now, { year: "numeric" }) + " so far"; phrase = "in " + monthOf(now) + " so far";
+  } else if (period === "lastmonth") {
+    const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    from = bmDayKey(first); to = bmDayKey(new Date(now.getFullYear(), now.getMonth(), 0));
+    label = monthOf(first, { year: "numeric" }); phrase = "in " + label;
+  } else if (period === "all") {
+    from = [...byDate.keys()].sort()[0] || today;
+    label = "since " + bmDayDate(from).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric" }); phrase = label;
+  } else {
+    period = "30d";
+    const d = new Date(now); d.setDate(d.getDate() - 29);
+    from = bmDayKey(d); label = "last 30 days"; phrase = "over the last 30 days";
+  }
+  const days = [];
+  for (let d = bmDayDate(from); bmDayKey(d) <= to; d.setDate(d.getDate() + 1))
+    days.push(byDate.get(bmDayKey(d)) || { date: bmDayKey(d), cost: 0, tokens: 0, read: 0, fresh: 0 });
+  const sum = (k) => days.reduce((a, x) => a + x[k], 0);
+  const read = sum("read"), fresh = sum("fresh");
+  return { period, label, phrase, from, to, days, cost: sum("cost"), tokens: sum("tokens"),
+           activeDays: days.filter((x) => x.tokens > 0).length,
+           busiest: days.reduce((a, x) => (x.cost > a.cost ? x : a), { date: "", cost: 0 }),
+           cacheHit: read + fresh > 0 ? read / (read + fresh) : null };
+}
+
+// "47× my $200/mo plan": the period's API-price total over what the plan cost for it
+// (one month for the monthly periods; every month since the first day for "all").
+function sharePlanLine(st, planUsd) {
+  if (!(planUsd > 0) || !(st.cost > 0)) return "";
+  const x = st.cost / (planUsd * (st.period === "all" ? Math.max(1, st.days.length / 30.44) : 1));
+  const plan = `my $${planUsd.toLocaleString("en-US")}/mo plan`;
+  if (x < 1) return `${Math.round(x * 100)}% of ${plan}`;
+  return `${x >= 10 ? Math.round(x).toLocaleString("en-US") : x.toFixed(1).replace(/\.0$/, "")}× ${plan}`;
+}
+
+function shareText(st, src, planUsd) {
+  const line = sharePlanLine(st, planUsd);
+  return `My ${SHARE_SRC_NAME[src] || SHARE_SRC_NAME.claude} usage ${st.phrase}: ${fmtMoney0(st.cost)} at API list prices` +
+         (line ? `, ${line}` : "") + ". Tracked locally with Burnmeter: https://burnmeter.dev";
+}
+
+function drawShareCard(cv, st, src, planUsd) {
+  const W = 1200, H = 630, P = 64;
+  cv.width = W; cv.height = H;
+  const c = cv.getContext("2d");
+  const css = getComputedStyle(document.documentElement);
+  const sans = css.getPropertyValue("--font-sans").trim() || "system-ui, sans-serif";
+  const mono = css.getPropertyValue("--font-mono").trim() || "ui-monospace, monospace";
+  const claude = "#D97757", codex = "#10A37F", brand = src === "codex" ? codex : claude;
+  const rgba = (hex, a) => `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(hex.slice(5, 7), 16)},${a})`;
+  const glow = (x, y, col) => {
+    const g = c.createRadialGradient(x, y, 0, x, y, 720);
+    g.addColorStop(0, rgba(col, 0.28)); g.addColorStop(1, rgba(col, 0));
+    c.fillStyle = g; c.fillRect(0, 0, W, H);
+  };
+  c.fillStyle = "#08090A"; c.fillRect(0, 0, W, H);
+  glow(W - 100, -140, brand);
+  if (src === "both") glow(W - 560, -220, codex);
+  c.textBaseline = "alphabetic"; c.textAlign = "left";
+
+  // what and when (left), the brand (right)
+  c.font = `600 21px ${sans}`; c.fillStyle = "#8A8F98";
+  c.letterSpacing = "2px";
+  c.fillText(`${SHARE_SRC_NAME[src] || SHARE_SRC_NAME.claude} · ${st.label}`.toUpperCase(), P, 88);
+  c.letterSpacing = "0px";
+  c.font = `700 27px ${sans}`; c.fillStyle = "#F7F8F8"; c.textAlign = "right";
+  c.fillText("Burnmeter", W - P, 90);
+  const gx = W - P - c.measureText("Burnmeter").width - 27, gy = 82;   // a small gauge as the mark
+  c.lineWidth = 4.5; c.lineCap = "round";
+  c.strokeStyle = "rgba(255,255,255,0.22)"; c.beginPath(); c.arc(gx, gy, 13, Math.PI * 0.75, Math.PI * 2.25); c.stroke();
+  c.strokeStyle = brand; c.beginPath(); c.arc(gx, gy, 13, Math.PI * 0.75, Math.PI * 1.85); c.stroke();
+  c.textAlign = "left";
+
+  c.font = `700 150px ${sans}`; c.fillStyle = "#F7F8F8";
+  c.fillText(fmtMoney0(st.cost), P - 6, 252);
+  c.font = `500 30px ${sans}`; c.fillStyle = "#D0D6E0";
+  c.fillText("of usage at API list prices", P, 302);
+  const line = sharePlanLine(st, planUsd);
+  if (line) { c.font = `700 36px ${sans}`; c.fillStyle = brand; c.fillText(line, P, 356); }
+
+  // a bar per day; the busiest one in full colour
+  const n = st.days.length, top = 392, bh = 70, gap = n > 60 ? 2 : 5;
+  const bw = (W - 2 * P - gap * (n - 1)) / n, max = Math.max(...st.days.map((d) => d.cost)) || 1;
+  st.days.forEach((d, i) => {
+    const h = d.cost > 0 ? Math.max(3, (d.cost / max) * bh) : 2;
+    c.fillStyle = d.cost <= 0 ? "rgba(255,255,255,0.08)" : d === st.busiest ? brand : rgba(brand, 0.5);
+    c.fillRect(P + i * (bw + gap), top + bh - h, Math.max(1, bw), h);
+  });
+
+  const short = (k) => bmDayDate(k).toLocaleString("en-US", { month: "short", day: "numeric" });
+  const cells = [
+    [fmtCompact(st.tokens), "tokens"],
+    [`${st.activeDays}/${n}`, "days active"],
+    [fmtMoney0(st.busiest.cost), "busiest day" + (st.busiest.date ? " · " + short(st.busiest.date) : "")],
+    [st.cacheHit == null ? "—" : Math.round(st.cacheHit * 100) + "%", "cache hit rate"],
+  ];
+  const cw = (W - 2 * P) / cells.length;
+  cells.forEach(([v, k], i) => {
+    c.font = `600 38px ${mono}`; c.fillStyle = "#F7F8F8"; c.fillText(v, P + i * cw, 530);
+    c.font = `500 19px ${sans}`; c.fillStyle = "#8A8F98"; c.fillText(k, P + i * cw, 560);
+  });
+  c.font = `500 19px ${sans}`; c.fillStyle = "#62666D";
+  c.fillText("burnmeter.dev  ·  free & local-first  ·  Claude Code + Codex", P, 606);
+}
+
+const bmShareBlob = () => new Promise((res) => $("share-canvas").toBlob(res, "image/png"));
+async function bmShareCopy() {
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": await bmShareBlob() })]);
+    return true;
+  } catch (e) { return false; }
+}
+
+function bmDrawShare() {
+  const sh = window.__share;
+  if (!sh || !sh.reps.length) return;
+  const st = shareStats(sh.reps, $("share-period").value);
+  const plan = parseFloat($("share-plan").value) || 0;
+  drawShareCard($("share-canvas"), st, sh.src, plan);
+  ["share-post", "share-copy", "share-save"].forEach((id) => { $(id).disabled = !(st.cost > 0); });
+  $("share-status").textContent = st.cost > 0 ? "" : "No usage in this period yet.";
+  sh.text = shareText(st, sh.src, plan);
+  sh.file = `burnmeter-${sh.src}-${st.period === "30d" ? "last-30-days" : st.period === "all" ? "all-time" : st.from.slice(0, 7)}.png`;
+}
+
+// On a phone the page is wider than the screen, so a fixed overlay spans the wider layout
+// viewport and the dialog ran off the right edge, × included: pin it to what's visible.
+function bmFitShare() {
+  const ov = $("share-ov"), vv = window.visualViewport;
+  if (!ov || ov.hidden) return;
+  const z = ov.getBoundingClientRect().width / (ov.offsetWidth || 1) || 1;   // the page's zoom (Settings, big screens)
+  const narrow = vv && (vv.width < window.innerWidth - 20 || vv.offsetLeft > 0 || vv.offsetTop > 0);
+  Object.assign(ov.style, narrow
+    ? { left: vv.offsetLeft / z + "px", top: vv.offsetTop / z + "px", width: vv.width / z + "px",
+        height: vv.height / z + "px", right: "auto", bottom: "auto" }
+    : { left: "", top: "", width: "", height: "", right: "", bottom: "" });
+}
+
+async function bmOpenShare() {
+  const src = window.__source || "claude";
+  $("share-ov").hidden = false;
+  bmFitShare();
+  $("share-status").textContent = "";
+  // A quick last-24h report (a first read still going) would draw a wrong month.
+  const reps = [];
+  for (const s of src === "both" ? ["claude", "codex"] : [src]) {
+    let r = window.__reportCache[s];
+    if (!r?.daily || r._meta?.partial) { try { r = await loadReportFor(s, false); } catch (e) { r = null; } }
+    if (r?.daily && !r._meta?.partial) reps.push(r);
+  }
+  window.__share = { src, reps };
+  ["share-post", "share-copy", "share-save"].forEach((id) => { $(id).disabled = !reps.length; });
+  if (!reps.length) {
+    $("share-status").textContent = "Your history is still being read. Try again when the dashboard has your figures.";
+    return;
+  }
+  const kept = localStorage.getItem("burnmeter_share_plan_" + src);
+  const guess = src === "codex" ? "" : SHARE_PLAN_USD[reps.find((r) => (r._meta?.source || "claude") === "claude")?.chosen_plan] || "";
+  $("share-plan").value = kept != null ? kept : guess;
+  $("share-period").value = localStorage.getItem("burnmeter_share_period") || "30d";
+  if (document.fonts) await document.fonts.ready;
+  bmDrawShare();
+  $("share-period").focus();
+}
+
+function bmCloseShare() {
+  $("share-ov").hidden = true;
+  $("share-btn").focus();
+}
+
+function wireShare() {
+  const ov = $("share-ov");
+  if (!ov) return;
+  $("share-btn").addEventListener("click", bmOpenShare);
+  $("share-close").addEventListener("click", bmCloseShare);
+  ov.addEventListener("click", (e) => { if (e.target === ov) bmCloseShare(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !ov.hidden) bmCloseShare(); });
+  window.visualViewport?.addEventListener("resize", bmFitShare);
+  window.visualViewport?.addEventListener("scroll", bmFitShare);
+  $("share-period").addEventListener("change", () => {
+    localStorage.setItem("burnmeter_share_period", $("share-period").value); bmDrawShare();
+  });
+  $("share-plan").addEventListener("input", () => {
+    localStorage.setItem("burnmeter_share_plan_" + window.__share.src, $("share-plan").value); bmDrawShare();
+  });
+  const say = (t) => { $("share-status").textContent = t; };
+  $("share-copy").addEventListener("click", async () => {
+    say((await bmShareCopy()) ? "Copied. Paste it into a post." : "Couldn't copy here. Use Save PNG instead.");
+  });
+  $("share-save").addEventListener("click", async () => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(await bmShareBlob());
+    a.download = window.__share.file;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  });
+  // X can't take an image through a link: the picture goes on the clipboard to paste in.
+  $("share-post").addEventListener("click", async () => {
+    const copied = await bmShareCopy();
+    window.open("https://x.com/intent/post?text=" + encodeURIComponent(window.__share.text), "_blank", "noopener");
+    say(copied ? "The picture is on your clipboard: paste it into the post." : "Save the PNG and attach it to the post.");
+  });
+}
+
 function start() {
   applyZoom();
   // sidebar section navigation
@@ -2531,6 +2762,7 @@ function start() {
   window.addEventListener("resize", applyZoom);
   $("refresh").addEventListener("click", () => refresh(!window.__bmWarming));   // no blocking rebuild mid first read
   wireAlerts();
+  wireShare();
   $("export-csv")?.addEventListener("click", () => {
     const s = window.__source === "both" ? "claude" : (window.__source || "claude");
     window.location.href = "/api/records.csv" + (s !== "claude" ? "?source=" + s : "");
