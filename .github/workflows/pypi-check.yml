@@ -11,6 +11,8 @@ on:
     types: [completed]
   workflow_dispatch:
   push:
+    # Branch pushes only: a release tag is pushed before PyPI has the new version.
+    branches: [main]
     paths: ['.github/workflows/pypi-check.yml']
 
 permissions:
@@ -46,9 +48,12 @@ jobs:
 
           version = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"]
           pipx = [sys.executable, "-m", "pipx"]
-          # PyPI's index can lag an upload by a minute or two.
-          for attempt in range(10):
-              if subprocess.run(pipx + ["install", f"burnmeter=={version}"]).returncode == 0:
+          # PyPI's index can lag an upload by a few minutes, and pip keeps an index page it
+          # has fetched for ten minutes: without --no-cache-dir every retry reads the same
+          # stale page (the 0.3.9 run on macOS saw only 0.3.8 ten times in a row).
+          for attempt in range(16):
+              if subprocess.run(pipx + ["install", "--pip-args=--no-cache-dir",
+                                        f"burnmeter=={version}"]).returncode == 0:
                   break
               time.sleep(30)
           else:
@@ -81,5 +86,5 @@ jobs:
           version=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
           python -m venv "$RUNNER_TEMP/app"
           if [ "$RUNNER_OS" = Windows ]; then py="$RUNNER_TEMP/app/Scripts/python"; else py="$RUNNER_TEMP/app/bin/python"; fi
-          "$py" -m pip install --upgrade "burnmeter[app]==$version"
+          "$py" -m pip install --upgrade --no-cache-dir "burnmeter[app]==$version"
           "$py" -m pip show burnmeter pywebview pystray Pillow | grep -E "^(Name|Version):"
