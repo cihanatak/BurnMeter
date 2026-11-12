@@ -661,6 +661,25 @@ function bmMergedDaily(pick, sources, n, thisId, localRep) {
     .sort((a, b) => String(a[0]).localeCompare(String(b[0]))).slice(-(n || 30))
     .map(([date, cost_usd]) => ({ date, cost_usd }));
 }
+// The gauge's zones for one needle window. A 0.3.9+ report has them per window
+// (burn_rate_zones_by_hours, measured like the needle); an older report or device has
+// one set for every window.
+const BM_DEFAULT_ZONES = { typical: 4, busy: 12, heavy: 25, max: 50 };
+function bmZonesFor(rep, hoursStr) {
+  return (rep && rep.burn_rate_zones_by_hours && rep.burn_rate_zones_by_hours[hoursStr])
+    || (rep && rep.burn_rate_zones) || BM_DEFAULT_ZONES;
+}
+// Zones scaled by k (the number of devices burning at once in an all-devices view), for the
+// default key and every window, so the gauge keeps reading its own window's zones.
+function bmScaleZones(localRep, k) {
+  const sc = (z0) => ({ ...z0, typical: z0.typical * k, busy: z0.busy * k, heavy: z0.heavy * k,
+                        max: (z0.max || 50) * k });
+  const byH = {};
+  const src = (localRep && localRep.burn_rate_zones_by_hours) || {};
+  Object.keys(src).forEach((h) => { if (src[h]) byH[h] = sc(src[h]); });
+  return { burn_rate_zones: sc((localRep && localRep.burn_rate_zones) || BM_DEFAULT_ZONES),
+           burn_rate_zones_by_hours: Object.keys(byH).length ? byH : undefined };
+}
 // Build a hero-shaped view for scope = "all" or a remote device_id; null → use local.
 function bmScopedRep(localRep) {
   const scope = window.__scope || "all";
@@ -685,11 +704,7 @@ function bmScopedRep(localRep) {
     if (!d) return null;
     agg = bmDeviceAgg(d, sources); label = d.label || "device";
   }
-  const z0 = localRep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25, max: 50 };
-  const zones = {
-    typical: z0.typical * k, busy: z0.busy * k, heavy: z0.heavy * k,
-    max: (z0.max || 50) * k, insufficient_history: z0.insufficient_history,
-  };
+  const zs = bmScaleZones(localRep, k);
   const pick = scope === "all" ? devices : devices.filter((d) => d.device_id === scope);
   const thisId = payload && payload.this_device;
   // Staleness: oldest REMOTE snapshot in scope (local device is live). updateLiveStamp shows
@@ -703,7 +718,8 @@ function bmScopedRep(localRep) {
   return {
     __scopeLabel: label,
     _meta: localRep._meta,
-    burn_rate_zones: zones,
+    burn_rate_zones: zs.burn_rate_zones,
+    burn_rate_zones_by_hours: zs.burn_rate_zones_by_hours,
     forecast: { burn_rate_per_hour_recent: agg.burn, recent_costs: null,
                 today: { so_far: agg.today }, month: { so_far: agg.month } },
     totals: { cost_usd: agg.lifetime, total_tokens: agg.tokens, cache_hit_rate: agg.cache },
@@ -837,7 +853,8 @@ function render(rep) {
   document.title = "Burnmeter — AI coding fuel gauge";
   $("version").textContent = "v" + (rep._meta?.version || "?");
   { const v = rep._meta?.version; if (v) { _showCheckAffordance(v); checkForUpdate(v); } }
-  $("data-source").textContent = `${rep._meta?.files_scanned ?? "?"} files · ${fmtInt(rep.record_count || 0)} records`;
+  $("data-source").textContent = `${rep._meta?.files_scanned ?? "?"} files · ${fmtInt(rep.record_count || 0)} records` + bmUnreadNote(rep);
+  $("data-source").title = bmUnreadHint(rep);
 
   renderWelcome(rep);
   renderSpeedometer(heroRep, isCodex);   // hero gauge = scoped (all devices / one device)
@@ -866,8 +883,8 @@ function render(rep) {
 // ---------- first-run WELCOME (onboarding) ----------
 // New users land on ~18 mostly-empty panels with no idea why. While history is
 // thin, show a friendly banner ON TOP (no panels removed) that either tells a
-// zero-data user how to get data, or explains that the gauges are market-normal
-// (still "calibrating") until there's enough personal history. Dismissible once.
+// zero-data user how to get data, or explains that the gauges are on a starting
+// scale (still "calibrating") until there's enough personal history. Dismissible once.
 function renderWelcome(rep) {
   const el = $("welcome-card"); if (!el) return;
   const n = rep.record_count || 0;
@@ -883,8 +900,8 @@ function renderWelcome(rep) {
   } else {
     lead = "Welcome — you're just getting started";
     body = `Burnmeter has seen <b>${fmtInt(n)}</b> ${tool} ${n === 1 ? "record" : "records"} so far. `
-         + `The gauges use <b>market-normal</b> thresholds while they calibrate — once there's enough `
-         + `of your own history they switch to your personal baseline, so early readings are a sensible `
+         + `The gauges use a <b>starting scale</b> while they calibrate — within about a week of use `
+         + `they switch to your own pace, so early readings are a sensible `
          + `reference, not a verdict on your habits.`;
   }
   el.innerHTML =
@@ -1024,7 +1041,7 @@ function bmScopedHalf(localRep, source) {
   });
   recent.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
   const kk = Math.max(1, scope === "all" ? k : 1);
-  const z0 = localRep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25, max: 50 };
+  const zs = bmScaleZones(localRep, kk);
   return {
     ...localRep,
     __scopeLabel: scope === "all" ? "All devices" : (pick[0].label || "device"),
@@ -1036,8 +1053,8 @@ function bmScopedHalf(localRep, source) {
                 today: { so_far: today }, month: { so_far: month } },
     totals: { ...(localRep.totals || {}), cost_usd: lifetime, total_tokens: tokens, cache_hit_rate: chW ? chSum / chW : 0 },
     record_count: records,
-    burn_rate_zones: { typical: z0.typical * kk, busy: z0.busy * kk, heavy: z0.heavy * kk,
-                       max: (z0.max || 50) * kk, insufficient_history: z0.insufficient_history },
+    burn_rate_zones: zs.burn_rate_zones,
+    burn_rate_zones_by_hours: zs.burn_rate_zones_by_hours,
     recent_turns: recent.slice(0, 20),
     // Live "what's running now" merged across devices (local windows + remote snapshots).
     live_active_models_by_window: bmMergeLive(localRep.live_active_models_by_window, pick, source, payload && payload.this_device),
@@ -1122,7 +1139,8 @@ function renderCombined(cl, cx) {
   $("version").textContent = "v" + (cl._meta?.version || cx._meta?.version || "?");
   { const v = cl._meta?.version || cx._meta?.version; if (v) { _showCheckAffordance(v); checkForUpdate(v); } }
   window.__multiDevice = new Set([...Object.keys(cl.by_device || {}), ...Object.keys(cx.by_device || {})]).size > 1;
-  $("data-source").textContent = `Claude ${fmtInt(cl.record_count || 0)} · Codex ${fmtInt(cx.record_count || 0)} records`;
+  $("data-source").textContent = `Claude ${fmtInt(cl.record_count || 0)} · Codex ${fmtInt(cx.record_count || 0)} records` + bmUnreadNote(cx);
+  $("data-source").title = bmUnreadHint(cx);
   $("last-updated").textContent = "now";
   // Device-aware: each half reflects the device scope (default all devices combined).
   const scl = bmScopedHalf(cl, "claude"), scx = bmScopedHalf(cx, "codex");
@@ -1182,6 +1200,20 @@ function paintCombinedActive(side, rep) {
 // independent of the server cache TTL (which used to freeze it at build time →
 // "stuck", and never 0 when no project ran). Falls back to the server-computed
 // value for reports from an older server with no recent_costs.
+// Codex compresses older logs (.jsonl.zst). A build that could not read some of them
+// (no zstd module in a pip install, or a damaged file) says so beside the record
+// count. A report from an older version has no such key.
+function bmUnreadNote(rep) {
+  const n = rep?._meta?.compressed_unread || 0;
+  return n ? ` · ${n} compressed Codex log${n === 1 ? "" : "s"} not read` : "";
+}
+function bmUnreadHint(rep) {
+  const r = rep?._meta?.compressed_unread_reasons || {};
+  if (r.no_zstd) return "Codex compresses older logs with zstd. Run: pip install backports.zstd";
+  if (r.corrupt) return "Some compressed Codex logs are damaged and were skipped.";
+  return "";
+}
+
 function liveBurnRate(fc, hoursStr) {
   // Prefer the server's per-window value — it's the SAME source the model breakdown, the
   // all-devices aggregate, and each device's contribution use. Recomputing from recent_costs
@@ -1208,8 +1240,11 @@ function computeGaugeSpec(rep, isCodex, hoursStr) {
   // Hem Claude HEM Codex → AYNI burn-rate $/saat göstergesi (tutarlılık — kullanıcı
   // talebi). Codex'in rate-limit %'si hero'da DEĞİL; yan kutuda ("Plan limiti · duvar")
   // gösterilir (renderHeroAside) → bilgi kaybolmaz, ama hero her iki araçta da burn.
-  const z = rep.burn_rate_zones || { typical: 4, busy: 12, heavy: 25, max: 50 };
+  const z = bmZonesFor(rep, hoursStr);
   const zd = !!z.insufficient_history;
+  // Still partly on the starting scale: an older report has no blend_ratio and says so
+  // only through insufficient_history.
+  const blending = !zd && z.blend_ratio != null && z.blend_ratio < 1;
   const g = {
     value: rate, max: z.max || 50, zones: z,
     ticks: zd
@@ -1225,8 +1260,10 @@ function computeGaugeSpec(rep, isCodex, hoursStr) {
     // projection (current_window.vs_baseline_ratio) stretched a block's first minutes
     // over all 5 hours and said "10.4×" beside a needle in the yellow.
     ratio: !zd && z.typical > 0 && rate >= z.typical ? rate / z.typical : null, below: rate < z.typical,
-    note: zd ? "Market-normal estimate for your plan — it recalibrates to your own pace as Burnmeter learns it."
-             : "Tuned to you: “typical” is your median 5-hour block, “heavy” is your busiest ~10%. (Started from a market-normal estimate.)",
+    note: zd ? "A starting scale for now — it becomes your own within about a week of use."
+             : "Tuned to you: “typical” is your median pace over a window this long while you were working; “heavy” is your busiest 10%."
+               + (blending ? " (Still blending in from the starting scale.)" : ""),
+    onStartingScale: zd || blending,
   };
   return { g, rate, fc, isLimit: false };
 }
@@ -1341,12 +1378,11 @@ function renderSpeedometer(rep, isCodex) {
   // efficiency headline (fuel_efficiency) + demoted note (öbür limit / eşik kaynağı)
   const fe = rep.fuel_efficiency?.headline || {};
   const noteHtml = `<div style="font-size:12px;margin-top:7px;color:var(--text-3);line-height:1.5">${esc(g.note)}</div>`;
-  // Market-normal reference numbers for the user's plan, so the "market normal" the
-  // gauge mentions is actually visible as $/hr (typical/busy/heavy).
+  // The starting scale's numbers, shown only while the gauge is on it or blending from
+  // it. It names no plan: the logs don't say which plan the user is on.
   const mz = rep.market_zones;
-  const planName = mz ? ({ pro: "Pro", max5: "Max 5×", max20: "Max 20×" }[mz.plan] || mz.plan) : "";
-  const marketHtml = mz
-    ? `<div style="font-size:12px;margin-top:4px;color:var(--text-3);line-height:1.5">Market-normal (${planName}): <b style="color:var(--text-2)">typical ${fmtMoney(mz.typical)}</b> · busy ${fmtMoney(mz.busy)} · heavy ${fmtMoney(mz.heavy)} /hr</div>`
+  const marketHtml = mz && g.onStartingScale
+    ? `<div style="font-size:12px;margin-top:4px;color:var(--text-3);line-height:1.5">It starts at <b style="color:var(--text-2)">typical ${fmtMoney(mz.typical)}</b> · busy ${fmtMoney(mz.busy)} · heavy ${fmtMoney(mz.heavy)} /hr</div>`
     : "";
   $("hero-detail").innerHTML = `<strong>${esc(fe.label || "")}</strong>${fe.detail ? " — " + esc(fe.detail) : ""}${noteHtml}${marketHtml}`;
   if (rep._meta?.partial) {
@@ -2451,7 +2487,7 @@ function alertLevelOf(rep, isCodex) {
     return { level: 0, msg: "" };
   }
   // Claude (hesap limiti yok) → aşırı burn uyarısı
-  const fc = rep.forecast || {}, z = rep.burn_rate_zones || {};
+  const fc = rep.forecast || {}, z = bmZonesFor(rep, "2");
   const rate = (fc.burn_rates_by_hours || {})["2"] ?? fc.burn_rate_per_hour_recent ?? 0;
   if (z.heavy && rate >= z.heavy * 1.6) return { level: 2, msg: `🟠 Burn rate very high: ${fmtMoney(rate)}/hr` };
   return { level: 0, msg: "" };
@@ -2527,7 +2563,6 @@ window.bmShowSection = function (name) {
 // set against what your plan costs. Drawn on a canvas from the daily totals the page
 // already has; it holds totals only (no project names, prompts or code) and leaves the
 // machine only if you post it.
-const SHARE_PLAN_USD = { pro: 20, max5: 100, max20: 200 };
 const SHARE_SRC_NAME = { claude: "Claude Code", codex: "Codex", both: "Claude Code + Codex" };
 const bmDayKey = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
 const bmDayDate = (k) => new Date(k + "T00:00:00");
@@ -2705,9 +2740,10 @@ async function bmOpenShare() {
     $("share-status").textContent = "Your history is still being read. Try again when the dashboard has your figures.";
     return;
   }
+  // Only what the user typed: the logs don't say which plan they're on, and the old
+  // token-count guess put light Pro users on the $200 plan. Empty draws no plan line.
   const kept = localStorage.getItem("burnmeter_share_plan_" + src);
-  const guess = src === "codex" ? "" : SHARE_PLAN_USD[reps.find((r) => (r._meta?.source || "claude") === "claude")?.chosen_plan] || "";
-  $("share-plan").value = kept != null ? kept : guess;
+  $("share-plan").value = kept != null ? kept : "";
   $("share-period").value = localStorage.getItem("burnmeter_share_period") || "30d";
   if (document.fonts) await document.fonts.ready;
   bmDrawShare();

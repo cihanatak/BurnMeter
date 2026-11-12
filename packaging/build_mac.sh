@@ -32,6 +32,7 @@ python3 -m PyInstaller --noconfirm --clean --name Burnmeter --windowed \
   --collect-all pystray \
   --collect-all PIL \
   --collect-submodules burnmeter \
+  --hidden-import backports.zstd \
   --hidden-import webview.platforms.cocoa \
   --hidden-import pystray._darwin \
   --add-data "burnmeter/static:burnmeter/static" \

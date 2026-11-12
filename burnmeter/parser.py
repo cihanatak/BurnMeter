@@ -22,6 +22,7 @@ therefore folds a response's lines into one record by field-wise max — see
 from __future__ import annotations
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta, timezone
@@ -29,7 +30,64 @@ from pathlib import Path
 from typing import Callable, Iterator, Optional
 
 
-CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
+
+
+def claude_project_roots() -> list[Path]:
+    """Folders Claude Code may keep its logs in, in priority order, existing ones
+    only and each folder once. Claude Code writes under $CLAUDE_CONFIG_DIR when
+    that is set (people with several accounts do; it may hold comma-separated
+    paths), else ~/.config/claude (newer builds) or ~/.claude. Reading only
+    ~/.claude left those users with an empty dashboard."""
+    candidates: list[Path] = []
+    for part in os.environ.get("CLAUDE_CONFIG_DIR", "").split(","):
+        part = part.strip()
+        if part:
+            candidates.append(Path(part).expanduser() / "projects")
+    home = Path.home()
+    candidates.append(home / ".config" / "claude" / "projects")
+    candidates.append(home / ".claude" / "projects")
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for c in candidates:
+        try:
+            if not c.is_dir():
+                continue
+            # realpath: the same folder under two names (symlink, 8.3 name, case)
+            # must not be read, and so counted, twice.
+            key = os.path.normcase(os.path.realpath(c))
+        except OSError:
+            continue
+        if key not in seen:
+            seen.add(key)
+            roots.append(c)
+    return roots
+
+
+def _is_default_root(path) -> bool:
+    try:
+        key = os.path.normcase(os.path.realpath(path))
+    except (OSError, TypeError, ValueError):
+        return False
+    return any(key == os.path.normcase(os.path.realpath(r)) for r in claude_project_roots())
+
+
+# The default every caller starts from (CLI flag default, server, worker, statusline):
+# the first location that exists, so someone whose logs are only under
+# $CLAUDE_CONFIG_DIR or ~/.config/claude gets them on every code path. With only
+# ~/.claude present this is ~/.claude/projects, as it always was.
+CLAUDE_PROJECTS_DIR = (claude_project_roots() or [Path.home() / ".claude" / "projects"])[0]
+
+
+def _default_cache_path() -> Path:
+    """Where the parse cache lives: beside ~/.claude as always when that exists
+    (an installed app keeps its cache there), else beside the first log root's
+    parent. ~/.claude is never created for it."""
+    legacy = Path.home() / ".claude"
+    if legacy.exists():
+        return legacy / ".burnmeter_claude_cache.json"
+    roots = claude_project_roots()
+    base = roots[0].parent if roots else legacy
+    return base / ".burnmeter_claude_cache.json"
 
 
 def _local_device() -> str:
@@ -119,9 +177,36 @@ def decode_project_dir(encoded: str) -> str:
     return encoded.replace("-", "/")
 
 
-def _parse_timestamp(raw: Optional[str]) -> datetime:
-    if not raw:
-        return datetime.fromtimestamp(0, tz=timezone.utc)
+_EPOCH0 = datetime.fromtimestamp(0, tz=timezone.utc)
+_NUMERIC = re.compile(r"-?\d+(\.\d+)?")
+
+
+def _from_unix(value) -> datetime:
+    """Unix seconds, or milliseconds when the value is above 1e11 (1e11 s is the
+    year 5138, 1e11 ms is 1973: no real log time is ambiguous). Anything that
+    lands before September 2001 (1e9 s) is not a log time but some other number,
+    such as a compact date like 20241110, which Python 3.10 cannot read as ISO and
+    which would otherwise become a day in 1970; the caller then falls back."""
+    try:
+        v = float(value)
+        if v != v or v <= 0:
+            return _EPOCH0
+        if v > 1e11:
+            v /= 1000.0
+        if v < 1e9:
+            return _EPOCH0
+        return datetime.fromtimestamp(v, tz=timezone.utc)
+    except (ValueError, TypeError, OverflowError, OSError):
+        return _EPOCH0
+
+
+def _parse_timestamp(raw) -> datetime:
+    if not raw or isinstance(raw, bool):
+        return _EPOCH0
+    if isinstance(raw, (int, float)):
+        return _from_unix(raw)
+    if not isinstance(raw, str):
+        return _EPOCH0
     try:
         # Claude Code emits ISO-8601 with 'Z' suffix.
         if raw.endswith("Z"):
@@ -131,7 +216,10 @@ def _parse_timestamp(raw: Optional[str]) -> datetime:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt
     except (ValueError, TypeError):
-        return datetime.fromtimestamp(0, tz=timezone.utc)
+        # Only after ISO failed, so every string that parsed before parses the same.
+        if _NUMERIC.fullmatch(raw.strip()):
+            return _from_unix(raw.strip())
+        return _EPOCH0
 
 
 def _extract_tool_names(content) -> list[str]:
@@ -385,7 +473,7 @@ def iter_jsonl_files(root: Path = CLAUDE_PROJECTS_DIR) -> Iterator[Path]:
 # Claude session JSONL'leri append-only; tamamlanmış dosyalar değişmez. Cache
 # (path,mtime,size) ile değişmemiş dosyalar yeniden OKUNMAZ → build ~25s'den
 # ~birkaç saniyeye iner (sadece aktif/yeni dosyalar parse edilir).
-_CLAUDE_CACHE_PATH = CLAUDE_PROJECTS_DIR.parent / ".burnmeter_claude_cache.json"
+_CLAUDE_CACHE_PATH = _default_cache_path()
 # Bump whenever UsageRecord gains a field the cache must carry, or a record's
 # meaning changes — an old entry would otherwise be replayed with the new field
 # silently zeroed. v2: cache_creation_1h_tokens (1-hour cache-write TTL split).
@@ -397,10 +485,13 @@ _CACHE_SAVE_EVERY = 60.0
 
 
 def _claude_load_cache() -> dict:
+    # Any failure means "no cache": a file damaged by a crash or power loss (bad
+    # bytes, truncated, or JSON of another shape) must cost a re-parse, not the build.
     try:
-        return json.loads(_CLAUDE_CACHE_PATH.read_text())
-    except (OSError, json.JSONDecodeError):
+        data = json.loads(_CLAUDE_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception:
         return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _claude_save_cache(cache: dict) -> None:
@@ -409,7 +500,7 @@ def _claude_save_cache(cache: dict) -> None:
     next build then re-parses every log from scratch — minutes on a big history."""
     tmp = _CLAUDE_CACHE_PATH.with_name(f"{_CLAUDE_CACHE_PATH.name}.{os.getpid()}.tmp")
     try:
-        tmp.write_text(json.dumps(cache))
+        tmp.write_text(json.dumps(cache), encoding="utf-8")
         os.replace(tmp, _CLAUDE_CACHE_PATH)
     except OSError:
         try:
@@ -479,6 +570,7 @@ def parse_claude_file(path: Path, scan_device: str = "mac"):
     # the first read of a big history (no parse cache yet: a fresh install) about
     # four times slower than the work needs.
     uuid_map: dict[str, tuple[str, str, bool]] = {}
+    last_raw_ts = None          # the latest stamp seen in this file, parsed only if needed
     try:
         with path.open("r", encoding="utf-8", errors="replace") as fh:
             for raw in fh:
@@ -531,8 +623,24 @@ def parse_claude_file(path: Path, scan_device: str = "mac"):
                 except Exception:
                     perr += 1
                     continue
+                raw_ts = parsed.get("timestamp")
                 if rec is None:
+                    if raw_ts:
+                        last_raw_ts = raw_ts
                     continue
+                if rec.timestamp.timestamp() <= 0:
+                    # Missing or unreadable stamp: borrow the previous line's, else the
+                    # file's mtime. Epoch 0 put a 1970 day in the charts and gave a chat
+                    # a 56-year duration.
+                    prev = _parse_timestamp(last_raw_ts)
+                    if prev.timestamp() <= 0:
+                        try:
+                            prev = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+                        except (OSError, ValueError, OverflowError):
+                            prev = rec.timestamp
+                    rec.timestamp = prev
+                else:
+                    last_raw_ts = raw_ts
                 rec.device = scan_device
                 records.append(rec)
     except OSError:
@@ -650,13 +758,16 @@ def parse_claude_recent(path: Path, scan_device: str, since: datetime):
 
 
 def load_records(
-    root: Path = CLAUDE_PROJECTS_DIR,
+    root: Optional[Path] = None,
     deduplicate: bool = True,
     extra_roots: Optional[list[Path]] = None,
     since: Optional[datetime] = None,
     progress: Optional[Callable[[dict], None]] = None,
 ) -> tuple[list[UsageRecord], dict, dict[str, str]]:
     """Load all usage records from a Claude projects directory tree.
+
+    root=None, or any one of the default locations, reads every default location
+    (claude_project_roots()). Any other folder is read alone.
 
     Returns (records sorted by time, stats, user_intents) where:
       - records: list of UsageRecord, sorted by timestamp
@@ -687,6 +798,15 @@ def load_records(
     # Claude Code yakımları da görünsün diye Syncthing/rsync ile mirror
     # edilmiş ek dizinler. dedup `message_id`'ye göre — aynı record iki
     # root'ta varsa (sync race) ikinci kez sayılmaz.
+    default_extra: list[Path] = []
+    # Callers pass CLAUDE_PROJECTS_DIR rather than None, so one of the default
+    # locations stands for all of them. Any other folder is read alone.
+    if root is None or _is_default_root(root):
+        found = claude_project_roots()
+        root = found[0] if found else (root or CLAUDE_PROJECTS_DIR)
+        default_extra = found[1:]
+        extra_roots = default_extra + list(extra_roots or [])
+    local_roots = {root, *default_extra}   # this machine's own logs, not a mirror
     all_roots = [root]
     if extra_roots:
         all_roots.extend(extra_roots)
@@ -716,7 +836,7 @@ def load_records(
         # device label — main root → "mac", extra_roots → "pc" (varsayım:
         # Cihan'ın senaryosu tek ek cihaz). İleride çoklu cihaz için
         # path-tail'inden infer edilebilir (örn. projects-pc → pc).
-        scan_device = _local_device() if scan_root == root else "pc"
+        scan_device = _local_device() if scan_root in local_roots else "pc"
         for path in iter_jsonl_files(scan_root):
             try:
                 st = path.stat()

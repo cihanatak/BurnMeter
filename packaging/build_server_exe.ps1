@@ -10,6 +10,8 @@ $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
 python -m pip install --quiet --upgrade pyinstaller pyinstaller-hooks-contrib
+# Codex compresses older logs with zstd; the frozen server has no pip to add it later.
+python -m pip install --quiet "backports.zstd>=1.0"
 
 $env:PYTHONPATH = $root
 $sep = ";"
@@ -19,6 +21,7 @@ python -m PyInstaller --noconfirm --clean --name burnmeter-server --windowed `
   --paths $root `
   --collect-all cryptography `
   --collect-submodules burnmeter `
+  --hidden-import backports.zstd `
   --add-data "burnmeter\static${sep}burnmeter\static" `
   --add-data "burnmeter\assets${sep}burnmeter\assets" `
   packaging\burnmeter_server.py

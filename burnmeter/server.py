@@ -622,7 +622,7 @@ def make_handler(cache: _Cache, codex_cache: Optional[_Cache] = None):
                             if not updater.run_installer_update(updater.installer_url(version)):
                                 raise RuntimeError(
                                     f"the v{version or 'latest'} installer could not be downloaded or started")
-                        elif not _spawn_update(host, port):
+                        elif not _spawn_update(host, port, version):
                             raise RuntimeError("_spawn_update returned False")
                         _UPDATE_STATE["state"] = "restarting"
                     except Exception as e:
@@ -1062,7 +1062,7 @@ def _spawn_relaunch(host: str, port: int, open_browser: bool = True) -> bool:
         return False
 
 
-def _spawn_update(host: str, port: int) -> bool:
+def _spawn_update(host: str, port: int, version: str = "") -> bool:
     """Spawn the DETACHED robust updater (`burnmeter _update`): it stops this server,
     reinstalls (package no longer in use), then relaunches. Survives this server
     exiting. Returns True on spawn."""
@@ -1077,7 +1077,7 @@ def _spawn_update(host: str, port: int) -> bool:
             kw["start_new_session"] = True
         subprocess.Popen(
             [desktop._pythonw(sys.executable), "-m", "burnmeter", "_update",
-             "--host", str(host), "--port", str(port)], **kw)
+             "--host", str(host), "--port", str(port), "--version", str(version or "")], **kw)
         return True
     except Exception:
         return False

@@ -95,7 +95,8 @@ reads and writes at their own rates.
 
 ## Conventions
 
-- **No third-party Python dependencies in the core** (stdlib only). Optional
+- **The core stays on the standard library**, with one exception: `backports.zstd` on
+  Python older than 3.14, because Codex compresses its logs with zstd. Optional
   features go behind an extra (`[sync]`, `[tray]`, `[app]`) and import lazily.
 - **Costs are estimates.** Always label them as such; never imply they are a
   bill.

@@ -30,6 +30,19 @@ def installer_url(version: str = "") -> str:
     return INSTALLER_URL
 
 
+def pip_specs(version: str = "") -> list[str]:
+    """What a pip-installed Burnmeter installs on a one-click update, best first.
+
+    The PyPI release of that exact version, then the same version's git tag (PyPI
+    is published by a workflow a minute or two after the GitHub release). Never
+    unpinned `main`: that is whatever was pushed last, released or not. With no
+    usable version, the newest PyPI release."""
+    if re.fullmatch(r"\d+(\.\d+){1,3}", version or ""):
+        return [f"burnmeter[app,sync]=={version}",
+                f"burnmeter[app,sync] @ git+https://github.com/cihanatak/BurnMeter@v{version}"]
+    return ["burnmeter[app,sync]"]
+
+
 def _cmd_line(cmdline: str) -> str:
     """The process command line that has cmd run `cmdline` as written.
 

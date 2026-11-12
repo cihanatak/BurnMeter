@@ -6,7 +6,7 @@ month by ~24%. Both slipped through 74 passing tests because NOTHING asserted
 that a model maps to the right price — only that the arithmetic was consistent.
 
 Rates below were verified against platform.claude.com/docs/en/about-claude/pricing
-and developers.openai.com/api/docs/pricing on 2026-10-29. When a provider changes
+and developers.openai.com/api/docs/pricing on 2026-11-12. When a provider changes
 a price or ships a model, update PRICES *and* this file together; a failure here
 means the table drifted from reality.
 
@@ -47,6 +47,8 @@ LIVE_RATES = {
     "claude-opus-4-5-20251101":   (5.00, 25.00, 0.50, 6.25),
     "claude-opus-4-1-20250805":   (15.00, 75.00, 1.50, 18.75),
     "claude-opus-4-20250514":     (15.00, 75.00, 1.50, 18.75),
+    "claude-fable-5-2":           (8.00, 40.00, 0.20, 10.00),
+    "claude-mythos-5-2":          (8.00, 40.00, 0.20, 10.00),
     "claude-fable-5-1":           (10.00, 50.00, 0.25, 12.50),
     "claude-mythos-5-1":          (10.00, 50.00, 0.25, 12.50),
     "claude-fable-5":             (10.00, 50.00, 1.00, 12.50),
@@ -61,12 +63,24 @@ LIVE_RATES = {
     "claude-haiku-4-5-20251001":  (1.00, 5.00, 0.10, 1.25),
     "claude-3-5-haiku-20241022":  (0.80, 4.00, 0.08, 1.00),
     "gpt-6-astra":                (10.00, 50.00, 1.00, 10.00),
+    "gpt-6.1-sol":                (2.00, 10.00, 0.10, 2.00),
+    "gpt-6.1-terra":              (1.00, 5.00, 0.05, 1.00),
+    "gpt-6-sol":                  (2.00, 10.00, 0.20, 2.00),
+    "gpt-6-luna":                 (0.10, 0.50, 0.01, 0.10),
+    "gpt-6-cyber":                (20.00, 100.00, 2.00, 20.00),
+    "gpt-6-rosalind":             (15.00, 75.00, 1.50, 15.00),
+    "gpt-6-astra-law":            (10.00, 50.00, 1.00, 10.00),
     "gpt-5.6-sol":                (4.00, 20.00, 0.40, 4.00),
     "gpt-5.6-terra":              (2.00, 12.00, 0.20, 2.00),
     "gpt-5.6-luna":               (0.20, 1.20, 0.02, 0.20),
-    "gpt-5.5-pro":                (30.00, 180.00, 3.00, 30.00),
+    "gpt-5.5-pro":                (30.00, 180.00, 30.00, 30.00),
     "gpt-5.5":                    (5.00, 30.00, 0.50, 5.00),
+    "gpt-5.4-pro":                (30.00, 180.00, 30.00, 30.00),
     "gpt-5.4":                    (2.50, 15.00, 0.25, 2.50),
+    "gpt-5.2-pro":                (21.00, 168.00, 21.00, 21.00),
+    "gpt-5.2":                    (1.75, 14.00, 0.175, 1.75),
+    "gpt-5.1":                    (1.25, 10.00, 0.125, 1.25),
+    "gpt-5-pro":                  (15.00, 120.00, 15.00, 15.00),
     "gpt-5.4-mini":               (0.75, 4.50, 0.075, 0.75),
     "gpt-5.4-nano":               (0.20, 1.25, 0.02, 0.20),
     "gpt-5":                      (1.25, 10.00, 0.125, 1.25),
@@ -82,6 +96,8 @@ LIVE_1H_WRITE = {
     "claude-opus-5-5": 8.00,
     "claude-opus-5": 10.00,
     "claude-opus-4-1-20250805": 30.00,
+    "claude-fable-5-2": 16.00,
+    "claude-mythos-5-2": 16.00,
     "claude-fable-5-1": 20.00,
     "claude-sonnet-5-5": 4.00,
     "claude-sonnet-4-6": 6.00,
@@ -204,7 +220,7 @@ def test_variant_beats_version_for_openai_ids():
     """gpt-5.4-mini is a mini model, not the 5.4 flagship; same for codex/nano."""
     assert resolve_price("gpt-5.4-mini")[0] == "gpt-5.4-mini"
     assert resolve_price("gpt-5.4-nano")[0] == "gpt-5.4-nano"
-    assert resolve_price("gpt-5.3-codex")[0] == "gpt-5-codex"
+    assert resolve_price("gpt-5.3-codex")[0] == "gpt-5.3-codex"
     assert resolve_price("gpt-5.5-pro")[0] == "gpt-5.5-pro"   # must beat plain gpt-5.5
 
 
@@ -427,3 +443,83 @@ def test_the_cache_card_reads_the_same_hit_rate_as_the_totals():
     for r in recs:
         totals.add(r)
     assert cache_efficiency(recs)["hit_rate"] == round(totals.cache_hit_rate, 4) == 0.8221
+
+
+# --- 0.3.9: Fable/Mythos 5.2 and the OpenAI id table ---------------------------
+
+@pytest.mark.parametrize("model", ["claude-fable-5-2", "claude-mythos-5-2"])
+def test_fable_and_mythos_52_are_exact_and_priced(model):
+    assert resolve_price(model) == ("fable-5-2", True)
+    assert estimate_cost_usd(model, input_tokens=1_000_000, output_tokens=1_000_000,
+                             cache_read_tokens=1_000_000, cache_creation_tokens=1_000_000,
+                             cache_creation_1h_tokens=500_000) == pytest.approx(
+        8.00 + 40.00 + 0.20 + 0.5 * 10.00 + 0.5 * 16.00)
+    assert resolve_price("claude-fable-5-1") == ("fable-5-1", True)   # keeps its own row
+    assert price_for("claude-fable-5-1").cache_read_per_mtok == 0.25
+
+
+def test_unknown_future_fable_is_estimated_at_the_newest_row():
+    assert resolve_price("claude-fable-6-0") == ("fable-5-2", False)
+    assert is_price_estimated("claude-fable-6-0")
+
+
+@pytest.mark.parametrize("model", [m for m in LIVE_RATES if m.startswith(("gpt-5", "gpt-6", "o4"))])
+def test_listed_openai_ids_are_exact_with_their_own_price(model):
+    assert resolve_price(model) == (model, True)
+
+
+def test_a_trailing_date_does_not_make_an_openai_id_unlisted():
+    assert resolve_price("gpt-5.3-codex-2026-10-01") == ("gpt-5.3-codex", True)
+    assert resolve_price("gpt-5-2025-08-07") == ("gpt-5", True)
+
+
+def test_codex_variants_do_not_share_the_gpt53_codex_price_as_exact():
+    # v0.3.8: any id containing "codex" was exact at $1.75/$14.
+    for m in ("gpt-5.1-codex-mini", "gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5-codex",
+              "codex-mini-latest", "gpt-5.5-codex"):
+        assert resolve_price(m)[1] is False, m
+        assert is_price_estimated(m)
+    assert resolve_price("gpt-5.1-codex-mini")[0] != "gpt-5-codex"
+
+
+def test_gpt51_and_gpt52_are_not_billed_at_gpt55_rates():
+    assert estimate_cost_usd("gpt-5.1", input_tokens=1_000_000) == pytest.approx(1.25)
+    assert estimate_cost_usd("gpt-5.2", output_tokens=1_000_000) == pytest.approx(14.00)
+
+
+def test_gpt56_tier_names_count_only_as_gpt_56_tier():
+    assert resolve_price("gpt-5-console-sol") == ("gpt-5.5", False)
+    assert resolve_price("my-luna-model")[1] is False
+    assert resolve_price("my-luna-model")[0] == "unknown"
+    assert resolve_price("gpt-5.6-sol") == ("gpt-5.6-sol", True)
+    assert resolve_price("gpt-5.6-other") == ("gpt-5.6-sol", False)
+
+
+def test_gpt61_sol_is_its_own_row_not_astra_or_gpt56_sol():
+    assert resolve_price("gpt-6.1-sol") == ("gpt-6.1-sol", True)
+    assert resolve_price("gpt-6.1-sol-2026-11-01") == ("gpt-6.1-sol", True)
+    assert estimate_cost_usd("gpt-6.1-sol", input_tokens=1_000_000) == pytest.approx(2.00)
+    assert resolve_price("gpt-6.1-sol")[0] not in ("gpt-6-astra", "gpt-5.6-sol")
+    # and the reverse: 5.6 / 6 sol are different rows
+    assert resolve_price("gpt-5.6-sol")[0] == "gpt-5.6-sol"
+    assert price_for("gpt-6-sol").cache_read_per_mtok != price_for("gpt-6.1-sol").cache_read_per_mtok
+
+
+def test_unlisted_gpt6_ids_and_codex_auto_review_are_flagged():
+    assert resolve_price("gpt-6.2-sol") == ("gpt-6.1-sol", False)
+    tier, exact = resolve_price("codex-auto-review")
+    assert exact is False and tier == "gpt-5.3-codex"
+    assert is_price_estimated("codex-auto-review")
+
+
+@pytest.mark.parametrize("model, row", [
+    ("gpt-6.2-sol", "gpt-6.1-sol"),
+    ("gpt-7-sol", "gpt-6.1-sol"),
+    ("gpt-6.2-terra", "gpt-6.1-terra"),
+    ("gpt-6.5-luna", "gpt-6-luna"),
+    ("gpt-6.2", "gpt-6-astra"),
+])
+def test_unlisted_gpt6_release_falls_to_its_own_tier(model, row):
+    # An unlisted point release keeps its tier's price (flagged), not the flagship's.
+    assert resolve_price(model) == (row, False)
+

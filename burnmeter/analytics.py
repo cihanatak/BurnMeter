@@ -30,6 +30,7 @@ import math
 import statistics
 import subprocess
 from collections import defaultdict
+from itertools import accumulate
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -43,14 +44,24 @@ from .pricing import (
 from ._proc import NO_WINDOW as _NO_WINDOW
 
 
-# Anthropic plan token budgets per 5-hour window (approximate; Anthropic
-# describes these in relative terms now, but these remain widely cited
-# anchor numbers).
-PLAN_LIMITS = {
-    "pro": 44_000,
-    "max5": 88_000,
-    "max20": 220_000,
-}
+# Claude Code's logs do not say which plan the user is on, and Anthropic does not publish
+# per-window token limits. The third-party numbers once used here (44k/88k/220k) counted
+# cache reads, so nearly every user came out on the top plan. Nothing is guessed now; the
+# report keeps an empty dict under "plan_limits" so older dashboards still find the key.
+PLAN_LIMITS: dict[str, int] = {}
+
+# Plan names a user may pass explicitly (--plan / ?plan=). Anthropic's names since
+# 30 Oct 2026: Pro $20, Max $100, Ultra $200. "max5"/"max20" are the old spellings of the
+# $100 and $200 plans.
+PLAN_ALIASES = {"pro": "pro", "max": "max", "ultra": "ultra", "max5": "max", "max20": "ultra"}
+PLAN_PRICE_USD = {"pro": 20, "max": 100, "ultra": 200}
+
+
+def normalize_plan(plan: Optional[str]) -> Optional[str]:
+    """An explicit plan name in today's spelling, or None when absent or unrecognised."""
+    if not plan:
+        return None
+    return PLAN_ALIASES.get(str(plan).strip().lower())
 
 # Industry reference points from Anthropic's own cost-management docs.
 INDUSTRY_REFERENCE = {
@@ -454,41 +465,19 @@ def detect_billing_windows(records: list[UsageRecord]) -> list[dict]:
 
 
 def infer_plan(windows: list[dict], lookback_days: int = 8) -> dict:
-    """Return a guess at the user's plan based on their P90 window usage.
+    """Kept for the report's "plan_inference" key; it no longer guesses.
 
-    We pick the smallest plan whose limit is >= the P90 observed over the
-    lookback period. This matches how Claude-Code-Usage-Monitor's "auto"
-    mode classifies plans (P90 over the last 192 hours).
+    A token-count guess put light Pro users on the $200 plan (the counts include cache
+    reads and the limits are not published), and that guess then priced the share card
+    and scaled the gauge. The logs carry no plan, so the answer is "unknown".
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
-    recent = [
-        w["window_tokens"]
-        for w in windows
-        if datetime.fromisoformat(w["started_at"]) >= cutoff
-    ]
-    if not recent:
-        return {
-            "guess": "unknown",
-            "p90_window_tokens": 0,
-            "samples": 0,
-            "reason": f"No activity in the last {lookback_days} days.",
-        }
-
-    p90 = _percentile(sorted(recent), 0.90)
-    if p90 <= PLAN_LIMITS["pro"]:
-        guess = "pro"
-    elif p90 <= PLAN_LIMITS["max5"]:
-        guess = "max5"
-    else:
-        guess = "max20"
+    recent = sum(1 for w in windows if datetime.fromisoformat(w["started_at"]) >= cutoff)
     return {
-        "guess": guess,
-        "p90_window_tokens": int(p90),
-        "samples": len(recent),
-        "reason": (
-            f"P90 of last {len(recent)} windows = {int(p90):,} tokens. "
-            "Smallest plan whose limit is greater wins."
-        ),
+        "guess": "unknown",
+        "p90_window_tokens": None,
+        "samples": recent,
+        "reason": "Claude Code's logs do not record your plan.",
     }
 
 
@@ -509,8 +498,7 @@ def window_baseline(windows: list[dict]) -> dict:
     costs = sorted(w.get("cost_usd", 0.0) for w in past if w.get("cost_usd", 0.0) > 0)
     if len(billable) < 8:
         # Need enough windows for a stable P90 — fewer than this and one intense early
-        # session would define "busy" and mis-scale the gauge. Until then the UI uses the
-        # plan-aware market-normal zones (burn_rate_zones falls back on missing cost_p90).
+        # session would define "busy" and mis-scale the block comparisons.
         return {"samples": len(billable)}
     return {
         "samples": len(billable),
@@ -527,8 +515,8 @@ def current_window_status(windows: list[dict], plan_name: Optional[str]) -> dict
 
     Compares billable (cache-read-excluded) usage against the user's own
     historical median window — that's the most honest "are you burning
-    faster than usual?" signal. The plan-limit comparison is reported but
-    de-emphasized because Anthropic's documented limits are heuristic.
+    faster than usual?" signal. There is no plan-limit comparison: Anthropic
+    publishes no per-window token limit, so plan_limit/utilization are None.
     """
     if not windows:
         return {"active": False}
@@ -542,8 +530,8 @@ def current_window_status(windows: list[dict], plan_name: Optional[str]) -> dict
     if elapsed >= WINDOW:
         return {"active": False, "last_window": last}
 
-    plan = (plan_name or "max5").lower()
-    limit = PLAN_LIMITS.get(plan, PLAN_LIMITS["max5"])
+    # Only a plan the user named; no limit for it (Anthropic does not publish one).
+    plan = normalize_plan(plan_name) or "unknown"
     used_total = last["window_tokens"]
     used_billable = last.get("billable_tokens", 0)
     used_cost = last.get("cost_usd", 0.0)
@@ -592,13 +580,13 @@ def current_window_status(windows: list[dict], plan_name: Optional[str]) -> dict
         "tokens_used": used_total,
         "billable_tokens_used": used_billable,
         "plan": plan,
-        "plan_limit": limit,
-        "utilization": round(used_total / limit, 4) if limit else 0,
+        "plan_limit": None,
+        "utilization": None,
         "burn_tokens_per_min": round(burn_total_per_min, 1),
         "burn_billable_per_min": round(burn_billable_per_min, 1),
         "projected_close_tokens": int(projected_total),
         "projected_close_billable": int(projected_billable),
-        "projected_overage": max(0, int(projected_total - limit)),
+        "projected_overage": None,
         "baseline_billable_p50": base.get("billable_p50"),
         "baseline_billable_p90": base.get("billable_p90"),
         "baseline_cost_p50": base.get("cost_p50"),
@@ -691,11 +679,13 @@ def weekly_cap_status(records: list[UsageRecord], daily: list[dict]) -> dict:
     rolling_7d_cost = _sum_between(cutoff_recent, cutoff_now)
     prev_7d_cost = _sum_between(cutoff_prior, cutoff_recent - timedelta(days=1))
 
-    # Compute all 7-day rolling windows in user's history → P95 + median.
-    daily_sorted = sorted(daily, key=lambda d: d["date"])
+    # Compute all 7-day rolling windows in user's history → P95 + median. Over CALENDAR
+    # days: `daily` holds active days only, so a once-a-week user's "week" used to add up
+    # 7 active days (7 weeks) and this week read as 14% of a normal one.
+    cal = _calendar_daily(daily, today)
     rolling_history = []
-    for i in range(6, len(daily_sorted)):
-        window_sum = sum(daily_sorted[j].get("cost_usd", 0) for j in range(i - 6, i + 1))
+    for i in range(6, len(cal)):
+        window_sum = sum(c for _, c in cal[i - 6:i + 1])
         if window_sum > 0.5:    # skip near-zero stretches
             rolling_history.append(window_sum)
     rolling_history.sort()
@@ -706,8 +696,13 @@ def weekly_cap_status(records: list[UsageRecord], daily: list[dict]) -> dict:
 
     pct_of_p95 = (rolling_7d_cost / p95 * 100) if p95 > 0 else 0
 
-    if pct_of_p95 >= 100:
+    # Near the median is a typical week even when it equals the P95: a user who spends the
+    # same every week would otherwise "hit your heaviest week ever" every week.
+    near_median = median7 > 0 and 0.75 * median7 <= rolling_7d_cost <= 1.25 * median7
+    if pct_of_p95 >= 100 and not near_median:
         kind, label = "bad",  "hit your heaviest week ever"
+    elif near_median:
+        kind, label = "good", "a typical week"
     elif pct_of_p95 >= 75:
         kind, label = "warn", "near your past heavy weeks"
     elif pct_of_p95 >= 40:
@@ -728,6 +723,23 @@ def weekly_cap_status(records: list[UsageRecord], daily: list[dict]) -> dict:
     }
 
 
+def _calendar_daily(daily: list[dict], until: date) -> list[tuple[date, float]]:
+    """(date, cost) for every calendar day from the first active day to `until`, quiet
+    days as 0. Rolling sums over `daily` itself would skip the quiet days."""
+    costs: dict[date, float] = {}
+    for d in daily:
+        try:
+            dd = date.fromisoformat(d["date"])
+        except (ValueError, TypeError):
+            continue
+        costs[dd] = costs.get(dd, 0.0) + (d.get("cost_usd", 0) or 0)
+    if not costs:
+        return []
+    first, last = min(costs), max(max(costs), until)
+    return [(first + timedelta(days=i), costs.get(first + timedelta(days=i), 0.0))
+            for i in range((last - first).days + 1)]
+
+
 # --- Anomaly detection -----------------------------------------------------
 
 def daily_anomalies(daily: list[dict]) -> list[dict]:
@@ -738,16 +750,25 @@ def daily_anomalies(daily: list[dict]) -> list[dict]:
     whose absolute cost is more than 2x the rolling 7-day median.
     """
     out = []
-    series = list(daily)
-    for i, day in enumerate(series):
-        prior = series[max(0, i - 7):i]
-        if len(prior) < 3:
+    # Trailing 7 CALENDAR days (quiet days count as 0), not the previous 7 active days,
+    # which for a sparse user reached weeks back.
+    by_date = {d["date"]: d for d in daily}
+    for day in daily:
+        try:
+            dd = date.fromisoformat(day["date"])
+        except (ValueError, TypeError):
             continue
-        tokens = [d["total_tokens"] for d in prior]
+        prior_keys = [(dd - timedelta(days=k)).isoformat() for k in range(7, 0, -1)]
+        active = [by_date[k] for k in prior_keys if k in by_date]
+        # At least 4 active days of 7, so the median is a working day and not a quiet one.
+        if len(active) < 4:
+            continue
+        tokens = [by_date[k]["total_tokens"] if k in by_date else 0 for k in prior_keys]
+        costs = [by_date[k]["cost_usd"] if k in by_date else 0.0 for k in prior_keys]
         mean = statistics.fmean(tokens)
         stdev = statistics.pstdev(tokens) or 1.0
         z = (day["total_tokens"] - mean) / stdev
-        median_cost = statistics.median([d["cost_usd"] for d in prior]) or 0.01
+        median_cost = statistics.median(costs) or 0.01
         cost_ratio = day["cost_usd"] / median_cost if median_cost else 0
         flags = []
         if z >= 2.0:
@@ -1381,7 +1402,35 @@ def burn_rate_timeseries(
     return out
 
 
-def daily_burn_rates(records: list[UsageRecord], days_back: int = 90) -> list[dict]:
+_SLOT_SEC = 300
+
+
+def _slot_series(records: list[UsageRecord], now: datetime, span_days: float) -> dict:
+    """Cost, tokens and record count per 5-minute UTC slot, from `span_days` before now
+    to a few minutes after it. One pass and one price lookup per record, shared by the
+    per-day burn rates and the gauge zones (each used to price every record itself)."""
+    first = int((now.timestamp() - span_days * 86400) // _SLOT_SEC)
+    last = int((now.timestamp() + 600) // _SLOT_SEC)
+    n = last - first + 1
+    cost, tokens, count = [0.0] * n, [0] * n, [0] * n
+    lo, hi, cost_of = first * _SLOT_SEC, (last + 1) * _SLOT_SEC, record_cost_usd
+    for rec in records:
+        t = rec.timestamp.timestamp()
+        if lo <= t < hi:
+            i = int((t - lo) // _SLOT_SEC)
+            cost[i] += cost_of(rec)
+            tokens[i] += (rec.input_tokens + rec.output_tokens
+                          + rec.cache_creation_tokens + rec.cache_read_tokens)
+            count[i] += 1
+    return {"first_slot": first, "cost": cost, "tokens": tokens, "count": count}
+
+
+def _slot_local_date(slot: int) -> date:
+    return local_date(datetime.fromtimestamp(slot * _SLOT_SEC, timezone.utc))
+
+
+def daily_burn_rates(records: list[UsageRecord], days_back: int = 90,
+                     slots: Optional[dict] = None) -> list[dict]:
     """Per-day $/active-hour — the true burn rate, not raw spend.
 
     Active hours computed by bucketing records into 5-minute slots and
@@ -1392,26 +1441,29 @@ def daily_burn_rates(records: list[UsageRecord], days_back: int = 90) -> list[di
     The "cost_per_hour" series is what should be plotted as the trend.
     "cost_usd" is included for reference (= what /day chart shows).
     """
-    BUCKET_SEC = 5 * 60
+    BUCKET_SEC = _SLOT_SEC
     cutoff = date.today() - timedelta(days=days_back)
+    if slots is None:
+        slots = _slot_series(records, datetime.now(timezone.utc), days_back + 2)
 
-    by_day: dict[str, dict] = defaultdict(lambda: {"cost": 0.0, "buckets": set(), "tokens": 0})
-    for r in records:
-        d = local_date(r.timestamp)
+    # A 5-minute UTC slot lies inside one 15-minute slot, so it has one local date.
+    by_day: dict[str, dict] = defaultdict(lambda: {"cost": 0.0, "buckets": 0, "tokens": 0})
+    first, cost, tokens = slots["first_slot"], slots["cost"], slots["tokens"]
+    for i, c in enumerate(slots["count"]):
+        if not c:
+            continue
+        d = _slot_local_date(first + i)
         if d < cutoff:
             continue
-        key = d.isoformat()
-        by_day[key]["cost"] += record_cost_usd(r)
-        by_day[key]["buckets"].add(int(r.timestamp.timestamp() // BUCKET_SEC))
-        by_day[key]["tokens"] += (
-            r.input_tokens + r.output_tokens
-            + r.cache_creation_tokens + r.cache_read_tokens
-        )
+        b = by_day[d.isoformat()]
+        b["cost"] += cost[i]
+        b["buckets"] += 1
+        b["tokens"] += tokens[i]
 
     out = []
     for d in sorted(by_day.keys()):
         s = by_day[d]
-        active_min = len(s["buckets"]) * (BUCKET_SEC / 60)
+        active_min = s["buckets"] * (BUCKET_SEC / 60)
         active_hr = active_min / 60.0
         burn = (s["cost"] / active_hr) if active_hr > 0 else 0.0
         out.append({
@@ -1638,49 +1690,76 @@ def forecast(records: list[UsageRecord], daily: list[dict]) -> dict:
     }
 
 
-# Market-normal $/hr gauge zones by plan tier — the COLD-START baseline (blended out as
-# the user's own history accrues). Without this a brand-new user got arbitrary numbers and
-# a meaningless verdict ("$10 in 5 min = very heavy"). Derived from the public flat-fee
-# prices ($20 Pro / $100 Max-5x / $200 Max-20x) ÷ ~30-50 active hrs/mo for a per-hour value
-# anchor ("typical"), then ~2× (busy), ~4× (heavy); max = gauge ceiling.
-_MARKET_ZONES = {
-    "pro":   {"typical": 8.0,  "busy": 18.0, "heavy": 35.0,  "max": 60.0},
-    "max5":  {"typical": 15.0, "busy": 35.0, "heavy": 70.0,  "max": 120.0},
-    "max20": {"typical": 30.0, "busy": 70.0, "heavy": 140.0, "max": 240.0},
-}
+# Starting gauge scale ($/hr) for everyone until their own history takes over. The
+# plan is unknown (the logs don't carry it), so one band: the old Pro band, the most
+# conservative one. Derived from a $20/mo plan over ~30-50 active hours for "typical",
+# then ~2x (busy), ~4x (heavy); max = gauge ceiling.
+_STARTING_ZONES = {"typical": 8.0, "busy": 18.0, "heavy": 35.0, "max": 60.0}
+
+_ZONE_SLOT_SEC = _SLOT_SEC    # 5-minute slots, the needle's finest window
+_ZONE_HISTORY_DAYS = 90
+_ZONE_MIN_DAYS = 3            # personal zones start here (blend 0) ...
+_ZONE_FULL_DAYS = 7           # ... and are fully personal here (blend 1)
+_ZONE_MIN_SAMPLES = 96
 
 
-def _market_zones(plan_guess: Optional[str]) -> dict:
-    g = (plan_guess or "").lower()
-    if "20" in g:
-        return dict(_MARKET_ZONES["max20"])
-    if "max" in g or "5" in g:
-        return dict(_MARKET_ZONES["max5"])
-    return dict(_MARKET_ZONES["pro"])   # pro / codex pro / unknown → conservative Pro band
+def _hours_key(h) -> str:
+    return str(int(h)) if float(h).is_integer() else str(h)
 
 
-def burn_rate_zones(window_baseline_data: dict, plan_guess: Optional[str] = None) -> dict:
-    """Speedometer zone boundaries ($/hr). Cold start = plan-aware MARKET-NORMAL zones (a
-    sensible scale for a brand-new user); as the user's own 5h-window history builds we
-    BLEND smoothly to their personal P50/P90 over windows ~8→16, so one intense early
-    session can't permanently mis-scale the gauge. Cost in a 5h window / 5 = avg $/hr."""
-    mkt = _market_zones(plan_guess)
-    cp90 = window_baseline_data.get("cost_p90")
-    if not cp90:
-        # 0-7 windows / no stable personal P90 yet → market-normal estimate.
-        return {**mkt, "insufficient_history": True, "market_default": True,
-                "plan_basis": (plan_guess or "pro")}
-    n = window_baseline_data.get("samples") or 0
-    p_busy = cp90 / 5.0
-    personal = {
-        "typical": (window_baseline_data.get("cost_p50") or 0) / 5.0,
-        "busy": p_busy, "heavy": p_busy * 2.0, "max": max(p_busy * 3.0, 1.0),
-    }
-    # Blend market→personal over windows 8..16 (w: 0→1) for a smooth, several-day handoff.
-    w = max(0.0, min(1.0, (n - 8) / 8.0))
-    blended = {k: round((1 - w) * mkt[k] + w * personal[k], 2)
-               for k in ("typical", "busy", "heavy", "max")}
-    return {**blended, "blend_ratio": round(w, 2), "plan_basis": (plan_guess or "pro")}
+def burn_rate_zones_by_window(records: list[UsageRecord], now: Optional[datetime] = None,
+                              slots: Optional[dict] = None) -> dict:
+    """Speedometer zones ($/hr) per needle window, measured the way the needle is.
+
+    The needle is cost over the last h hours / h. The zones used to be a 5-hour block's
+    cost / 5, so someone working in 30-minute bursts got "typical $0.80/h" and pegged
+    the needle whenever they worked. Now, for every past 5-minute slot in which the user
+    spent something, take the needle's own reading at that moment for each window h;
+    typical = P50, busy = P90, heavy = 2x busy, max = max(3x busy, $1). Slots that ended
+    less than max(h, 5) hours ago are left out, so the present isn't compared with itself.
+    Until 3 active days and 96 samples: the starting scale; then a linear blend to fully
+    personal at 7 active days.
+    """
+    now = now or datetime.now(timezone.utc)
+    now_s = now.timestamp()
+    hist_from = now_s - _ZONE_HISTORY_DAYS * 86400
+    longest = max(BURN_WINDOWS_H)
+    if slots is None:
+        slots = _slot_series(records, now, _ZONE_HISTORY_DAYS + longest / 24 + 1)
+    first_slot, slot_cost = slots["first_slot"], slots["cost"]
+    n = min(len(slot_cost), int(now_s // _ZONE_SLOT_SEC) - first_slot + 1)
+    prefix = [0.0, *accumulate(slot_cost)]
+    # Slots before hist_first are lookback only; starting at least one 48-h window in
+    # keeps i + 1 - width from going below 0.
+    max_width = round(longest * 3600 / _ZONE_SLOT_SEC)
+    hist_first = max(int(hist_from // _ZONE_SLOT_SEC) - first_slot, max_width)
+    active = [i for i in range(hist_first, n) if slot_cost[i] > 0]
+    # Local dates per 15-minute group (local_date's own granularity), not per slot.
+    days = len({_slot_local_date(g * 3) for g in {(first_slot + i) // 3 for i in active}})
+    w_blend = max(0.0, min(1.0, (days - _ZONE_MIN_DAYS) / (_ZONE_FULL_DAYS - _ZONE_MIN_DAYS)))
+
+    out = {}
+    for h in BURN_WINDOWS_H:
+        width = max(1, round(h * 3600 / _ZONE_SLOT_SEC))
+        # A slot i covers [(first+i)*300, (first+i+1)*300); it must end before this cutoff.
+        cutoff_i = int((now_s - max(h, 5) * 3600) // _ZONE_SLOT_SEC) - first_slot - 1
+        samples = sorted([(prefix[i + 1] - prefix[i + 1 - width]) / h
+                          for i in active if i <= cutoff_i])
+        enough = days >= _ZONE_MIN_DAYS and len(samples) >= _ZONE_MIN_SAMPLES
+        base = {"samples": len(samples), "active_days": days, "window_hours": h,
+                "plan_basis": "unknown"}
+        if not enough:
+            out[_hours_key(h)] = {**_STARTING_ZONES, **base, "blend_ratio": 0.0,
+                                  "insufficient_history": True, "market_default": True}
+            continue
+        busy = _percentile(samples, 0.9)
+        personal = {"typical": _percentile(samples, 0.5), "busy": busy,
+                    "heavy": busy * 2.0, "max": max(busy * 3.0, 1.0)}
+        zones = {k: round((1 - w_blend) * _STARTING_ZONES[k] + w_blend * personal[k], 2)
+                 for k in ("typical", "busy", "heavy", "max")}
+        out[_hours_key(h)] = {**zones, **base, "blend_ratio": round(w_blend, 2),
+                              "insufficient_history": False}
+    return out
 
 
 def errors_summary(error_events: list[dict], lookback_hours: int = 24) -> dict:
@@ -1820,10 +1899,17 @@ def build_report(
     project (7 of the 8 seconds of a one-day build); its block comes back empty.
     """
     tool_label = "Codex" if source == "codex" else "Claude Code"
+    # A record stamped in the future (clock skew, a log copied from a machine with a wrong
+    # clock) opened a 5-hour block that hid the real one for weeks. Every source passes
+    # through here, so drop them once; the count goes in the report.
+    _future_cut = datetime.now(timezone.utc) + timedelta(minutes=5)
+    _n_in = len(records)
+    records = [r for r in records if r.timestamp <= _future_cut]
+    future_dropped = _n_in - len(records)
     daily = aggregate_by_day(records)
     windows = detect_billing_windows(records)
     plan_guess = infer_plan(windows)
-    chosen_plan = plan or plan_guess["guess"]
+    chosen_plan = normalize_plan(plan) or "unknown"
     totals_dict = aggregate_total(records).to_dict()
     git_attr = attribute_to_commits(records if git else [], since_days=14)
     # 2026-05-28 (Cihan paradigm): "SON AKTİVİTE" panelinde session
@@ -1960,6 +2046,9 @@ def build_report(
         }
 
     bmf = aggregate_by_specific_model(records)
+    # One priced pass over 5-minute slots feeds both the gauge zones and the per-day rates.
+    slots = _slot_series(records, now_utc, 93)
+    zones_by_h = burn_rate_zones_by_window(records, now_utc, slots=slots)
     rep = {
         "recent_turns": recent_turns_data,
         "by_device": by_device_totals,
@@ -1989,7 +2078,7 @@ def build_report(
         "fuel_efficiency": fuel_efficiency(records, daily, git_attr, totals_dict, tool_label=tool_label),
         "weekly_cap": weekly_cap_status(records, daily),
         "errors": errors_summary(error_events or [], lookback_hours=24),
-        "daily_burn_rates": daily_burn_rates(records, days_back=90),
+        "daily_burn_rates": daily_burn_rates(records, days_back=90, slots=slots),
         # Trading-chart style multi-timeframe burn rate data. UI picks which
         # one to plot, then computes moving averages client-side.
         "burn_rate_timeseries": {
@@ -2000,10 +2089,12 @@ def build_report(
             "24": burn_rate_timeseries(records, bucket_hours=24, num_buckets=120),
         },
         "forecast": forecast(records, daily),
-        "burn_rate_zones": burn_rate_zones(window_baseline(windows), plan_guess.get("guess")),
-        # Raw market-normal baseline for the user's plan, so the gauge can SHOW the
-        # market numbers next to the user's own (not just say "started market-normal").
-        "market_zones": {**_market_zones(plan_guess.get("guess")), "plan": (plan_guess.get("guess") or "pro")},
+        # Per needle window ("0.0833" … "48", the burn_rates_by_hours keys); the old
+        # single key holds the default 2-hour window's zones for older readers.
+        "burn_rate_zones_by_hours": zones_by_h,
+        "burn_rate_zones": zones_by_h.get("2") or next(iter(zones_by_h.values())),
+        # The starting scale, so the gauge can show its numbers while it is still on it.
+        "market_zones": {**_STARTING_ZONES, "plan": "unknown"},
         "live_active_models_by_window": {
             "1":    live_active_models(records, lookback_min=1),
             "5":    live_active_models(records, lookback_min=5),
@@ -2016,6 +2107,7 @@ def build_report(
         "industry_reference": INDUSTRY_REFERENCE,
         "pricing_coverage": pricing_coverage(bmf),
         "record_count": len(records),
+        "future_records_dropped": future_dropped,
     }
     # Chat titles (sohbet adı) MUST be attached HERE — build_report is the single choke
     # point every build path goes through (worker subprocess, in-process fallback,
