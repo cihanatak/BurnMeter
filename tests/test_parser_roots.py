@@ -70,7 +70,10 @@ def test_parse_timestamp_unix_seconds_and_milliseconds():
 def test_parse_timestamp_keeps_todays_results():
     assert _parse_timestamp("2026-10-29T10:00:00.000Z") == datetime(2026, 10, 29, 10, tzinfo=timezone.utc)
     assert _parse_timestamp("2026-10-29T10:00:00") == datetime(2026, 10, 29, 10, tzinfo=timezone.utc)
-    assert _parse_timestamp("20241110") == datetime.fromisoformat("20241110").replace(tzinfo=timezone.utc)
+    # A compact date: ISO on Python 3.11+, unreadable on 3.10. Never a 1970 day.
+    assert _parse_timestamp("20241110") in (datetime(2024, 11, 10, tzinfo=timezone.utc),
+                                            datetime.fromtimestamp(0, tz=timezone.utc))
+    assert _parse_timestamp(20241110).timestamp() == 0
     for empty in (None, "", "garbage", True, [], 0):
         assert _parse_timestamp(empty).timestamp() == 0
 

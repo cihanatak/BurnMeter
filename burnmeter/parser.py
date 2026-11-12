@@ -183,13 +183,18 @@ _NUMERIC = re.compile(r"-?\d+(\.\d+)?")
 
 def _from_unix(value) -> datetime:
     """Unix seconds, or milliseconds when the value is above 1e11 (1e11 s is the
-    year 5138, 1e11 ms is 1973: no real log time is ambiguous)."""
+    year 5138, 1e11 ms is 1973: no real log time is ambiguous). Anything that
+    lands before September 2001 (1e9 s) is not a log time but some other number,
+    such as a compact date like 20241110, which Python 3.10 cannot read as ISO and
+    which would otherwise become a day in 1970; the caller then falls back."""
     try:
         v = float(value)
         if v != v or v <= 0:
             return _EPOCH0
         if v > 1e11:
             v /= 1000.0
+        if v < 1e9:
+            return _EPOCH0
         return datetime.fromtimestamp(v, tz=timezone.utc)
     except (ValueError, TypeError, OverflowError, OSError):
         return _EPOCH0
