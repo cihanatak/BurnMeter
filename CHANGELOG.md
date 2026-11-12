@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.3.9] — 2026-11-12
+
+### Fixed
+- **Codex logs that Codex has compressed are read again.** Since Codex 0.164, older
+  session logs are stored as `rollout-*.jsonl.zst`. Burnmeter read only `.jsonl`, so most
+  Codex history dropped out of the dashboard. Both forms are read now. On Python older
+  than 3.14 this needs `backports.zstd`, which is installed with Burnmeter and is its one
+  dependency. If a compressed log cannot be read, the footer says how many.
+- **The gauge compares like with like.** "Your typical" and "your heavy" were the cost of
+  a 5-hour block divided by five, whichever window the needle showed, so anyone who works
+  in short bursts sat past the end of the dial. Each window (5 minutes to 48 hours) now
+  has its own zones, measured the same way as the needle, from the times you were working
+  in the last 90 days.
+- **Burnmeter no longer guesses your plan.** The guess came from token counts and said
+  "Max 20×" for almost everyone. Claude Code does not write the plan to its logs, so the
+  Share card leaves the plan price for you to fill in, and a new install uses one starting
+  scale until it has about a week of your own history. `--plan` takes `pro`, `max` or
+  `ultra`.
+- **Prices.** Added Claude Fable 5.2 and Mythos 5.2 ($8 in, $40 out per million tokens),
+  which were priced as Fable 5.1, 25% too high. Every OpenAI model on OpenAI's price page
+  has its own row (GPT-5 to GPT-6.1, `gpt-6.1-sol` included). Before, every id containing
+  "codex" shared one price. A model that is not on the price page is priced like its
+  nearest listed model and marked as an estimate.
+- **Weekly pace counts calendar days.** It added up the last seven days that had any
+  usage, so someone who works one day a week looked far below their usual. A week within
+  25% of your usual now reads as a typical week.
+- **A record dated in the future no longer takes over the current 5-hour block.** Records
+  stamped more than five minutes ahead are left out.
+- **A damaged cache file no longer stops the dashboard.** It is rebuilt. One malformed
+  line in a Codex log no longer hides all Codex data. Log lines with a numeric or missing
+  timestamp are kept; they were dropped or dated 1970.
+- **Logs outside `~/.claude` and `~/.codex` are found.** Burnmeter reads
+  `CLAUDE_CONFIG_DIR` (one folder or several), `~/.config/claude` and `CODEX_HOME`.
+
+### Changed
+- **Updating a pip install takes the published release.** The one-click update installed
+  whatever was on the main branch and ignored a failure. It now installs the release it was
+  told about from PyPI, falls back to that release's tag, and writes the reason to
+  `~/.burnmeter/update_error.log` if neither works.
+
 ## [0.3.8] — 2026-11-01
 
 ### Added

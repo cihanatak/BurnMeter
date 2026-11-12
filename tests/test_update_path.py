@@ -99,3 +99,14 @@ def test_a_frozen_update_runs_the_installer_and_reports_failure(monkeypatch, tmp
     assert asked == [updater.installer_url("0.3.5")]
     assert state["state"] == "failed" and "v0.3.5" in state["error"]
     assert "update spawn failed" in (tmp_path / ".burnmeter" / "update_error.log").read_text()
+
+
+def test_a_pip_update_installs_the_pinned_release_never_main():
+    specs = updater.pip_specs("0.3.9")
+    assert specs[0] == "burnmeter[app,sync]==0.3.9"
+    assert specs[1] == "burnmeter[app,sync] @ git+https://github.com/cihanatak/BurnMeter@v0.3.9"
+    # No usable version: the newest PyPI release, still never a git branch.
+    assert updater.pip_specs("") == ["burnmeter[app,sync]"]
+    assert updater.pip_specs("0.3.9; del *") == ["burnmeter[app,sync]"]
+    assert not any(spec.endswith("BurnMeter") for spec in specs)
+

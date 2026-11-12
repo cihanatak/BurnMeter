@@ -156,7 +156,7 @@ def run_tray(host: str = "127.0.0.1", port: int = 7654, projects_dir=None,
                     pass
                 how = ("Click the tray → Update to install."
                        if frozen else
-                       "Update:  pip install git+https://github.com/cihanatak/BurnMeter")
+                       "Update:  pip install --upgrade burnmeter")
                 _notify(icon, f"Burnmeter v{v} is available.\n{how}", "Update available")
             elif manual:
                 _notify(icon, f"You're on the latest version (v{__version__}).")
@@ -178,8 +178,7 @@ def run_tray(host: str = "127.0.0.1", port: int = 7654, projects_dir=None,
             from .server import _spawn_update
             if not _spawn_update(h.host, h.port):
                 _notify(icon, "Couldn't start the updater. From a terminal:\n"
-                              "pip install --force-reinstall --no-cache-dir "
-                              "git+https://github.com/cihanatak/BurnMeter", "Update failed")
+                              "pip install --upgrade burnmeter", "Update failed")
 
         def _update_text(item):
             v = update["latest"]

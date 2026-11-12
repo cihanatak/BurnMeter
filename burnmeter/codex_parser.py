@@ -1,7 +1,9 @@
 """Codex (OpenAI gpt-5.x) session parser for Burnmeter.
 
 Codex CLI writes session rollouts to:
-    ~/.codex/sessions/YYYY/MM/DD/rollout-<ISO>-<uuid>.jsonl
+    $CODEX_HOME/sessions/YYYY/MM/DD/rollout-<ISO>-<uuid>.jsonl   (CODEX_HOME defaults to ~/.codex)
+and, since Codex CLI 0.164, compresses finished ones to rollout-*.jsonl.zst
+(same line-delimited JSON, read as a stream).
 
 Each line: {timestamp, type, payload}. We care about:
   - session_meta  → payload.{id, cwd, git}
@@ -25,6 +27,7 @@ is re-read on refresh.
 """
 from __future__ import annotations
 
+import io
 import json
 import os
 from pathlib import Path
@@ -32,9 +35,54 @@ from typing import Callable, Iterator, Optional
 
 from .parser import UsageRecord, _local_device, _parse_timestamp, _root_prefixes, _under
 
-CODEX_SESSIONS_DIR = Path.home() / ".codex" / "sessions"
-_CACHE_PATH = Path.home() / ".codex" / ".burnmeter_codex_cache.json"
-_OLD_CACHE_PATH = Path.home() / ".codex" / ".codex_meter_cache.json"   # pre-rename → auto-migrated
+# Codex CLI 0.164+ compresses finished rollouts to rollout-*.jsonl.zst. Plain
+# imports (not importlib strings) so PyInstaller's static analysis bundles the
+# module into the frozen app. Order: stdlib (3.14+), its backport (same API),
+# then the third-party `zstandard` if the user happens to have it.
+try:
+    from compression import zstd as _zstd_mod          # type: ignore[import-not-found]
+except ImportError:
+    try:
+        from backports import zstd as _zstd_mod        # type: ignore[import-not-found,no-redef]
+    except ImportError:
+        _zstd_mod = None
+_zstandard = None
+if _zstd_mod is None:
+    try:
+        import zstandard as _zstandard                  # type: ignore[import-not-found,no-redef]
+    except ImportError:
+        _zstandard = None
+
+
+def _zstd_opener() -> Optional[Callable[[Path], io.BufferedIOBase]]:
+    """Return a function that opens a .zst file as a decompressing binary stream,
+    or None when no zstd module imports (those files are then skipped and counted)."""
+    if _zstd_mod is not None:
+        return lambda p: _zstd_mod.open(p, "rb")
+    if _zstandard is not None:
+        def _open(p: Path):
+            fh = open(p, "rb")
+            try:
+                reader = _zstandard.ZstdDecompressor().stream_reader(
+                    fh, read_across_frames=True, closefd=True)
+                return io.BufferedReader(reader)
+            except Exception:
+                fh.close()
+                raise
+        return _open
+    return None
+
+
+def _codex_home() -> Path:
+    """Codex honours $CODEX_HOME for its whole state folder; ~/.codex otherwise."""
+    env = (os.environ.get("CODEX_HOME") or "").strip()
+    return Path(env).expanduser() if env else Path.home() / ".codex"
+
+
+CODEX_HOME = _codex_home()
+CODEX_SESSIONS_DIR = CODEX_HOME / "sessions"
+_CACHE_PATH = CODEX_HOME / ".burnmeter_codex_cache.json"
+_OLD_CACHE_PATH = CODEX_HOME / ".codex_meter_cache.json"   # pre-rename → auto-migrated
 # parse mantığı değişince bump et → farklı "v" taşıyan eski cache entry'leri yok
 # sayılır (mtime/size aynı olsa bile yeniden parse edilir, stale turn dönmez).
 # v2: ardışık birebir-aynı token_count delta'ları atlanır (anti-şişme).
@@ -47,10 +95,33 @@ _PARSE_VERSION = 3
 _INTEREST = ('"token_count"', '"turn_context"', '"session_meta"', '"user_message"')
 
 
+_ZST = ".zst"
+
+
+class CompressedReadError(Exception):
+    """A rollout-*.jsonl.zst that could not be read. reason: "no_zstd" | "corrupt"."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _is_compressed(path: Path) -> bool:
+    return path.name.endswith(_ZST)
+
+
 def iter_codex_files(root: Path = CODEX_SESSIONS_DIR) -> Iterator[Path]:
+    """Plain and compressed rollouts. When both X.jsonl and X.jsonl.zst exist
+    (Codex mid-compression), only the plain one is yielded: same session, and
+    reading both would count it twice."""
     if not root.exists():
         return
-    yield from sorted(root.rglob("rollout-*.jsonl"))
+    plain = set(root.rglob("rollout-*.jsonl"))
+    files = list(plain)
+    for z in root.rglob("rollout-*.jsonl.zst"):
+        if z.with_name(z.name[:-len(_ZST)]) not in plain:
+            files.append(z)
+    yield from sorted(files)
 
 
 def _line_of_interest(raw: str) -> bool:
@@ -69,7 +140,7 @@ def _epoch(iso: Optional[str]) -> float:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt.timestamp()
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, AttributeError):
         return 0.0
 
 
@@ -100,14 +171,25 @@ def parse_codex_file(path: Path, start_offset: int = 0, resume: Optional[dict] =
     prev_sig: Optional[tuple] = tuple(_ps) if _ps else None
     turns: list = []
     last_rate_limits: Optional[dict] = None
-    offset = int(start_offset or 0)
+    # A .zst is written once and never appended to: always read whole, streamed
+    # (it can expand to gigabytes), and its last line counts even without "\n".
+    compressed = _is_compressed(path)
+    offset = 0 if compressed else int(start_offset or 0)
 
     try:
+        if compressed:
+            opener = _zstd_opener()
+            if opener is None:
+                raise CompressedReadError("no_zstd")
+            fh = opener(path)
+        else:
+            fh = path.open("rb")
         # Binary so byte offsets are exact; only consume newline-terminated lines.
-        with path.open("rb") as fh:
-            fh.seek(offset)
+        with fh:
+            if offset:
+                fh.seek(offset)
             for raw_b in fh:
-                if not raw_b.endswith(b"\n"):
+                if not compressed and not raw_b.endswith(b"\n"):
                     break          # partial trailing line → consume on next pass
                 offset += len(raw_b)
                 raw = raw_b.decode("utf-8", "replace")
@@ -117,8 +199,14 @@ def parse_codex_file(path: Path, start_offset: int = 0, resume: Optional[dict] =
                     r = json.loads(raw)
                 except json.JSONDecodeError:
                     continue
+                # One odd line (array, number, string payload) must not abort the
+                # whole Codex load: skip anything that isn't the expected shape.
+                if not isinstance(r, dict):
+                    continue
                 typ = r.get("type")
-                payload = r.get("payload") or {}
+                payload = r.get("payload")
+                if not isinstance(payload, dict):
+                    continue
                 if typ == "session_meta":
                     session_id = str(payload.get("id") or "")
                     cwd = str(payload.get("cwd") or "")
@@ -145,12 +233,17 @@ def parse_codex_file(path: Path, start_offset: int = 0, resume: Optional[dict] =
                         if isinstance(rl, dict) and rl.get("primary"):
                             last_rate_limits = dict(rl)
                             last_rate_limits["_ts"] = _epoch(r.get("timestamp"))
-                        last = info.get("last_token_usage") or {}
-                        if not last:
+                        if not isinstance(info, dict):
                             continue
-                        in_tok = int(last.get("input_tokens") or 0)
-                        cached = int(last.get("cached_input_tokens") or 0)
-                        out_tok = int(last.get("output_tokens") or 0)
+                        last = info.get("last_token_usage") or {}
+                        if not last or not isinstance(last, dict):
+                            continue
+                        try:
+                            in_tok = int(last.get("input_tokens") or 0)
+                            cached = int(last.get("cached_input_tokens") or 0)
+                            out_tok = int(last.get("output_tokens") or 0)
+                        except (TypeError, ValueError):
+                            continue
                         # ANTI-DUPLICATE: Codex akış sırasında aynı last_token_usage'ı
                         # ardışık birebir tekrar yayabilir (ölçüm: event'lerin %5.2'si).
                         # Bunları saymak hesabı %6.6 şişirir. Ardışık birebir-aynı
@@ -160,7 +253,9 @@ def parse_codex_file(path: Path, start_offset: int = 0, resume: Optional[dict] =
                             continue
                         prev_sig = sig
                         fresh_in = max(0, in_tok - cached)
-                        ts = r.get("timestamp") or ""
+                        ts = r.get("timestamp")
+                        if not isinstance(ts, str):
+                            ts = ""
                         # KOMPAKT turn tuple: [ts, model, turn_id, fresh_in, out, cache_read]
                         # session_id/cwd/git_branch dosya-seviyesinde meta'ya hoist
                         # edilir (record başına tekrar etmez → cache 198MB→~birkaç MB).
@@ -174,9 +269,19 @@ def parse_codex_file(path: Path, start_offset: int = 0, resume: Optional[dict] =
                             fresh_in, out_tok, cached,
                         ])
                         idx += 1
+    except CompressedReadError:
+        raise
     except OSError:
-        pass
-    meta = {"sid": session_id or path.stem, "cwd": cwd, "branch": git_branch}
+        if compressed:
+            raise CompressedReadError("corrupt")
+    except Exception:
+        # A truncated or corrupt .zst (ZstdError, EOFError, ...) yields no
+        # trustworthy turns: the caller skips and counts it.
+        if compressed:
+            raise CompressedReadError("corrupt")
+        raise
+    stem = path.name[:-len(_ZST)] if compressed else path.name
+    meta = {"sid": session_id or Path(stem).stem, "cwd": cwd, "branch": git_branch}
     state = {"sid": session_id, "cwd": cwd, "branch": git_branch,
              "model": cur_model, "turn_id": cur_turn_id, "idx": idx,
              "prev_sig": list(prev_sig) if prev_sig else None, "intent": intent}
@@ -190,10 +295,14 @@ def _load_cache() -> dict:
         except OSError:
             pass
     if _CACHE_PATH.exists():
+        # Garbage bytes after a power cut, or valid JSON that isn't an object,
+        # used to stop every build until the user deleted the file: treat any
+        # failure as "no cache" and rebuild.
         try:
-            return json.loads(_CACHE_PATH.read_text())
-        except (OSError, json.JSONDecodeError):
+            cache = json.loads(_CACHE_PATH.read_text(encoding="utf-8"))
+        except Exception:
             return {}
+        return cache if isinstance(cache, dict) else {}
     return {}
 
 
@@ -202,7 +311,7 @@ def _save_cache(cache: dict) -> None:
     # mid-save) never sees half a cache.
     tmp = _CACHE_PATH.with_name(f"{_CACHE_PATH.name}.{os.getpid()}.tmp")
     try:
-        tmp.write_text(json.dumps(cache))
+        tmp.write_text(json.dumps(cache), encoding="utf-8")
         os.replace(tmp, _CACHE_PATH)
     except OSError:
         try:
@@ -245,15 +354,38 @@ def _compact_to_usages(meta: dict, turns: list, device: str):
         )
 
 
-def _bytes_to_read(cached: Optional[dict], sig: list) -> int:
+def _usable_entry(cached) -> Optional[dict]:
+    """A cache entry this version can reuse, else None (a foreign or damaged cache
+    must mean "re-read the file", never a crash)."""
+    if (isinstance(cached, dict) and cached.get("v") == _PARSE_VERSION
+            and isinstance(cached.get("meta"), dict)
+            and isinstance(cached.get("turns", []), list)):
+        return cached
+    return None
+
+
+def _cached_failure(cached, sig: list) -> Optional[str]:
+    """Reason a compressed file failed last time, if it is still byte-identical.
+    Only "corrupt" is remembered: installing a zstd module must take effect at once."""
+    if (isinstance(cached, dict) and cached.get("v") == _PARSE_VERSION
+            and cached.get("error") == "corrupt" and cached.get("sig") == sig):
+        return "corrupt"
+    return None
+
+
+def _bytes_to_read(cached: Optional[dict], sig: list, compressed: bool = False) -> int:
     """How much of a log load_codex_records reads: nothing if it's unchanged, the new
-    bytes if it only grew, else all of it (its three cases, for the progress counts)."""
-    if cached and cached.get("v") == _PARSE_VERSION and "meta" in cached:
+    bytes if it only grew, else all of it (its three cases, for the progress counts).
+    A compressed log is never appended to, so it is either unchanged or read whole."""
+    if _cached_failure(cached, sig):
+        return 0
+    cached = _usable_entry(cached)
+    if cached:
         old_sig = cached.get("sig") or [0, 0]
         off0 = int(cached.get("offset") or 0)
         if old_sig == sig:
             return 0
-        if sig[1] > old_sig[1] and off0 <= sig[1]:
+        if not compressed and sig[1] > old_sig[1] and off0 <= sig[1]:
             return sig[1] - off0
     return sig[1]
 
@@ -283,6 +415,10 @@ def load_codex_records(
     reparsed = 0
     saved_at = 0                   # reparse count at the last partial save
     latest_rl_by_dev: dict[str, dict] = {}   # device → most-recent rate_limits
+    # Compressed logs that could not be read, so the CLI/dashboard can say
+    # "N compressed Codex logs were not read" instead of silently showing less.
+    compressed_files = 0
+    unread = {"no_zstd": 0, "corrupt": 0}
 
     roots = [(root, _local_device())]
     for er in (extra_roots or []):
@@ -293,6 +429,8 @@ def load_codex_records(
             "files_scanned": 0, "reparsed": 0,
             "root": str(root), "root_exists": False,
             "source": "codex",
+            "compressed_files": 0, "compressed_unread": 0,
+            "compressed_unread_reasons": dict(unread),
         }, user_intents
 
     import time
@@ -315,7 +453,8 @@ def load_codex_records(
             # signal — the active file keeps a fresh mtime; old sessions fall out.
             if cutoff_ts and st.st_mtime < cutoff_ts:
                 continue
-            logs.append((path, sig, _bytes_to_read(cache.get(str(path)), sig)))
+            logs.append((path, sig, _bytes_to_read(cache.get(str(path)), sig,
+                                                   _is_compressed(path))))
         plan.append((device, logs))
     files_total = sum(len(logs) for _dev, logs in plan)
     read_total = sum(need for _dev, logs in plan for _p, _s, need in logs)
@@ -329,32 +468,58 @@ def load_codex_records(
                 reported = time.monotonic()
             key = str(path)
             files += 1
-            cached = cache.get(key)
-            if cached and cached.get("v") == _PARSE_VERSION and "meta" in cached:
-                old_sig = cached.get("sig") or [0, 0]
-                off0 = int(cached.get("offset") or 0)
-                if old_sig == sig:
-                    # unchanged → reuse cached fully (no I/O)
-                    meta = cached["meta"]; turns = cached.get("turns", [])
-                    intent = cached.get("intent"); rl = cached.get("rate_limits")
-                    offset = off0; state = cached.get("resume") or {}
-                elif sig[1] > old_sig[1] and off0 <= sig[1]:
-                    # append-only growth → INCREMENTAL: read ONLY the new bytes,
-                    # append to the cached turns (the 7.7GB active file never gets
-                    # fully reparsed → ~30s build collapses to milliseconds).
-                    meta, new_turns, intent2, rl2, offset, state = parse_codex_file(
-                        path, start_offset=off0, resume=cached.get("resume") or {})
-                    turns = (cached.get("turns") or []) + new_turns
-                    intent = cached.get("intent") or intent2
-                    rl = rl2 or cached.get("rate_limits")
-                    reparsed += 1
+            compressed = _is_compressed(path)
+            if compressed:
+                compressed_files += 1
+            raw_cached = cache.get(key)
+            if compressed and _cached_failure(raw_cached, sig):
+                # Same corrupt bytes as last build: don't decompress them again.
+                unread["corrupt"] += 1
+                new_cache[key] = raw_cached
+                read_done += need
+                continue
+            cached = _usable_entry(raw_cached)
+            try:
+                if cached:
+                    old_sig = cached.get("sig") or [0, 0]
+                    off0 = int(cached.get("offset") or 0)
+                    if old_sig == sig:
+                        # unchanged → reuse cached fully (no I/O)
+                        meta = cached["meta"]; turns = cached.get("turns", [])
+                        intent = cached.get("intent"); rl = cached.get("rate_limits")
+                        offset = off0; state = cached.get("resume") or {}
+                        if not isinstance(state, dict):
+                            state = {}
+                    elif not compressed and sig[1] > old_sig[1] and off0 <= sig[1]:
+                        # append-only growth → INCREMENTAL: read ONLY the new bytes,
+                        # append to the cached turns (the 7.7GB active file never gets
+                        # fully reparsed → ~30s build collapses to milliseconds).
+                        resume = cached.get("resume")
+                        meta, new_turns, intent2, rl2, offset, state = parse_codex_file(
+                            path, start_offset=off0,
+                            resume=resume if isinstance(resume, dict) else {})
+                        turns = (cached.get("turns") or []) + new_turns
+                        intent = cached.get("intent") or intent2
+                        rl = rl2 or cached.get("rate_limits")
+                        reparsed += 1
+                    else:
+                        # shrunk / rotated / edited-in-place / compressed changed
+                        # → safe full reparse
+                        meta, turns, intent, rl, offset, state = parse_codex_file(path)
+                        reparsed += 1
                 else:
-                    # shrunk / rotated / edited-in-place → safe full reparse
+                    # New key. A session that was read as X.jsonl and now appears as
+                    # X.jsonl.zst is parsed once more under its new path; the old
+                    # entry drops out below because X.jsonl no longer exists, and
+                    # the replay dedup would collapse any overlap anyway.
                     meta, turns, intent, rl, offset, state = parse_codex_file(path)
                     reparsed += 1
-            else:
-                meta, turns, intent, rl, offset, state = parse_codex_file(path)
-                reparsed += 1
+            except CompressedReadError as e:
+                unread[e.reason] = unread.get(e.reason, 0) + 1
+                if e.reason == "corrupt":
+                    new_cache[key] = {"sig": sig, "v": _PARSE_VERSION, "error": "corrupt"}
+                read_done += need
+                continue
             state["intent"] = intent          # keep resume intent in sync
             read_done += need
             # KOMPAKT cache + byte offset & resume state for incremental reparse.
@@ -413,4 +578,8 @@ def load_codex_records(
         "source": "codex",
         "record_count": len(records),
         "rate_limits": latest_rl_by_dev,   # {device: {primary, secondary, plan_type, ...}}
+        # rollout-*.jsonl.zst seen / not readable (reasons: no_zstd, corrupt).
+        "compressed_files": compressed_files,
+        "compressed_unread": sum(unread.values()),
+        "compressed_unread_reasons": unread,
     }, user_intents

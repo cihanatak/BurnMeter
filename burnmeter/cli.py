@@ -27,7 +27,6 @@ from .analytics import (
     detect_billing_windows,
     current_window_status,
     infer_plan,
-    PLAN_LIMITS,
     INDUSTRY_REFERENCE,
 )
 
@@ -107,7 +106,6 @@ def cmd_status(args):
     totals = report["totals"]
     baseline = report["baseline"]
     cw = report["current_window"]
-    plan_inf = report["plan_inference"]
 
     _print_header("burnmeter status")
     print(f"  data: {_fmt_int(report['record_count'])} usage records "
@@ -140,23 +138,15 @@ def cmd_status(args):
 
     _print_header("active 5-hour window")
     if cw.get("active"):
-        print(f"  plan: {bold(cw['plan'].upper())}  "
-              f"(inferred from P90 over last {plan_inf['samples']} windows: "
-              f"{_fmt_int(plan_inf['p90_window_tokens'])} tokens)")
-        used = cw["tokens_used"]
-        limit = cw["plan_limit"]
-        print(f"  usage: {_fmt_int(used)} / {_fmt_int(limit)}  "
-              f"({_fmt_pct(cw['utilization'])})")
-        print(f"         {_bar(used, limit)}")
+        # The logs don't record the plan and Anthropic publishes no per-window token
+        # limit, so no limit bar: only a plan the user named with --plan is shown.
+        if cw.get("plan") and cw["plan"] != "unknown":
+            print(f"  plan: {bold(cw['plan'].capitalize())}  (from --plan)")
+        print(f"  used: {_fmt_int(cw['tokens_used'])} tokens   "
+              f"cost: {bold(_fmt_money(cw.get('cost_usd', 0)))}")
         mins_left = cw["remaining_seconds"] // 60
         print(f"  burn rate: {_fmt_int(int(cw['burn_tokens_per_min']))} tokens/min   "
               f"time left: {mins_left} min")
-        if cw.get("projected_overage", 0) > 0:
-            print(red(f"  ⚠ projected to exceed limit by "
-                      f"{_fmt_int(cw['projected_overage'])} tokens at window close"))
-        else:
-            print(green(f"  ✓ projected close: "
-                        f"{_fmt_int(cw['projected_close_tokens'])} tokens"))
     else:
         print(dim("  no active window"))
 
@@ -501,16 +491,35 @@ def cmd_update(args):
     # 3. reinstall — now nothing is using the package, so pip can replace it cleanly.
     #    (BURNMETER_UPDATE_SKIP_PIP=1 skips this — used to test the restart path.)
     if os.environ.get("BURNMETER_UPDATE_SKIP_PIP") != "1":
-        try:
-            # Pull the GUI + crypto extras so the native window (pywebview), the
-            # tray (pystray/Pillow) and Pro sync (cryptography) all work after an
-            # update — otherwise the desktop icon silently falls back to a browser.
-            subprocess.run([sys.executable, "-m", "pip", "install", "--force-reinstall",
-                            "--no-cache-dir",
-                            "burnmeter[app,sync] @ git+https://github.com/cihanatak/BurnMeter"],
-                           capture_output=True, text=True, timeout=600, creationflags=NO_WINDOW)
-        except Exception:
-            pass
+        # The GUI + crypto extras come along so the native window (pywebview), the
+        # tray (pystray/Pillow) and Pro sync (cryptography) all work after an
+        # update — otherwise the desktop icon silently falls back to a browser.
+        # --upgrade, not --force-reinstall: the version is pinned, so pip replaces
+        # Burnmeter itself and leaves working dependencies alone.
+        from . import updater
+        failure = ""
+        for spec in updater.pip_specs(getattr(args, "version", "") or ""):
+            try:
+                r = subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade",
+                                    "--no-cache-dir", spec],
+                                   capture_output=True, text=True, timeout=600, creationflags=NO_WINDOW)
+                if r.returncode == 0:
+                    failure = ""
+                    break
+                failure = f"{spec}: pip exit {r.returncode}: {(r.stderr or r.stdout or '').strip()[-400:]}"
+            except Exception as e:
+                failure = f"{spec}: {e!r}"
+        if failure:
+            # The old version is relaunched below. Leave the reason where the server
+            # logs its own update failures; pip used to fail here without a trace.
+            try:
+                from datetime import datetime as _dt
+                log = Path.home() / ".burnmeter" / "update_error.log"
+                log.parent.mkdir(parents=True, exist_ok=True)
+                with open(log, "a", encoding="utf-8") as f:
+                    f.write(_dt.now().isoformat() + " pip update failed: " + failure + "\n")
+            except Exception:
+                pass
     # 4. relaunch the freshly-installed code on the SAME port (new process → new code)
     try:
         from . import desktop
@@ -843,6 +852,9 @@ def cmd_alerts(args):
                     if getattr(args, "codex_dir", None) else CODEX_SESSIONS_DIR)
             records, stats, intents = load_codex_records(root)
             errors: list = []
+            if stats.get("compressed_unread"):
+                print(dim(f"{stats['compressed_unread']} compressed Codex logs were not read "
+                          f"({stats.get('compressed_unread_reasons')})"))
         else:
             records, stats, intents, errors = load_records(Path(args.projects_dir))
         if not records:
@@ -886,8 +898,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="burnmeter")
     parser.add_argument("--projects-dir", default=str(CLAUDE_PROJECTS_DIR))
     parser.add_argument("--plan", default=None,
-                        choices=["pro", "max5", "max20"],
-                        help="override plan inference")
+                        choices=["pro", "max", "ultra", "max5", "max20"],
+                        help="your Claude plan (pro, max or ultra; max5/max20 are old "
+                             "names). Burnmeter can't read it from the logs.")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("status", help="one-screen overview")
@@ -969,6 +982,7 @@ def main(argv=None):
     p_update = sub.add_parser("_update", help=argparse.SUPPRESS)   # internal (robust updater)
     p_update.add_argument("--host", default="127.0.0.1")
     p_update.add_argument("--port", type=int, default=7654)
+    p_update.add_argument("--version", default="")     # the release the dashboard saw
 
     sub.add_parser("stop",
                    help="stop a backgrounded dashboard (the tray / windowless one)")

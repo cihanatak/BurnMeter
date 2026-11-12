@@ -690,4 +690,38 @@ passed += 1;
   passed += 15;
 }
 
+// === 0.3.9: the gauge reads the zones of its own window; no plan is guessed ===
+{
+  const { computeGaugeSpec, bmScopedRep, bmScopedHalf } = globalThis.__BM;
+  const z5m = { typical: 8, busy: 9, heavy: 18, max: 27, blend_ratio: 1, insufficient_history: false };
+  const z2h = { typical: 2, busy: 4, heavy: 8, max: 12, blend_ratio: 1, insufficient_history: false };
+  const fc = { burn_rates_by_hours: { "0.0833": 8, "1": 3, "2": 3 } };
+  const rep = { forecast: fc, burn_rate_zones: z2h, burn_rate_zones_by_hours: { "0.0833": z5m, "2": z2h } };
+  const g5 = computeGaugeSpec(rep, false, "0.0833").g;
+  assert.equal(g5.max, 27, "the 5-minute needle uses the 5-minute zones");
+  assert.equal(g5.zone[1], "🟡 above normal", "$8/h against a $8 typical is not the heavy zone");
+  assert.equal(computeGaugeSpec(rep, false, "1").g.max, 12, "a window without its own zones falls back to burn_rate_zones");
+  assert.equal(computeGaugeSpec({ forecast: fc }, false, "1").g.max, 50, "an old report without zones: the default");
+  assert.ok(g5.note.startsWith("Tuned to you"), g5.note);
+  assert.equal(g5.onStartingScale, false, "fully personal: no starting-scale line");
+  const gb = computeGaugeSpec({ ...rep, burn_rate_zones_by_hours: { "0.0833": { ...z5m, blend_ratio: 0.5 } } }, false, "0.0833").g;
+  assert.equal(gb.onStartingScale, true, "blending: the starting-scale line shows");
+  const gs = computeGaugeSpec({ forecast: fc, burn_rate_zones: { ...z2h, insufficient_history: true } }, false, "2").g;
+  assert.ok(/starting scale/.test(gs.note) && gs.onStartingScale, gs.note);
+  // all-devices views scale every window's zones by the same factor as the default key
+  const loc = { ...clLocal, burn_rate_zones_by_hours: { "0.0833": z5m, "2": z2h } };
+  for (const v of [bmScopedRep(loc), bmScopedHalf(loc, "claude")]) {
+    const k = v.burn_rate_zones.typical / (loc.burn_rate_zones || { typical: 4 }).typical;
+    assert.ok(v.burn_rate_zones_by_hours && near(v.burn_rate_zones_by_hours["0.0833"].typical, 8 * k),
+      "scaled per-window zones kept in the scoped view");
+  }
+  // the share card's plan price is only what the user typed; no plan names in the page code
+  const open = code.slice(code.indexOf("async function bmOpenShare"), code.indexOf("function bmCloseShare"));
+  assert.ok(!/chosen_plan|SHARE_PLAN_USD/.test(open) && /kept != null \? kept : ""/.test(open), "share plan not pre-filled");
+  assert.ok(!/Max 5|Max 20|max5|max20|Market-normal/.test(code), "no plan tier in the dashboard");
+  const htmlS = readFileSync(join(__dirname, "..", "burnmeter", "static", "dashboard.html"), "utf8");
+  assert.ok(/id="share-plan"[^>]*placeholder="e.g. 200"/.test(htmlS), "share plan placeholder");
+  passed += 14;
+}
+
 console.log(`dashboard_render: ${passed} assertions passed`);

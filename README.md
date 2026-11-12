@@ -62,9 +62,9 @@ python -m burnmeter serve
 ## What you get
 
 - **Burn rate against your own normal.** A gauge of your $/hour over the last
-  5 minutes to 48 hours, next to your own typical, busy and heavy zones, worked out
-  from your past 5-hour blocks (a market-normal estimate until there's enough
-  history), and which models are driving it.
+  5 minutes to 48 hours, next to your own typical, busy and heavy zones for that
+  same window, measured from your past working time (a starting scale until about a
+  week of history), and which models are driving it.
 - **Live chats.** Each chat that's running right now, with its own $/hour, so you
   can see which one is burning.
 - **Plan limits where they exist.** Codex writes your real rate-limit usage into

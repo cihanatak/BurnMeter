@@ -1,9 +1,10 @@
 """Pricing tables for Claude Code + OpenAI Codex models.
 
 Source of truth: official Anthropic + OpenAI pricing pages.
-RE-VERIFIED 2026-10-29 against platform.claude.com/docs/en/about-claude/pricing and
+RE-VERIFIED 2026-11-12 against platform.claude.com/docs/en/about-claude/pricing and
 developers.openai.com/api/docs/pricing (live fetch). Per 1M tokens
 (input / output / cache-read / cache-write-5m / cache-write-1h):
+- Fable 5.2 · Mythos 5.2   $8  / $40 / $0.20 / $10    / $16    ← cache read 0.025x input
 - Fable 5.1 · Mythos 5.1   $10 / $50 / $0.25 / $12.50 / $20    ← cache read 0.025x input
 - Fable 5 · Mythos 5       $10 / $50 / $1.00 / $12.50 / $20
 - Opus 5.5                 $4  / $20 / $0.20 / $5     / $8     ← cache read 0.05x input
@@ -16,8 +17,9 @@ developers.openai.com/api/docs/pricing (live fetch). Per 1M tokens
 - Haiku 5.5, prompt >100K  $0.50 / $2.50 / $0.05 / $0.625 / $1
 - Haiku 4.5                $1  / $5  / $0.10 / $1.25  / $2
 - Haiku 3.5                $0.80 / $4 / $0.08 / $1    / $1.60
-- GPT-5.5 $5/$30 · GPT-5.4 $2.50/$15 · GPT-5.4 mini $0.75/$4.50 · GPT-5 $1.25/$10
-  · GPT-5 mini $0.25/$2 · o4-mini $1.10/$4.40 · Codex $1.75/$14
+- OpenAI (developers.openai.com/api/docs/pricing, 2026-11-12): every id listed there has its own
+  row below. Of the Codex ids only gpt-5.3-codex ($1.75/$14) is listed; any other id is
+  priced at the nearest row and flagged. o4-mini was NOT on that page (carried over).
 - Fast mode (`usage.speed == "fast"`, Opus 5.5 / 5 / 4.8 only): 2x every rate above.
 
 WHY MODEL IDS ARE PARSED, NOT SUBSTRING-MATCHED (v0.3.5): v0.3.2 made prices
@@ -53,7 +55,7 @@ from typing import Optional
 
 # Date the rates below were last checked against the providers' live pricing
 # pages. Surfaced in the report so a stale table is visible, not invisible.
-PRICES_VERIFIED_AT = "2026-10-29"
+PRICES_VERIFIED_AT = "2026-11-12"
 
 # Fast mode (`usage.speed == "fast"`) bills every token type at this multiple of the
 # model's standard rates: $8/$40 on Opus 5.5, $10/$50 on Opus 5 and Opus 4.8, with the
@@ -79,6 +81,16 @@ class ModelPrice:
 # Per-million-token prices in USD, keyed by PRICE TIER (a version, not a family:
 # two versions of one family can bill differently — see the module docstring).
 PRICES: dict[str, ModelPrice] = {
+    # Fable 5.2 / Mythos 5.2 — cheaper than 5.1 on every token type (platform.claude.com
+    # pricing page, 2026-11-12).
+    "fable-5-2": ModelPrice(
+        family="fable-5",
+        input_per_mtok=8.00,
+        output_per_mtok=40.00,
+        cache_read_per_mtok=0.20,           # 0.025x input
+        cache_write_5m_per_mtok=10.00,      # 1.25x input
+        cache_write_1h_per_mtok=16.00,      # 2.00x input
+    ),
     # Fable 5.1 / Mythos 5.1 — same headline rates as Fable 5 but cache reads are
     # $0.25/MTok instead of $1.00. Cache reads dominate agentic sessions, so this
     # single number moves a heavy user's monthly total by hundreds of dollars.
@@ -194,22 +206,53 @@ PRICES: dict[str, ModelPrice] = {
     # Claude. OpenAI has no explicit cache WRITE charge (automatic prompt cache,
     # only reads are discounted) → cache_write_* = input rate (a no-op anyway
     # because Codex records carry cache_creation = 0).
-    # GPT-6 Astra — the flagship above GPT-5.5. Twice 5.5's rate on both sides, so
-    # falling back to the 5.5 row halved a Codex user's reported spend.
+    # --- OpenAI / Codex: one row per id on developers.openai.com/api/docs/pricing
+    # (standard tier, short context, checked 2026-11-12). OpenAI has no cache WRITE
+    # charge, so cache_write_* = input (a no-op: Codex records carry cache_creation = 0).
+    # "-" in the cached-input column (the *-pro models) means no cache discount, so
+    # cache reads bill at the input rate. o4-mini is not on that page; carried over.
+    # Display family stays one bucket per model, except every Codex id shares "gpt-5-codex".
     "gpt-6-astra": ModelPrice(
         family="gpt-6-astra", input_per_mtok=10.00, output_per_mtok=50.00,
-        cache_read_per_mtok=1.00, cache_write_5m_per_mtok=10.00, cache_write_1h_per_mtok=10.00,
+        cache_read_per_mtok=1.0, cache_write_5m_per_mtok=10.00, cache_write_1h_per_mtok=10.00,
     ),
-    # GPT-5.6 ships as three tiers that differ by 20x. Luna in particular was being
-    # reported at 25x its real cost — a user switching to it to save money would
-    # have watched Burnmeter claim their bill exploded.
+    # GPT-6 family, standard tier, short context (<=272K). Prompts over 272K pay about
+    # 2x input / 1.5x output on the page; that long-context tier is not modelled.
+    "gpt-6.1-sol": ModelPrice(
+        family="gpt-6.1-sol", input_per_mtok=2.00, output_per_mtok=10.00,
+        cache_read_per_mtok=0.1, cache_write_5m_per_mtok=2.00, cache_write_1h_per_mtok=2.00,
+    ),
+    "gpt-6.1-terra": ModelPrice(
+        family="gpt-6.1-terra", input_per_mtok=1.00, output_per_mtok=5.00,
+        cache_read_per_mtok=0.05, cache_write_5m_per_mtok=1.00, cache_write_1h_per_mtok=1.00,
+    ),
+    "gpt-6-sol": ModelPrice(
+        family="gpt-6-sol", input_per_mtok=2.00, output_per_mtok=10.00,
+        cache_read_per_mtok=0.2, cache_write_5m_per_mtok=2.00, cache_write_1h_per_mtok=2.00,
+    ),
+    "gpt-6-luna": ModelPrice(
+        family="gpt-6-luna", input_per_mtok=0.10, output_per_mtok=0.50,
+        cache_read_per_mtok=0.01, cache_write_5m_per_mtok=0.10, cache_write_1h_per_mtok=0.10,
+    ),
+    "gpt-6-cyber": ModelPrice(
+        family="gpt-6-cyber", input_per_mtok=20.00, output_per_mtok=100.00,
+        cache_read_per_mtok=2.0, cache_write_5m_per_mtok=20.00, cache_write_1h_per_mtok=20.00,
+    ),
+    "gpt-6-rosalind": ModelPrice(
+        family="gpt-6-rosalind", input_per_mtok=15.00, output_per_mtok=75.00,
+        cache_read_per_mtok=1.5, cache_write_5m_per_mtok=15.00, cache_write_1h_per_mtok=15.00,
+    ),
+    "gpt-6-astra-law": ModelPrice(
+        family="gpt-6-astra-law", input_per_mtok=10.00, output_per_mtok=50.00,
+        cache_read_per_mtok=1.0, cache_write_5m_per_mtok=10.00, cache_write_1h_per_mtok=10.00,
+    ),
     "gpt-5.6-sol": ModelPrice(
         family="gpt-5.6-sol", input_per_mtok=4.00, output_per_mtok=20.00,
-        cache_read_per_mtok=0.40, cache_write_5m_per_mtok=4.00, cache_write_1h_per_mtok=4.00,
+        cache_read_per_mtok=0.4, cache_write_5m_per_mtok=4.00, cache_write_1h_per_mtok=4.00,
     ),
     "gpt-5.6-terra": ModelPrice(
         family="gpt-5.6-terra", input_per_mtok=2.00, output_per_mtok=12.00,
-        cache_read_per_mtok=0.20, cache_write_5m_per_mtok=2.00, cache_write_1h_per_mtok=2.00,
+        cache_read_per_mtok=0.2, cache_write_5m_per_mtok=2.00, cache_write_1h_per_mtok=2.00,
     ),
     "gpt-5.6-luna": ModelPrice(
         family="gpt-5.6-luna", input_per_mtok=0.20, output_per_mtok=1.20,
@@ -217,22 +260,20 @@ PRICES: dict[str, ModelPrice] = {
     ),
     "gpt-5.5-pro": ModelPrice(
         family="gpt-5.5-pro", input_per_mtok=30.00, output_per_mtok=180.00,
-        cache_read_per_mtok=3.00, cache_write_5m_per_mtok=30.00, cache_write_1h_per_mtok=30.00,
+        cache_read_per_mtok=30.00, cache_write_5m_per_mtok=30.00, cache_write_1h_per_mtok=30.00,
     ),
     "gpt-5.5": ModelPrice(
         family="gpt-5.5", input_per_mtok=5.00, output_per_mtok=30.00,
-        cache_read_per_mtok=0.50, cache_write_5m_per_mtok=5.00, cache_write_1h_per_mtok=5.00,
+        cache_read_per_mtok=0.5, cache_write_5m_per_mtok=5.00, cache_write_1h_per_mtok=5.00,
+    ),
+    "gpt-5.4-pro": ModelPrice(
+        family="gpt-5.4-pro", input_per_mtok=30.00, output_per_mtok=180.00,
+        cache_read_per_mtok=30.00, cache_write_5m_per_mtok=30.00, cache_write_1h_per_mtok=30.00,
     ),
     "gpt-5.4": ModelPrice(
         family="gpt-5.4", input_per_mtok=2.50, output_per_mtok=15.00,
         cache_read_per_mtok=0.25, cache_write_5m_per_mtok=2.50, cache_write_1h_per_mtok=2.50,
     ),
-    "gpt-5": ModelPrice(
-        family="gpt-5", input_per_mtok=1.25, output_per_mtok=10.00,
-        cache_read_per_mtok=0.125, cache_write_5m_per_mtok=1.25, cache_write_1h_per_mtok=1.25,
-    ),
-    # mini / nano: the VERSION sets the price — gpt-5-mini is a third of gpt-5.4-mini,
-    # and o4-mini is dearer than both. One "mini" row billed all three alike.
     "gpt-5.4-mini": ModelPrice(
         family="gpt-5.4-mini", input_per_mtok=0.75, output_per_mtok=4.50,
         cache_read_per_mtok=0.075, cache_write_5m_per_mtok=0.75, cache_write_1h_per_mtok=0.75,
@@ -240,6 +281,30 @@ PRICES: dict[str, ModelPrice] = {
     "gpt-5.4-nano": ModelPrice(
         family="gpt-5.4-nano", input_per_mtok=0.20, output_per_mtok=1.25,
         cache_read_per_mtok=0.02, cache_write_5m_per_mtok=0.20, cache_write_1h_per_mtok=0.20,
+    ),
+    "gpt-5.3-codex": ModelPrice(
+        family="gpt-5-codex", input_per_mtok=1.75, output_per_mtok=14.00,
+        cache_read_per_mtok=0.175, cache_write_5m_per_mtok=1.75, cache_write_1h_per_mtok=1.75,
+    ),
+    "gpt-5.2-pro": ModelPrice(
+        family="gpt-5.2-pro", input_per_mtok=21.00, output_per_mtok=168.00,
+        cache_read_per_mtok=21.00, cache_write_5m_per_mtok=21.00, cache_write_1h_per_mtok=21.00,
+    ),
+    "gpt-5.2": ModelPrice(
+        family="gpt-5.2", input_per_mtok=1.75, output_per_mtok=14.00,
+        cache_read_per_mtok=0.175, cache_write_5m_per_mtok=1.75, cache_write_1h_per_mtok=1.75,
+    ),
+    "gpt-5.1": ModelPrice(
+        family="gpt-5.1", input_per_mtok=1.25, output_per_mtok=10.00,
+        cache_read_per_mtok=0.125, cache_write_5m_per_mtok=1.25, cache_write_1h_per_mtok=1.25,
+    ),
+    "gpt-5-pro": ModelPrice(
+        family="gpt-5-pro", input_per_mtok=15.00, output_per_mtok=120.00,
+        cache_read_per_mtok=15.00, cache_write_5m_per_mtok=15.00, cache_write_1h_per_mtok=15.00,
+    ),
+    "gpt-5": ModelPrice(
+        family="gpt-5", input_per_mtok=1.25, output_per_mtok=10.00,
+        cache_read_per_mtok=0.125, cache_write_5m_per_mtok=1.25, cache_write_1h_per_mtok=1.25,
     ),
     "gpt-5-mini": ModelPrice(
         family="gpt-5-mini", input_per_mtok=0.25, output_per_mtok=2.00,
@@ -253,10 +318,6 @@ PRICES: dict[str, ModelPrice] = {
         family="o4-mini", input_per_mtok=1.10, output_per_mtok=4.40,
         cache_read_per_mtok=0.275, cache_write_5m_per_mtok=1.10, cache_write_1h_per_mtok=1.10,
     ),
-    "gpt-5-codex": ModelPrice(
-        family="gpt-5-codex", input_per_mtok=1.75, output_per_mtok=14.00,
-        cache_read_per_mtok=0.175, cache_write_5m_per_mtok=1.75, cache_write_1h_per_mtok=1.75,
-    ),
     "unknown": ModelPrice(
         family="unknown",
         input_per_mtok=0.0,
@@ -269,6 +330,7 @@ PRICES: dict[str, ModelPrice] = {
 
 # Exact Claude versions: (family, major, minor) → tier. Mythos ids share Fable's rows.
 _CLAUDE_VERSIONS: dict[tuple[str, int, int], str] = {
+    ("fable", 5, 2): "fable-5-2",
     ("fable", 5, 1): "fable-5-1",
     ("fable", 5, 0): "fable-5",
     ("opus", 5, 5): "opus-5-5",
@@ -294,7 +356,7 @@ _CLAUDE_VERSIONS: dict[tuple[str, int, int], str] = {
 }
 # An unrecognised version of a known family is priced at the family's NEWEST row (a
 # new release is far likelier than an ancient one reappearing) and flagged.
-_CLAUDE_NEWEST = {"fable": "fable-5-1", "opus": "opus-5-5", "sonnet": "sonnet-5-5", "haiku": "haiku-5-5"}
+_CLAUDE_NEWEST = {"fable": "fable-5-2", "opus": "opus-5-5", "sonnet": "sonnet-5-5", "haiku": "haiku-5-5"}
 
 # claude-opus-4-5-20251101 · claude-opus-5-5 · us.anthropic.claude-opus-4-1-20250805-v1:0
 # · claude-opus-4-1@20250805. The (?!\d) guard keeps an 8-digit snapshot date from
@@ -358,42 +420,44 @@ def resolve_price(model: Optional[str]) -> tuple[str, bool]:
         fam, version = claude
         tier = _CLAUDE_VERSIONS.get((fam, *version)) if version else None
         return (tier, True) if tier else (_CLAUDE_NEWEST[fam], False)
-    # --- OpenAI / Codex. Variant beats version: gpt-5.3-codex is a Codex model
-    # and gpt-5.4-mini is a mini model — checking the version number first would
-    # bill both at the flagship tier. ('mini' only counts on OpenAI ids.)
+    # --- OpenAI / Codex. Exact only when the id (minus a trailing -YYYY-MM-DD date)
+    # is a row of the table; anything else is priced at the nearest row and flagged.
+    # A substring rule marked every "*codex*" id exact at one price (v0.3.8).
+    oid = _OPENAI_DATE.sub("", m)
+    if oid in _OPENAI_IDS:
+        return oid, True
+    return _openai_nearest(oid), False
+
+
+_OPENAI_DATE = re.compile(r"-\d{4}-\d{2}-\d{2}$")
+_OPENAI_IDS = frozenset(k for k in PRICES if k.startswith(("gpt-", "o4-")))
+
+
+def _openai_nearest(m: str) -> str:
+    """Fallback row for an OpenAI-looking id that is not in the table ('unknown' if it
+    does not look like one). Same variant if possible, else the newest plain model."""
+    m = re.sub(r"^gpt(?=\d)", "gpt-", m)
+    if not ("gpt" in m or "codex" in m or re.match(r"o[134]", m)):
+        return "unknown"
     if "codex" in m:
-        return "gpt-5-codex", True
-    if ("mini" in m or "nano" in m) and ("gpt" in m or m.startswith("o")):
+        return "gpt-5.3-codex"
+    if "mini" in m or "nano" in m:
         size = "nano" if "nano" in m else "mini"
-        if m.startswith("o4-mini"):
-            return "o4-mini", True
-        if "5.4" in m or "5-4" in m:
-            return f"gpt-5.4-{size}", True
-        if re.match(r"gpt-?5-(mini|nano)", m):
-            return f"gpt-5-{size}", True
-        return f"gpt-5.4-{size}", False   # unlisted mini/nano version → newest known, flagged
-    if "astra" in m or "gpt-6" in m or "gpt6" in m:
-        return "gpt-6-astra", True
-    # GPT-5.6's three tiers differ by 20x, so the tier name decides the price.
-    if "luna" in m:
-        return "gpt-5.6-luna", True
-    if "terra" in m:
-        return "gpt-5.6-terra", True
-    if "sol" in m:
-        return "gpt-5.6-sol", True
-    if "gpt-5.6" in m or "gpt5.6" in m:
-        return "gpt-5.6-sol", False  # unnamed 5.6 tier → priciest of the three, flagged
-    if "gpt-5.5-pro" in m or "gpt5.5-pro" in m:
-        return "gpt-5.5-pro", True
-    if "gpt-5.5" in m or "gpt5.5" in m:
-        return "gpt-5.5", True
-    if "gpt-5.4" in m or "gpt5.4" in m:
-        return "gpt-5.4", True
-    if re.fullmatch(r"gpt-?5(-\d{4}-\d{2}-\d{2})?", m):   # plain gpt-5, optionally dated
-        return "gpt-5", True
-    if "gpt" in m or m.startswith("o1") or m.startswith("o3") or m.startswith("o4"):
-        return "gpt-5.5", False      # unknown GPT version → flagship tier, flagged
-    return "unknown", False
+        return f"gpt-5.4-{size}"
+    if "pro" in m and "gpt" in m:
+        return "gpt-5.5-pro"
+    ver = re.match(r"gpt-(\d+)", m)
+    if ver and int(ver.group(1)) >= 6:
+        # A point release of a named tier that is not listed yet (gpt-6.2-sol) is priced
+        # like the newest listed row of that tier. Sol is the Codex default; falling back
+        # to the flagship (astra) would show five times the real cost.
+        for tier, row in (("sol", "gpt-6.1-sol"), ("terra", "gpt-6.1-terra"), ("luna", "gpt-6-luna")):
+            if re.search(rf"(?:^|-){tier}(?:-|$)", m):
+                return row
+        return "gpt-6-astra"
+    if m.startswith("gpt-5.6"):
+        return "gpt-5.6-sol"          # unnamed 5.6 tier → priciest of the three
+    return "gpt-5.5"                  # unknown GPT version → flagship tier
 
 
 @lru_cache(maxsize=512)
